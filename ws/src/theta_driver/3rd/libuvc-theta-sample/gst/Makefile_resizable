@@ -1,0 +1,55 @@
+# Makefile cho Enhanced GStreamer Viewer với resize và scroll
+# Dựa trên Makefile gốc với cải tiến
+
+CC = gcc
+CFLAGS = -Wall -Wextra -O2 -g
+LDFLAGS = 
+
+# GStreamer flags
+GST_CFLAGS = $(shell pkg-config --cflags gstreamer-1.0 gstreamer-app-1.0)
+GST_LIBS = $(shell pkg-config --libs gstreamer-1.0 gstreamer-app-1.0)
+
+# GTK flags
+GTK_CFLAGS = $(shell pkg-config --cflags gtk+-3.0)
+GTK_LIBS = $(shell pkg-config --libs gtk+-3.0)
+
+# libuvc flags
+UVC_CFLAGS = -I../libuvc-theta/include
+UVC_LIBS = -L../libuvc-theta/build -luvc
+
+# pthread
+PTHREAD_LIBS = -lpthread
+
+# Combined flags
+ALL_CFLAGS = $(CFLAGS) $(GST_CFLAGS) $(GTK_CFLAGS) $(UVC_CFLAGS)
+ALL_LIBS = $(GST_LIBS) $(GTK_LIBS) $(UVC_LIBS) $(PTHREAD_LIBS)
+
+# Targets
+TARGET = gst_viewer_resizable
+SOURCES = gst_viewer_resizable.c
+
+# Default target
+all: $(TARGET)
+
+$(TARGET): $(SOURCES)
+	$(CC) $(ALL_CFLAGS) -o $(TARGET) $(SOURCES) $(ALL_LIBS)
+
+# Clean
+clean:
+	rm -f $(TARGET)
+
+# Install (optional)
+install: $(TARGET)
+	cp $(TARGET) /usr/local/bin/
+
+# Help
+help:
+	@echo "Enhanced GStreamer Viewer Makefile"
+	@echo "Targets:"
+	@echo "  all     - Build gst_viewer_resizable"
+	@echo "  clean   - Remove built files"
+	@echo "  install - Install to /usr/local/bin"
+	@echo "  help    - Show this help"
+
+.PHONY: all clean install help
+

@@ -1,0 +1,31 @@
+---
+alwaysApply: true
+---
+
+# Môi trường phát triển
+
+## Hệ thống
+- **OS**: Ubuntu 24.04
+- **ROS**: ROS2 Jazzy
+
+## Quy tắc Build
+
+### Quan trọng về livox_ros_driver2
+- **KHÔNG được build** `livox_ros_driver2/` khi update các ROS node trong `ws/`
+- `livox_ros_driver2/` cần lệnh build riêng (không dùng colcon build thông thường)
+- **LUÔN source** `ws/install/setup.sh` trước mỗi lần build để lấy class của driver2
+
+### Quy trình Build
+1. Source setup.sh trước:
+   ```bash
+   source ws/install/setup.sh
+   ```
+2. Build các ROS node trong ws/ (KHÔNG bao gồm livox_ros_driver2):
+   ```bash
+   colcon build --packages-select <package_name> --symlink-install
+   ```
+3. Nếu cần build livox_ros_driver2, sử dụng lệnh build riêng của nó (không dùng colcon build)
+
+### Lưu ý
+- Luôn đảm bảo đã source setup.sh trước khi build để có đầy đủ dependencies từ livox_ros_driver2
+- Không thêm livox_ros_driver2 vào danh sách packages khi dùng colcon build
