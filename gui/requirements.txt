@@ -1,0 +1,14 @@
+# Requirements cho Theta Viewer GUI
+# ROS2 dependencies (cần cài đặt từ apt)
+# sudo apt install ros-jazzy-cv-bridge ros-jazzy-sensor-msgs
+
+# Python dependencies
+opencv-python>=4.5.0
+Pillow>=9.0.0
+
+# Lưu ý: rclpy và các ROS2 Python packages được cài đặt cùng với ROS2
+# Nếu chưa có, cài đặt bằng:
+# sudo apt install python3-rosdep2
+# rosdep update
+# rosdep install --from-paths src --ignore-src -r -y
+
