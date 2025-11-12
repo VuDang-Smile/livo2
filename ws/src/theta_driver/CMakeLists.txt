@@ -96,6 +96,14 @@ ament_target_dependencies(cubemap_converter_optimized_lib
   OpenCV
 )
 
+# Add perspective converter library and dependencies
+add_library(perspective_converter_lib SHARED src/perspective_converter_lib.cpp)
+rclcpp_components_register_nodes(perspective_converter_lib "theta_driver::PerspectiveConverter")
+ament_target_dependencies(perspective_converter_lib
+  ${dependencies}
+  OpenCV
+)
+
 # Add executable and dependencies
 add_executable(theta_driver_node 
   src/theta_driver_node.cpp
@@ -123,6 +131,11 @@ add_executable(cubemap_converter_optimized_node src/cubemap_converter_optimized_
 target_link_libraries(cubemap_converter_optimized_node cubemap_converter_optimized_lib)
 ament_target_dependencies(cubemap_converter_optimized_node ${dependencies})
 
+# Add perspective converter executable
+add_executable(perspective_converter_node src/perspective_converter_node.cpp)
+target_link_libraries(perspective_converter_node perspective_converter_lib)
+ament_target_dependencies(perspective_converter_node ${dependencies})
+
 if(NOT WIN32)
   ament_environment_hooks(
     "${ament_cmake_package_templates_ENVIRONMENT_HOOK_LIBRARY_PATH}")
@@ -135,6 +148,7 @@ install(TARGETS
   qr_detector_lib
   qr_detector_optimized_lib
   cubemap_converter_optimized_lib
+  perspective_converter_lib
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -147,6 +161,7 @@ install(TARGETS
   qr_detector_node
   qr_detector_optimized_node
   cubemap_converter_optimized_node
+  perspective_converter_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 

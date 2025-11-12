@@ -30,37 +30,67 @@ except ImportError as e:
 
 
 class ImageSubscriber(Node):
-    """ROS2 Node để subscribe topic /image_raw"""
+    """ROS2 Node để subscribe topic /image_raw và /image_perspective"""
     
-    def __init__(self, callback):
+    def __init__(self, callback_raw, callback_perspective):
         super().__init__('theta_viewer_subscriber')
-        self.subscription = self.create_subscription(
+        
+        # Subscribe topic equirectangular
+        self.subscription_raw = self.create_subscription(
             Image,
             'image_raw',
-            self.image_callback,
+            self.image_callback_raw,
             10
         )
+        
+        # Subscribe topic perspective
+        self.subscription_perspective = self.create_subscription(
+            Image,
+            'image_perspective',
+            self.image_callback_perspective,
+            10
+        )
+        
         self.bridge = CvBridge()
-        self.callback = callback
-        self.get_logger().info('Đã subscribe topic /image_raw')
+        self.callback_raw = callback_raw
+        self.callback_perspective = callback_perspective
+        self.get_logger().info('Đã subscribe topics /image_raw và /image_perspective')
     
-    def image_callback(self, msg):
-        """Callback khi nhận được ảnh mới"""
+    def image_callback_raw(self, msg):
+        """Callback khi nhận được ảnh equirectangular"""
         try:
             # Log để debug (chỉ log mỗi 30 frame để không spam)
-            if not hasattr(self, '_frame_count'):
-                self._frame_count = 0
-            self._frame_count += 1
-            if self._frame_count % 30 == 0:
-                self.get_logger().info(f'Đã nhận {self._frame_count} frames')
+            if not hasattr(self, '_frame_count_raw'):
+                self._frame_count_raw = 0
+            self._frame_count_raw += 1
+            if self._frame_count_raw % 30 == 0:
+                self.get_logger().info(f'Đã nhận {self._frame_count_raw} frames từ /image_raw')
             
             # Chuyển đổi từ ROS Image sang OpenCV Mat
             # Encoding từ theta_driver là rgb8, giữ nguyên RGB
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
             # cv_image đã là RGB, truyền trực tiếp
-            self.callback(cv_image)
+            self.callback_raw(cv_image)
         except Exception as e:
-            self.get_logger().error(f'Lỗi xử lý ảnh: {e}')
+            self.get_logger().error(f'Lỗi xử lý ảnh equirectangular: {e}')
+            import traceback
+            self.get_logger().error(traceback.format_exc())
+    
+    def image_callback_perspective(self, msg):
+        """Callback khi nhận được ảnh perspective"""
+        try:
+            # Log để debug (chỉ log mỗi 30 frame để không spam)
+            if not hasattr(self, '_frame_count_perspective'):
+                self._frame_count_perspective = 0
+            self._frame_count_perspective += 1
+            if self._frame_count_perspective % 30 == 0:
+                self.get_logger().info(f'Đã nhận {self._frame_count_perspective} frames từ /image_perspective')
+            
+            # Chuyển đổi từ ROS Image sang OpenCV Mat
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
+            self.callback_perspective(cv_image)
+        except Exception as e:
+            self.get_logger().error(f'Lỗi xử lý ảnh perspective: {e}')
             import traceback
             self.get_logger().error(traceback.format_exc())
 
@@ -70,17 +100,20 @@ class ThetaViewerGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("Theta Driver Viewer")
-        self.root.geometry("1200x800")
+        self.root.title("Theta Driver Viewer - Equirectangular & Perspective")
+        self.root.geometry("1600x900")
         
         # Biến trạng thái
         self.ros_node = None
         self.ros_executor = None
         self.ros_thread = None
         self.theta_driver_process = None
-        self.current_image = None
+        self.perspective_converter_process = None
+        self.current_image_raw = None
+        self.current_image_perspective = None
         self.is_ros_running = False
-        self.frame_count = 0
+        self.frame_count_raw = 0
+        self.frame_count_perspective = 0
         
         # Tạo UI
         self.create_widgets()
@@ -102,6 +135,15 @@ class ThetaViewerGUI:
             command=self.launch_theta_driver
         )
         self.launch_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Nút Launch Perspective Converter
+        self.launch_perspective_btn = ttk.Button(
+            control_frame,
+            text="Launch Perspective Converter",
+            command=self.launch_perspective_converter,
+            state=tk.DISABLED
+        )
+        self.launch_perspective_btn.pack(side=tk.LEFT, padx=5)
         
         # Nút Start ROS Subscriber
         self.start_btn = ttk.Button(
@@ -129,33 +171,49 @@ class ThetaViewerGUI:
         )
         self.status_label.pack(side=tk.LEFT, padx=20)
         
-        # Frame hiển thị ảnh
+        # Frame hiển thị ảnh - chia làm 2 phần
         image_frame = ttk.Frame(self.root, padding="10")
         image_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Canvas để hiển thị ảnh
-        self.canvas = tk.Canvas(
-            image_frame,
+        # Frame cho Equirectangular (bên trái)
+        equirect_frame = ttk.LabelFrame(image_frame, text="Equirectangular (360°)", padding="5")
+        equirect_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+        
+        self.canvas_raw = tk.Canvas(
+            equirect_frame,
             bg="black",
             highlightthickness=0
         )
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+        self.canvas_raw.pack(fill=tk.BOTH, expand=True)
         
-        # Scrollbar (nếu cần)
-        scrollbar_v = ttk.Scrollbar(image_frame, orient=tk.VERTICAL, command=self.canvas.yview)
-        scrollbar_h = ttk.Scrollbar(image_frame, orient=tk.HORIZONTAL, command=self.canvas.xview)
-        self.canvas.configure(yscrollcommand=scrollbar_v.set, xscrollcommand=scrollbar_h.set)
+        # Frame cho Perspective (bên phải)
+        perspective_frame = ttk.LabelFrame(image_frame, text="Perspective (Front View)", padding="5")
+        perspective_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+        
+        self.canvas_perspective = tk.Canvas(
+            perspective_frame,
+            bg="black",
+            highlightthickness=0
+        )
+        self.canvas_perspective.pack(fill=tk.BOTH, expand=True)
         
         # Label thông tin ảnh
         info_frame = ttk.Frame(self.root, padding="5")
         info_frame.pack(fill=tk.X)
         
-        self.info_label = ttk.Label(
+        self.info_label_raw = ttk.Label(
             info_frame,
-            text="Chưa có ảnh",
-            font=("Arial", 10)
+            text="Equirectangular: Chưa có ảnh",
+            font=("Arial", 9)
         )
-        self.info_label.pack()
+        self.info_label_raw.pack(side=tk.LEFT, padx=10)
+        
+        self.info_label_perspective = ttk.Label(
+            info_frame,
+            text="Perspective: Chưa có ảnh",
+            font=("Arial", 9)
+        )
+        self.info_label_perspective.pack(side=tk.LEFT, padx=10)
         
     def launch_theta_driver(self):
         """Launch theta_driver node"""
@@ -188,6 +246,7 @@ class ThetaViewerGUI:
                 foreground="orange"
             )
             self.launch_btn.config(state=tk.DISABLED)
+            self.launch_perspective_btn.config(state=tk.NORMAL)
             self.start_btn.config(state=tk.NORMAL)
             
             # Kiểm tra process sau 2 giây
@@ -195,6 +254,55 @@ class ThetaViewerGUI:
             
         except Exception as e:
             messagebox.showerror("Lỗi", f"Không thể launch theta_driver: {e}")
+    
+    def launch_perspective_converter(self):
+        """Launch perspective_converter node"""
+        try:
+            # Kiểm tra xem ROS2 đã được source chưa
+            workspace_path = Path(__file__).parent.parent / "ws"
+            setup_script = workspace_path / "install" / "setup.sh"
+            
+            if not setup_script.exists():
+                messagebox.showerror(
+                    "Lỗi",
+                    f"Không tìm thấy setup.sh tại: {setup_script}\n"
+                    "Vui lòng build workspace trước."
+                )
+                return
+            
+            # Source setup.sh và chạy perspective_converter_node
+            cmd = f"source {setup_script} && ros2 run theta_driver perspective_converter_node"
+            
+            self.perspective_converter_process = subprocess.Popen(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            self.status_label.config(
+                text="Trạng thái: Perspective Converter đang chạy",
+                foreground="orange"
+            )
+            self.launch_perspective_btn.config(state=tk.DISABLED)
+            
+            # Kiểm tra process sau 2 giây
+            self.root.after(2000, self.check_perspective_converter_process)
+            
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể launch perspective_converter: {e}")
+    
+    def check_perspective_converter_process(self):
+        """Kiểm tra xem perspective_converter process còn chạy không"""
+        if self.perspective_converter_process:
+            if self.perspective_converter_process.poll() is not None:
+                # Process đã dừng
+                self.status_label.config(
+                    text="Trạng thái: Perspective Converter đã dừng",
+                    foreground="orange"
+                )
+                self.launch_perspective_btn.config(state=tk.NORMAL)
     
     def check_theta_driver_process(self):
         """Kiểm tra xem theta_driver process còn chạy không"""
@@ -206,6 +314,7 @@ class ThetaViewerGUI:
                     foreground="red"
                 )
                 self.launch_btn.config(state=tk.NORMAL)
+                self.launch_perspective_btn.config(state=tk.DISABLED)
                 self.start_btn.config(state=tk.DISABLED)
                 if self.is_ros_running:
                     self.stop_all()
@@ -223,7 +332,10 @@ class ThetaViewerGUI:
             
             # Tạo node subscriber
             print("Tạo ROS2 node...")
-            self.ros_node = ImageSubscriber(self.on_image_received)
+            self.ros_node = ImageSubscriber(
+                self.on_image_received_raw,
+                self.on_image_received_perspective
+            )
             
             # Tạo executor và add node
             print("Tạo executor...")
@@ -252,9 +364,10 @@ class ThetaViewerGUI:
             self.ros_thread.start()
             
             self.is_ros_running = True
-            self.frame_count = 0
+            self.frame_count_raw = 0
+            self.frame_count_perspective = 0
             self.status_label.config(
-                text="Trạng thái: Đang subscribe /image_raw...",
+                text="Trạng thái: Đang subscribe /image_raw và /image_perspective...",
                 foreground="green"
             )
             self.start_btn.config(state=tk.DISABLED)
@@ -291,31 +404,46 @@ class ThetaViewerGUI:
                     foreground="red"
                 ))
     
-    def on_image_received(self, cv_image):
-        """Callback khi nhận được ảnh từ ROS"""
-        self.current_image = cv_image
-        self.frame_count += 1
+    def on_image_received_raw(self, cv_image):
+        """Callback khi nhận được ảnh equirectangular từ ROS"""
+        self.current_image_raw = cv_image
+        self.frame_count_raw += 1
         
         # Cập nhật UI trong main thread
-        self.root.after(0, self.update_image_display, cv_image)
+        self.root.after(0, self.update_image_display_raw, cv_image)
         
         # Cập nhật status mỗi 30 frame
-        if self.frame_count % 30 == 0:
+        if self.frame_count_raw % 30 == 0:
             self.root.after(0, lambda: self.status_label.config(
-                text=f"Trạng thái: Đã nhận {self.frame_count} frames",
+                text=f"Trạng thái: Đã nhận {self.frame_count_raw} frames (raw), {self.frame_count_perspective} frames (perspective)",
                 foreground="green"
             ))
     
-    def update_image_display(self, cv_image):
-        """Cập nhật hiển thị ảnh trên canvas"""
+    def on_image_received_perspective(self, cv_image):
+        """Callback khi nhận được ảnh perspective từ ROS"""
+        self.current_image_perspective = cv_image
+        self.frame_count_perspective += 1
+        
+        # Cập nhật UI trong main thread
+        self.root.after(0, self.update_image_display_perspective, cv_image)
+        
+        # Cập nhật status mỗi 30 frame
+        if self.frame_count_perspective % 30 == 0:
+            self.root.after(0, lambda: self.status_label.config(
+                text=f"Trạng thái: Đã nhận {self.frame_count_raw} frames (raw), {self.frame_count_perspective} frames (perspective)",
+                foreground="green"
+            ))
+    
+    def update_image_display_raw(self, cv_image):
+        """Cập nhật hiển thị ảnh equirectangular trên canvas"""
         try:
             # Lấy kích thước canvas
-            canvas_width = self.canvas.winfo_width()
-            canvas_height = self.canvas.winfo_height()
+            canvas_width = self.canvas_raw.winfo_width()
+            canvas_height = self.canvas_raw.winfo_height()
             
             if canvas_width <= 1 or canvas_height <= 1:
                 # Canvas chưa được render, thử lại sau
-                self.root.after(100, lambda: self.update_image_display(cv_image))
+                self.root.after(100, lambda: self.update_image_display_raw(cv_image))
                 return
             
             # Resize ảnh để vừa với canvas (giữ tỷ lệ)
@@ -335,8 +463,8 @@ class ThetaViewerGUI:
             photo = ImageTk.PhotoImage(image=pil_image)
             
             # Xóa canvas cũ và vẽ ảnh mới
-            self.canvas.delete("all")
-            self.canvas.create_image(
+            self.canvas_raw.delete("all")
+            self.canvas_raw.create_image(
                 canvas_width // 2,
                 canvas_height // 2,
                 image=photo,
@@ -344,17 +472,67 @@ class ThetaViewerGUI:
             )
             
             # Lưu reference để tránh garbage collection
-            self.canvas.image = photo
+            self.canvas_raw.image = photo
             
             # Cập nhật thông tin
-            self.info_label.config(
-                text=f"Kích thước: {img_width}x{img_height} | "
+            self.info_label_raw.config(
+                text=f"Equirectangular: {img_width}x{img_height} | "
                      f"Hiển thị: {new_width}x{new_height} | "
                      f"Scale: {scale:.2f}"
             )
             
         except Exception as e:
-            print(f"Lỗi cập nhật hiển thị: {e}")
+            print(f"Lỗi cập nhật hiển thị equirectangular: {e}")
+    
+    def update_image_display_perspective(self, cv_image):
+        """Cập nhật hiển thị ảnh perspective trên canvas"""
+        try:
+            # Lấy kích thước canvas
+            canvas_width = self.canvas_perspective.winfo_width()
+            canvas_height = self.canvas_perspective.winfo_height()
+            
+            if canvas_width <= 1 or canvas_height <= 1:
+                # Canvas chưa được render, thử lại sau
+                self.root.after(100, lambda: self.update_image_display_perspective(cv_image))
+                return
+            
+            # Resize ảnh để vừa với canvas (giữ tỷ lệ)
+            img_height, img_width = cv_image.shape[:2]
+            
+            # Tính toán kích thước mới
+            scale = min(canvas_width / img_width, canvas_height / img_height)
+            new_width = int(img_width * scale)
+            new_height = int(img_height * scale)
+            
+            # Resize ảnh
+            resized = cv2.resize(cv_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            
+            # cv_image đã là RGB, không cần convert
+            # Chuyển đổi sang PIL Image (PIL cũng dùng RGB)
+            pil_image = PILImage.fromarray(resized)
+            photo = ImageTk.PhotoImage(image=pil_image)
+            
+            # Xóa canvas cũ và vẽ ảnh mới
+            self.canvas_perspective.delete("all")
+            self.canvas_perspective.create_image(
+                canvas_width // 2,
+                canvas_height // 2,
+                image=photo,
+                anchor=tk.CENTER
+            )
+            
+            # Lưu reference để tránh garbage collection
+            self.canvas_perspective.image = photo
+            
+            # Cập nhật thông tin
+            self.info_label_perspective.config(
+                text=f"Perspective: {img_width}x{img_height} | "
+                     f"Hiển thị: {new_width}x{new_height} | "
+                     f"Scale: {scale:.2f}"
+            )
+            
+        except Exception as e:
+            print(f"Lỗi cập nhật hiển thị perspective: {e}")
     
     def stop_all(self):
         """Dừng tất cả"""
@@ -387,18 +565,33 @@ class ThetaViewerGUI:
                     pass
             self.theta_driver_process = None
         
+        # Dừng perspective_converter process
+        if self.perspective_converter_process:
+            try:
+                self.perspective_converter_process.terminate()
+                self.perspective_converter_process.wait(timeout=5)
+            except:
+                try:
+                    self.perspective_converter_process.kill()
+                except:
+                    pass
+            self.perspective_converter_process = None
+        
         # Cập nhật UI
         self.status_label.config(
             text="Trạng thái: Đã dừng",
             foreground="red"
         )
         self.launch_btn.config(state=tk.NORMAL)
+        self.launch_perspective_btn.config(state=tk.DISABLED)
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.DISABLED)
         
         # Xóa ảnh
-        self.canvas.delete("all")
-        self.info_label.config(text="Chưa có ảnh")
+        self.canvas_raw.delete("all")
+        self.canvas_perspective.delete("all")
+        self.info_label_raw.config(text="Equirectangular: Chưa có ảnh")
+        self.info_label_perspective.config(text="Perspective: Chưa có ảnh")
     
     def on_closing(self):
         """Xử lý khi đóng window"""
