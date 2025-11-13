@@ -27,27 +27,32 @@ except ImportError as e:
 
 
 class LivoxSubscriber(Node):
-    """ROS2 Node để subscribe topics /livox/lidar và /livox/imu"""
+    """ROS2 Node để subscribe topics livox/points và livox/imu"""
     
-    def __init__(self, callback_lidar, callback_imu):
+    def __init__(self, callback_lidar, callback_imu, use_pointcloud2=True):
         super().__init__('livox_viewer_subscriber')
         
-        # Kiểm tra xem có CustomMsg không (cần source setup.sh trước)
-        if CustomMsg is None:
-            self.get_logger().error(
-                "Không thể import CustomMsg. "
-                "Vui lòng source ws/install/setup.sh trước khi chạy GUI."
-            )
-            # Fallback về PointCloud2 nếu không có CustomMsg
+        # Mặc định dùng PointCloud2 vì launch file msg_MID360_launch.py dùng xfer_format=0
+        # Nếu use_pointcloud2=False và có CustomMsg, sẽ dùng CustomMsg
+        if use_pointcloud2:
             lidar_msg_type = PointCloud2
+            self.get_logger().info('Sử dụng PointCloud2 format cho livox/points')
         else:
-            # Sử dụng CustomMsg vì launch file dùng xfer_format=1
-            lidar_msg_type = CustomMsg
+            if CustomMsg is None:
+                self.get_logger().warn(
+                    "Không thể import CustomMsg, fallback về PointCloud2. "
+                    "Vui lòng source drive_ws/install/setup.sh trước khi chạy GUI."
+                )
+                lidar_msg_type = PointCloud2
+            else:
+                lidar_msg_type = CustomMsg
+                self.get_logger().info('Sử dụng CustomMsg format cho livox/points')
         
         # Subscribe topic lidar với đúng message type
+        # Topic name: livox/points (không có / ở đầu, theo driver code)
         self.subscription_lidar = self.create_subscription(
             lidar_msg_type,
-            'livox/lidar',
+            'livox/points',
             self.lidar_callback,
             10
         )
@@ -167,7 +172,7 @@ class LivoxTab(ttk.Frame):
         info_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Frame cho Lidar info
-        lidar_frame = ttk.LabelFrame(info_frame, text="Lidar Topic: /livox/lidar", padding="5")
+        lidar_frame = ttk.LabelFrame(info_frame, text="Lidar Topic: livox/points", padding="5")
         lidar_frame.pack(fill=tk.X, padx=5, pady=5)
         
         self.lidar_info_label = ttk.Label(
@@ -178,7 +183,7 @@ class LivoxTab(ttk.Frame):
         self.lidar_info_label.pack(anchor=tk.W, padx=5)
         
         # Frame cho IMU info
-        imu_frame = ttk.LabelFrame(info_frame, text="IMU Topic: /livox/imu", padding="5")
+        imu_frame = ttk.LabelFrame(info_frame, text="IMU Topic: livox/imu", padding="5")
         imu_frame.pack(fill=tk.X, padx=5, pady=5)
         
         self.imu_info_label = ttk.Label(
@@ -210,7 +215,7 @@ class LivoxTab(ttk.Frame):
     def start_livox_driver(self):
         """Start Livox MID 360 driver"""
         try:
-            workspace_path = Path(__file__).parent.parent / "ws"
+            workspace_path = Path(__file__).parent.parent / "drive_ws"
             setup_script = workspace_path / "install" / "setup.sh"
             
             if not setup_script.exists():
@@ -317,26 +322,37 @@ class LivoxTab(ttk.Frame):
                 self.log("Khởi tạo ROS2...")
                 rclpy.init()
             
-            # Kiểm tra xem có CustomMsg không (cần source setup.sh)
-            if CustomMsg is None:
-                self.log("⚠️  Cảnh báo: Không thể import CustomMsg")
-                self.log("   Vui lòng source ws/install/setup.sh trước khi chạy GUI:")
-                self.log("   source ws/install/setup.sh")
-                self.log("   Sau đó chạy lại GUI")
-                messagebox.showwarning(
-                    "Cảnh báo",
-                    "Không thể import CustomMsg.\n"
-                    "Vui lòng source ws/install/setup.sh trước khi chạy GUI:\n\n"
-                    "source ws/install/setup.sh\n\n"
-                    "Sau đó chạy lại GUI."
-                )
-                return
+            # Kiểm tra topic type trước khi subscribe
+            self.log("Kiểm tra topic type...")
+            topic_type_result = subprocess.run(
+                ['ros2', 'topic', 'type', 'livox/points'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            
+            use_pointcloud2 = True  # Mặc định dùng PointCloud2
+            if topic_type_result.returncode == 0:
+                topic_type = topic_type_result.stdout.strip()
+                self.log(f"Topic livox/points có type: {topic_type}")
+                if 'CustomMsg' in topic_type:
+                    use_pointcloud2 = False
+                    self.log("Phát hiện CustomMsg format, sẽ subscribe với CustomMsg")
+                elif 'PointCloud2' in topic_type or 'sensor_msgs' in topic_type:
+                    use_pointcloud2 = True
+                    self.log("Phát hiện PointCloud2 format")
+                else:
+                    self.log(f"⚠️  Topic type không xác định: {topic_type}, dùng PointCloud2 mặc định")
+            else:
+                self.log("⚠️  Không thể kiểm tra topic type, dùng PointCloud2 mặc định")
+                self.log("   (Topic có thể chưa tồn tại, sẽ thử subscribe với PointCloud2)")
             
             # Tạo node subscriber
             self.log("Tạo ROS2 node cho Livox...")
             self.ros_node = LivoxSubscriber(
                 self.on_lidar_received,
-                self.on_imu_received
+                self.on_imu_received,
+                use_pointcloud2=use_pointcloud2
             )
             
             # Tạo executor và add node
@@ -354,17 +370,19 @@ class LivoxTab(ttk.Frame):
             )
             
             topics_found = []
-            if '/livox/lidar' in result.stdout:
-                topics_found.append('/livox/lidar')
-                self.log("✓ Topic /livox/lidar đã tồn tại")
+            # Kiểm tra cả livox/points và /livox/points (ROS2 có thể normalize)
+            if 'livox/points' in result.stdout or '/livox/points' in result.stdout:
+                topics_found.append('livox/points')
+                self.log("✓ Topic livox/points đã tồn tại")
             else:
-                self.log("⚠️  Cảnh báo: Topic /livox/lidar chưa tồn tại")
+                self.log("⚠️  Cảnh báo: Topic livox/points chưa tồn tại")
             
-            if '/livox/imu' in result.stdout:
-                topics_found.append('/livox/imu')
-                self.log("✓ Topic /livox/imu đã tồn tại")
+            # Kiểm tra cả livox/imu và /livox/imu (ROS2 có thể normalize)
+            if 'livox/imu' in result.stdout or '/livox/imu' in result.stdout:
+                topics_found.append('livox/imu')
+                self.log("✓ Topic livox/imu đã tồn tại")
             else:
-                self.log("⚠️  Cảnh báo: Topic /livox/imu chưa tồn tại")
+                self.log("⚠️  Cảnh báo: Topic livox/imu chưa tồn tại")
             
             if not topics_found:
                 self.log("⚠️  Không tìm thấy topics. Đảm bảo Livox Driver đang chạy.")
@@ -378,7 +396,7 @@ class LivoxTab(ttk.Frame):
             self.lidar_count = 0
             self.imu_count = 0
             self.status_label.config(
-                text="Trạng thái: Đang subscribe /livox/lidar và /livox/imu...",
+                text="Trạng thái: Đang subscribe livox/points và livox/imu...",
                 foreground="green"
             )
             self.start_subscriber_btn.config(state=tk.DISABLED)
