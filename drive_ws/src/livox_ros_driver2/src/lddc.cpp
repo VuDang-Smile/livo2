@@ -572,12 +572,12 @@ PublisherPtr Lddc::GetCurrentPublisher(uint8_t index) {
     memset(name_str, 0, sizeof(name_str));
     if (use_multi_topic_) {
       std::string ip_string = IpNumToString(lds_->lidars_[index].handle);
-      snprintf(name_str, sizeof(name_str), "livox/lidar_%s",
+      snprintf(name_str, sizeof(name_str), "livox/points_%s",
                ReplacePeriodByUnderline(ip_string).c_str());
       DRIVER_INFO(*cur_node_, "Support multi topics.");
     } else {
       DRIVER_INFO(*cur_node_, "Support only one topic.");
-      snprintf(name_str, sizeof(name_str), "livox/lidar");
+      snprintf(name_str, sizeof(name_str), "livox/points");
     }
 
     *pub = new ros::Publisher;
@@ -647,7 +647,7 @@ std::shared_ptr<rclcpp::PublisherBase> Lddc::GetCurrentPublisher(uint8_t handle)
       memset(name_str, 0, sizeof(name_str));
 
       std::string ip_string = IpNumToString(lds_->lidars_[handle].handle);
-      snprintf(name_str, sizeof(name_str), "livox/lidar_%s",
+      snprintf(name_str, sizeof(name_str), "livox/points_%s",
           ReplacePeriodByUnderline(ip_string).c_str());
       std::string topic_name(name_str);
       queue_size = queue_size * 2; // queue size is 64 for only one lidar
@@ -656,7 +656,7 @@ std::shared_ptr<rclcpp::PublisherBase> Lddc::GetCurrentPublisher(uint8_t handle)
     return private_pub_[handle];
   } else {
     if (!global_pub_) {
-      std::string topic_name("livox/lidar");
+      std::string topic_name("livox/points");
       queue_size = queue_size * 8; // shared queue size is 256, for all lidars
       global_pub_ = CreatePublisher(transfer_format_, topic_name, queue_size);
     }
