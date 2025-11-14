@@ -26,11 +26,12 @@ declare -a PACKAGES=(
     "theta_driver"
     "vikit_common"
     "vikit_ros"
+    "livox_msg_converter"
 )
 
 # Mảng lưu trạng thái chọn của từng package (0 = chưa chọn, 1 = đã chọn)
 declare -a SELECTED=(
-    0 0 0 0 0
+    0 0 0 0 0 0
 )
 
 # Hàm hiển thị menu
@@ -117,10 +118,12 @@ handle_menu_input() {
         fi
         
         case "$key" in
-            [1-6])
+            [1-9])
                 local index=$((key - 1))
-                toggle_selection $index
-                current_selection=$index
+                if [ $index -lt ${#PACKAGES[@]} ]; then
+                    toggle_selection $index
+                    current_selection=$index
+                fi
                 ;;
             " ")
                 # Space bar - toggle current selection

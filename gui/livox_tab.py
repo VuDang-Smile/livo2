@@ -27,32 +27,28 @@ except ImportError as e:
 
 
 class LivoxSubscriber(Node):
-    """ROS2 Node để subscribe topics livox/points và livox/imu"""
+    """ROS2 Node để subscribe topics /livox/lidar, livox/imu và /livox/points2"""
     
-    def __init__(self, callback_lidar, callback_imu, use_pointcloud2=True):
+    def __init__(self, callback_lidar, callback_imu, callback_points2=None, use_pointcloud2=True):
         super().__init__('livox_viewer_subscriber')
         
-        # Mặc định dùng PointCloud2 vì launch file msg_MID360_launch.py dùng xfer_format=0
-        # Nếu use_pointcloud2=False và có CustomMsg, sẽ dùng CustomMsg
-        if use_pointcloud2:
+        # Mặc định dùng CustomMsg vì launch file msg_MID360_launch.py dùng xfer_format=1
+        # /livox/lidar luôn là CustomMsg format
+        if CustomMsg is None:
+            self.get_logger().warn(
+                "Không thể import CustomMsg, fallback về PointCloud2. "
+                "Vui lòng source drive_ws/install/setup.sh trước khi chạy GUI."
+            )
             lidar_msg_type = PointCloud2
-            self.get_logger().info('Sử dụng PointCloud2 format cho livox/points')
         else:
-            if CustomMsg is None:
-                self.get_logger().warn(
-                    "Không thể import CustomMsg, fallback về PointCloud2. "
-                    "Vui lòng source drive_ws/install/setup.sh trước khi chạy GUI."
-                )
-                lidar_msg_type = PointCloud2
-            else:
-                lidar_msg_type = CustomMsg
-                self.get_logger().info('Sử dụng CustomMsg format cho livox/points')
+            lidar_msg_type = CustomMsg
+            self.get_logger().info('Sử dụng CustomMsg format cho /livox/lidar')
         
         # Subscribe topic lidar với đúng message type
-        # Topic name: livox/points (không có / ở đầu, theo driver code)
+        # Topic name: /livox/lidar (đã được remap từ livox/points trong launch file)
         self.subscription_lidar = self.create_subscription(
             lidar_msg_type,
-            'livox/points',
+            '/livox/lidar',
             self.lidar_callback,
             10
         )
@@ -65,8 +61,21 @@ class LivoxSubscriber(Node):
             10
         )
         
+        # Subscribe topic /livox/points2 (PointCloud2 từ converter)
+        if callback_points2 is not None:
+            self.subscription_points2 = self.create_subscription(
+                PointCloud2,
+                '/livox/points2',
+                self.points2_callback,
+                10
+            )
+            self.get_logger().info('Đã subscribe topic /livox/points2')
+        else:
+            self.subscription_points2 = None
+        
         self.callback_lidar = callback_lidar
         self.callback_imu = callback_imu
+        self.callback_points2 = callback_points2
         self.lidar_msg_type = lidar_msg_type
         # Không log để tránh spam log
     
@@ -97,6 +106,21 @@ class LivoxSubscriber(Node):
             self.get_logger().error(f'Lỗi xử lý IMU data: {e}')
             import traceback
             self.get_logger().error(traceback.format_exc())
+    
+    def points2_callback(self, msg):
+        """Callback khi nhận được PointCloud2 từ converter"""
+        try:
+            if not hasattr(self, '_points2_count'):
+                self._points2_count = 0
+            self._points2_count += 1
+            # Không log để tránh spam log
+            
+            if self.callback_points2:
+                self.callback_points2(msg)
+        except Exception as e:
+            self.get_logger().error(f'Lỗi xử lý points2 data: {e}')
+            import traceback
+            self.get_logger().error(traceback.format_exc())
 
 
 class LivoxTab(ttk.Frame):
@@ -110,9 +134,11 @@ class LivoxTab(ttk.Frame):
         self.ros_executor = None
         self.ros_thread = None
         self.livox_driver_process = None
+        self.converter_process = None
         self.is_ros_running = False
         self.lidar_count = 0
         self.imu_count = 0
+        self.points2_count = 0
         
         # Tạo UI
         self.create_widgets()
@@ -159,6 +185,24 @@ class LivoxTab(ttk.Frame):
         )
         self.stop_subscriber_btn.pack(side=tk.LEFT, padx=5)
         
+        # Nút Start Converter
+        self.start_converter_btn = ttk.Button(
+            control_frame,
+            text="Start Converter",
+            command=self.start_converter,
+            state=tk.DISABLED
+        )
+        self.start_converter_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Nút Stop Converter
+        self.stop_converter_btn = ttk.Button(
+            control_frame,
+            text="Stop Converter",
+            command=self.stop_converter,
+            state=tk.DISABLED
+        )
+        self.stop_converter_btn.pack(side=tk.LEFT, padx=5)
+        
         # Label trạng thái
         self.status_label = ttk.Label(
             control_frame,
@@ -172,7 +216,7 @@ class LivoxTab(ttk.Frame):
         info_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Frame cho Lidar info
-        lidar_frame = ttk.LabelFrame(info_frame, text="Lidar Topic: livox/points", padding="5")
+        lidar_frame = ttk.LabelFrame(info_frame, text="Lidar Topic: /livox/lidar", padding="5")
         lidar_frame.pack(fill=tk.X, padx=5, pady=5)
         
         self.lidar_info_label = ttk.Label(
@@ -193,6 +237,17 @@ class LivoxTab(ttk.Frame):
         )
         self.imu_info_label.pack(anchor=tk.W, padx=5)
         
+        # Frame cho Points2 info (từ converter)
+        points2_frame = ttk.LabelFrame(info_frame, text="PointCloud2 Topic: /livox/points2", padding="5")
+        points2_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.points2_info_label = ttk.Label(
+            points2_frame,
+            text="Chưa nhận dữ liệu",
+            font=("Arial", 10)
+        )
+        self.points2_info_label.pack(anchor=tk.W, padx=5)
+        
         # Text area để hiển thị log
         log_frame = ttk.LabelFrame(self, text="Log", padding="5")
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -212,104 +267,185 @@ class LivoxTab(ttk.Frame):
         self.log_text.see(tk.END)
         self.log_text.config(state=tk.DISABLED)
     
-    def start_livox_driver(self):
-        """Start Livox MID 360 driver"""
+    def _validate_ros2_setup(self):
+        """Kiểm tra ROS2 setup có tồn tại không"""
+        ros2_setup = "/opt/ros/jazzy/setup.bash"
+        if not Path(ros2_setup).exists():
+            messagebox.showerror(
+                "Lỗi",
+                f"Không tìm thấy ROS2 setup tại: {ros2_setup}\n"
+                "Vui lòng cài đặt ROS2 Jazzy."
+            )
+            return None
+        return ros2_setup
+    
+    def _start_ros2_process(self, workspace_path, launch_file, process_name, process_attr, monitor_func, status_text, package_name=None):
+        """Helper function để start ROS2 process"""
         try:
-            workspace_path = Path(__file__).parent.parent / "drive_ws"
             setup_script = workspace_path / "install" / "setup.sh"
-            
             if not setup_script.exists():
                 messagebox.showerror(
                     "Lỗi",
                     f"Không tìm thấy setup.sh tại: {setup_script}\n"
                     "Vui lòng build workspace trước."
                 )
-                return
+                return False
             
-            # Source setup.sh và chạy livox driver với launch file
-            livox_launch_path = workspace_path / "src" / "livox_ros_driver2" / "launch_ROS2" / "msg_MID360_launch.py"
-            
-            if not livox_launch_path.exists():
+            launch_path = workspace_path / launch_file
+            if not launch_path.exists():
                 messagebox.showerror(
                     "Lỗi",
-                    f"Không tìm thấy launch file tại: {livox_launch_path}"
+                    f"Không tìm thấy launch file tại: {launch_path}"
                 )
-                return
+                return False
             
-            # Source setup.sh trước để lấy class, sau đó chạy livox driver với ros2 launch
-            # Cần source setup.sh để có đầy đủ dependencies từ livox_ros_driver2
-            cmd = f"source {setup_script} && ros2 launch livox_ros_driver2 msg_MID360_launch.py"
+            ros2_setup = self._validate_ros2_setup()
+            if not ros2_setup:
+                return False
             
-            self.log(f"Đang khởi động Livox MID 360 driver...")
-            # Redirect output vào /dev/null để tránh spam log
-            self.livox_driver_process = subprocess.Popen(
+            # Xác định package name từ launch file path
+            if package_name is None:
+                # Tìm package name từ path: src/package_name/launch/...
+                parts = launch_file.parts
+                if len(parts) >= 2 and parts[0] == "src":
+                    package_name = parts[1]
+                else:
+                    # Fallback: dùng tên thư mục chứa launch file
+                    package_name = launch_path.parent.parent.name
+            
+            launch_filename = launch_path.name
+            cmd = f"source {ros2_setup} && source {setup_script} && ros2 launch {package_name} {launch_filename}"
+            
+            self.log(f"Đang khởi động {process_name}...")
+            self.log(f"Command: {cmd}")
+            
+            process = subprocess.Popen(
                 cmd,
                 shell=True,
                 executable="/bin/bash",
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1
             )
             
-            self.status_label.config(
-                text="Trạng thái: Livox Driver đang chạy",
-                foreground="orange"
-            )
+            setattr(self, process_attr, process)
+            threading.Thread(target=monitor_func, daemon=True).start()
+            
+            self.status_label.config(text=f"Trạng thái: {status_text}", foreground="orange")
+            return True
+            
+        except Exception as e:
+            error_msg = f"Không thể start {process_name}: {e}"
+            self.log(f"Lỗi: {error_msg}")
+            messagebox.showerror("Lỗi", error_msg)
+            return False
+    
+    def start_livox_driver(self):
+        """Start Livox MID 360 driver"""
+        workspace_path = Path(__file__).parent.parent / "drive_ws"
+        launch_file = Path("src/livox_ros_driver2/launch_ROS2/msg_MID360_launch.py")
+        
+        if self._start_ros2_process(
+            workspace_path,
+            launch_file,
+            "Livox MID 360 driver",
+            "livox_driver_process",
+            self.monitor_livox_driver_output,
+            "Livox Driver đang chạy"
+        ):
             self.start_driver_btn.config(state=tk.DISABLED)
             self.stop_driver_btn.config(state=tk.NORMAL)
             self.start_subscriber_btn.config(state=tk.NORMAL)
-            
-            # Kiểm tra process sau 2 giây
-            self.after(2000, self.check_livox_driver_process)
-            
-        except Exception as e:
-            error_msg = f"Không thể start Livox driver: {e}"
-            self.log(f"Lỗi: {error_msg}")
-            messagebox.showerror("Lỗi", error_msg)
+            self.start_converter_btn.config(state=tk.NORMAL)
     
-    def check_livox_driver_process(self):
-        """Kiểm tra xem livox driver process còn chạy không"""
-        if self.livox_driver_process:
-            if self.livox_driver_process.poll() is not None:
-                # Process đã dừng
-                self.status_label.config(
-                    text="Trạng thái: Livox Driver đã dừng",
-                    foreground="red"
-                )
-                self.start_driver_btn.config(state=tk.NORMAL)
-                self.stop_driver_btn.config(state=tk.DISABLED)
-                self.start_subscriber_btn.config(state=tk.DISABLED)
-                if self.is_ros_running:
-                    self.stop_ros_subscriber()
-                self.log("Livox Driver đã dừng")
+    def _monitor_process_output(self, process, process_name, stopped_handler):
+        """Helper function để monitor output từ process"""
+        if not process:
+            return
+        
+        try:
+            for line in iter(process.stdout.readline, ''):
+                if not line:
+                    break
+                line = line.strip()
+                if line:
+                    # Log output với prefix
+                    if any(keyword in line.lower() for keyword in ['error', 'fatal', 'exception', 'failed', 'cannot', 'unable']):
+                        self.log(f"❌ {process_name} ERROR: {line}")
+                    elif any(keyword in line.lower() for keyword in ['warning', 'warn']):
+                        self.log(f"⚠️  {process_name} WARNING: {line}")
+                    else:
+                        self.log(f"{process_name}: {line}")
+        except Exception as e:
+            self.log(f"Lỗi khi đọc output từ {process_name}: {e}")
+        
+        # Kiểm tra exit code
+        if process.poll() is not None:
+            exit_code = process.poll()
+            if exit_code != 0:
+                self.log(f"✗ {process_name} đã dừng với exit code: {exit_code}")
             else:
-                # Process vẫn chạy, kiểm tra lại sau
-                self.after(2000, self.check_livox_driver_process)
+                self.log(f"✓ {process_name} đã dừng bình thường")
+            self.after(0, stopped_handler)
+    
+    def monitor_livox_driver_output(self):
+        """Monitor output từ livox driver process"""
+        self._monitor_process_output(
+            self.livox_driver_process,
+            "Driver",
+            self._handle_driver_stopped
+        )
+    
+    def _handle_driver_stopped(self):
+        """Xử lý khi driver dừng"""
+        self.status_label.config(
+            text="Trạng thái: Livox Driver đã dừng",
+            foreground="red"
+        )
+        self.start_driver_btn.config(state=tk.NORMAL)
+        self.stop_driver_btn.config(state=tk.DISABLED)
+        self.start_subscriber_btn.config(state=tk.DISABLED)
+        if self.converter_process:
+            self.stop_converter()
+        if self.is_ros_running:
+            self.stop_ros_subscriber()
+    
+    
+    def _stop_process(self, process, process_name, timeout=5):
+        """Helper function để stop process"""
+        if not process:
+            return
+        
+        try:
+            self.log(f"Đang dừng {process_name}...")
+            process.terminate()
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+            except:
+                pass
+        except Exception as e:
+            self.log(f"Lỗi khi dừng {process_name}: {e}")
     
     def stop_livox_driver(self):
         """Stop Livox driver"""
-        if self.livox_driver_process:
-            try:
-                self.log("Đang dừng Livox Driver...")
-                self.livox_driver_process.terminate()
-                self.livox_driver_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                try:
-                    self.livox_driver_process.kill()
-                except:
-                    pass
-            except Exception as e:
-                self.log(f"Lỗi khi dừng driver: {e}")
-            finally:
-                self.livox_driver_process = None
-                self.status_label.config(
-                    text="Trạng thái: Livox Driver đã dừng",
-                    foreground="red"
-                )
-                self.start_driver_btn.config(state=tk.NORMAL)
-                self.stop_driver_btn.config(state=tk.DISABLED)
-                self.start_subscriber_btn.config(state=tk.DISABLED)
-                if self.is_ros_running:
-                    self.stop_ros_subscriber()
+        self._stop_process(self.livox_driver_process, "Livox Driver")
+        self.livox_driver_process = None
+        
+        self.status_label.config(
+            text="Trạng thái: Livox Driver đã dừng",
+            foreground="red"
+        )
+        self.start_driver_btn.config(state=tk.NORMAL)
+        self.stop_driver_btn.config(state=tk.DISABLED)
+        self.start_subscriber_btn.config(state=tk.DISABLED)
+        
+        if self.converter_process:
+            self.stop_converter()
+        if self.is_ros_running:
+            self.stop_ros_subscriber()
     
     def start_ros_subscriber(self):
         """Bắt đầu ROS subscriber cho livox topics"""
@@ -325,33 +461,36 @@ class LivoxTab(ttk.Frame):
             # Kiểm tra topic type trước khi subscribe
             self.log("Kiểm tra topic type...")
             topic_type_result = subprocess.run(
-                ['ros2', 'topic', 'type', 'livox/points'],
+                ['ros2', 'topic', 'type', '/livox/lidar'],
                 capture_output=True,
                 text=True,
                 timeout=2
             )
             
-            use_pointcloud2 = True  # Mặc định dùng PointCloud2
+            use_pointcloud2 = False  # Mặc định dùng CustomMsg vì /livox/lidar là CustomMsg
             if topic_type_result.returncode == 0:
                 topic_type = topic_type_result.stdout.strip()
-                self.log(f"Topic livox/points có type: {topic_type}")
+                self.log(f"Topic /livox/lidar có type: {topic_type}")
                 if 'CustomMsg' in topic_type:
                     use_pointcloud2 = False
                     self.log("Phát hiện CustomMsg format, sẽ subscribe với CustomMsg")
                 elif 'PointCloud2' in topic_type or 'sensor_msgs' in topic_type:
                     use_pointcloud2 = True
-                    self.log("Phát hiện PointCloud2 format")
+                    self.log("⚠️  Phát hiện PointCloud2 format (không mong đợi), sẽ dùng PointCloud2")
                 else:
-                    self.log(f"⚠️  Topic type không xác định: {topic_type}, dùng PointCloud2 mặc định")
+                    self.log(f"⚠️  Topic type không xác định: {topic_type}, dùng CustomMsg mặc định")
             else:
-                self.log("⚠️  Không thể kiểm tra topic type, dùng PointCloud2 mặc định")
-                self.log("   (Topic có thể chưa tồn tại, sẽ thử subscribe với PointCloud2)")
+                self.log("⚠️  Không thể kiểm tra topic type, dùng CustomMsg mặc định")
+                self.log("   (Topic có thể chưa tồn tại, sẽ thử subscribe với CustomMsg)")
             
-            # Tạo node subscriber
+            # Tạo node subscriber (có thể subscribe /livox/points2 nếu converter đang chạy)
             self.log("Tạo ROS2 node cho Livox...")
+            # Kiểm tra xem converter có đang chạy không
+            subscribe_points2 = self.converter_process is not None and self.converter_process.poll() is None
             self.ros_node = LivoxSubscriber(
                 self.on_lidar_received,
                 self.on_imu_received,
+                callback_points2=self.on_points2_received if subscribe_points2 else None,
                 use_pointcloud2=use_pointcloud2
             )
             
@@ -370,12 +509,12 @@ class LivoxTab(ttk.Frame):
             )
             
             topics_found = []
-            # Kiểm tra cả livox/points và /livox/points (ROS2 có thể normalize)
-            if 'livox/points' in result.stdout or '/livox/points' in result.stdout:
-                topics_found.append('livox/points')
-                self.log("✓ Topic livox/points đã tồn tại")
+            # Kiểm tra cả /livox/lidar và livox/lidar (ROS2 có thể normalize)
+            if '/livox/lidar' in result.stdout or 'livox/lidar' in result.stdout:
+                topics_found.append('/livox/lidar')
+                self.log("✓ Topic /livox/lidar đã tồn tại")
             else:
-                self.log("⚠️  Cảnh báo: Topic livox/points chưa tồn tại")
+                self.log("⚠️  Cảnh báo: Topic /livox/lidar chưa tồn tại")
             
             # Kiểm tra cả livox/imu và /livox/imu (ROS2 có thể normalize)
             if 'livox/imu' in result.stdout or '/livox/imu' in result.stdout:
@@ -396,7 +535,7 @@ class LivoxTab(ttk.Frame):
             self.lidar_count = 0
             self.imu_count = 0
             self.status_label.config(
-                text="Trạng thái: Đang subscribe livox/points và livox/imu...",
+                text="Trạng thái: Đang subscribe /livox/lidar và livox/imu...",
                 foreground="green"
             )
             self.start_subscriber_btn.config(state=tk.DISABLED)
@@ -514,5 +653,83 @@ class LivoxTab(ttk.Frame):
         
         self.lidar_info_label.config(text="Chưa nhận dữ liệu")
         self.imu_info_label.config(text="Chưa nhận dữ liệu")
+        self.points2_info_label.config(text="Chưa nhận dữ liệu")
         self.log("ROS subscriber đã dừng")
+    
+    def start_converter(self):
+        """Start Livox Message Converter node"""
+        workspace_path = Path(__file__).parent.parent / "ws"
+        launch_file = Path("src/livox_msg_converter/launch/livox_msg_converter.launch.py")
+        
+        if self._start_ros2_process(
+            workspace_path,
+            launch_file,
+            "Livox Message Converter",
+            "converter_process",
+            self.monitor_converter_output,
+            "Converter đang chạy"
+        ):
+            self.start_converter_btn.config(state=tk.DISABLED)
+            self.stop_converter_btn.config(state=tk.NORMAL)
+            
+            # Nếu subscriber đang chạy, cần restart để subscribe /livox/points2
+            if self.is_ros_running:
+                self.log("Đang restart subscriber để subscribe /livox/points2...")
+                self.stop_ros_subscriber()
+                self.after(1000, self.start_ros_subscriber)
+    
+    def monitor_converter_output(self):
+        """Monitor output từ converter process"""
+        self._monitor_process_output(
+            self.converter_process,
+            "Converter",
+            self._handle_converter_stopped
+        )
+    
+    def _handle_converter_stopped(self):
+        """Xử lý khi converter dừng"""
+        self.status_label.config(
+            text="Trạng thái: Converter đã dừng",
+            foreground="red"
+        )
+        self.start_converter_btn.config(state=tk.NORMAL)
+        self.stop_converter_btn.config(state=tk.DISABLED)
+        self.points2_info_label.config(text="Chưa nhận dữ liệu")
+        self.points2_count = 0
+    
+    
+    def stop_converter(self):
+        """Stop Converter node"""
+        self._stop_process(self.converter_process, "Converter")
+        self.converter_process = None
+        
+        self.status_label.config(
+            text="Trạng thái: Converter đã dừng",
+            foreground="red"
+        )
+        self.start_converter_btn.config(state=tk.NORMAL)
+        self.stop_converter_btn.config(state=tk.DISABLED)
+        self.points2_info_label.config(text="Chưa nhận dữ liệu")
+        self.points2_count = 0
+    
+    def on_points2_received(self, msg):
+        """Callback khi nhận được PointCloud2 từ /livox/points2"""
+        self.points2_count += 1
+        
+        # Cập nhật UI trong main thread
+        info_text = (
+            f"Đã nhận {self.points2_count} point clouds | "
+            f"Width: {msg.width} | Height: {msg.height} | "
+            f"Point step: {msg.point_step} bytes | "
+            f"Type: PointCloud2 (từ converter)"
+        )
+        
+        self.after(0, lambda: self.points2_info_label.config(text=info_text))
+        
+        # Cập nhật status mỗi 30 message
+        if self.points2_count % 30 == 0:
+            self.after(0, lambda: self.status_label.config(
+                text=f"Trạng thái: Đã nhận {self.lidar_count} lidar, {self.imu_count} IMU, {self.points2_count} points2 messages",
+                foreground="green"
+            ))
 
