@@ -399,6 +399,12 @@ std::tuple<std::string, cv::Size, std::vector<double>, std::vector<double>> Prep
   }
 
   std::cout << "try to get the camera model automatically" << std::endl;
+  if (camera_info_topic.empty()) {
+    std::cerr << vlcal::console::bold_red << "error: camera_info topic is not available and camera_model is set to 'auto'!!" << vlcal::console::reset << std::endl;
+    std::cerr << vlcal::console::bold_red << "     : please specify camera model and parameters manually using:" << vlcal::console::reset << std::endl;
+    std::cerr << vlcal::console::bold_red << "     : --camera_model <model> --camera_intrinsics <fx,fy,cx,cy> --camera_distortion_coeffs <k1,k2,p1,p2,k3>" << vlcal::console::reset << std::endl;
+    abort();
+  }
   auto [distortion_model, intrinsics, distortion_coeffs] = get_camera_info(bag_filename, camera_info_topic);
   return {distortion_model, image_size, intrinsics, distortion_coeffs};
 }

@@ -20,6 +20,7 @@ except ImportError as e:
 # Import các tab modules
 from theta_tab import ThetaTab
 from livox_tab import LivoxTab
+from calibration_tab import CalibrationTab
 
 
 class MainGUI:
@@ -42,6 +43,10 @@ class MainGUI:
         self.livox_tab = LivoxTab(self.notebook)
         self.notebook.add(self.livox_tab, text="Livox Driver 2")
         
+        # Tạo tab Calibration
+        self.calibration_tab = CalibrationTab(self.notebook)
+        self.notebook.add(self.calibration_tab, text="Calibration")
+        
         # Bind events
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
     
@@ -55,6 +60,11 @@ class MainGUI:
             self.livox_tab.stop_livox_driver()
         if hasattr(self.livox_tab, 'stop_ros_subscriber'):
             self.livox_tab.stop_ros_subscriber()
+        
+        # Dừng các process trong calibration tab
+        if hasattr(self.calibration_tab, 'stop_record'):
+            if self.calibration_tab.is_recording:
+                self.calibration_tab.stop_record()
         
         # Shutdown ROS
         if rclpy.ok():

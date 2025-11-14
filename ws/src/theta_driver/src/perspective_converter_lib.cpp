@@ -33,11 +33,21 @@ void PerspectiveConverter::onInit() {
     declare_parameter<double>("fov_degrees", 75.0);
     get_parameter("fov_degrees", fov_degrees_);
     
+    declare_parameter<std::string>("camera_info_topic", "camera_info");
+    get_parameter("camera_info_topic", camera_info_topic_);
+    
+    declare_parameter<std::string>("distortion_model", "plumb_bob");
+    get_parameter("distortion_model", distortion_model_);
+    
     RCLCPP_INFO(get_logger(), "Perspective converter parameters:");
     RCLCPP_INFO(get_logger(), "  Input topic: %s", input_topic_.c_str());
     RCLCPP_INFO(get_logger(), "  Output topic: %s", output_topic_.c_str());
+    RCLCPP_INFO(get_logger(), "  Camera info topic: %s", camera_info_topic_.c_str());
     RCLCPP_INFO(get_logger(), "  Output size: %dx%d", output_width_, output_height_);
     RCLCPP_INFO(get_logger(), "  FOV: %.1f degrees", fov_degrees_);
+    
+    // Calculate camera intrinsics
+    calculateCameraIntrinsics();
     
     // Create subscriber and publisher
     image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
@@ -45,8 +55,11 @@ void PerspectiveConverter::onInit() {
         std::bind(&PerspectiveConverter::imageCallback, this, std::placeholders::_1));
     
     perspective_pub_ = this->create_publisher<sensor_msgs::msg::Image>(output_topic_, 10);
+    camera_info_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>(camera_info_topic_, 10);
     
     RCLCPP_INFO(get_logger(), "Perspective Converter initialized");
+    RCLCPP_INFO(get_logger(), "  Camera intrinsics: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f", 
+                fx_, fy_, cx_, cy_);
 }
 
 void PerspectiveConverter::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg) {
@@ -71,6 +84,9 @@ void PerspectiveConverter::imageCallback(const sensor_msgs::msg::Image::SharedPt
         
         // Publish perspective image
         publishPerspectiveImage(perspective, msg->header.stamp);
+        
+        // Publish camera info
+        publishCameraInfo(msg->header.stamp);
         
     } catch (const std::exception& e) {
         RCLCPP_ERROR(get_logger(), "Error in image callback: %s", e.what());
@@ -164,6 +180,92 @@ void PerspectiveConverter::publishPerspectiveImage(const cv::Mat& perspective,
     
     RCLCPP_DEBUG(get_logger(), "Published perspective image: %dx%d", 
                 perspective.cols, perspective.rows);
+}
+
+void PerspectiveConverter::calculateCameraIntrinsics() {
+    // Calculate focal length from FOV and image size
+    // FOV = 2 * atan(image_size / (2 * focal_length))
+    // focal_length = image_size / (2 * tan(FOV / 2))
+    double fov_rad = fov_degrees_ * M_PI / 180.0;
+    double half_fov_tan = tan(fov_rad / 2.0);
+    
+    // For perspective projection, use average of width and height for focal length
+    // Or use diagonal FOV - but simpler: use width for horizontal FOV
+    // fx = width / (2 * tan(FOV/2))
+    fx_ = static_cast<double>(output_width_) / (2.0 * half_fov_tan);
+    // For square pixels, fy = fx
+    fy_ = fx_;
+    
+    // Principal point at image center
+    cx_ = static_cast<double>(output_width_) / 2.0;
+    cy_ = static_cast<double>(output_height_) / 2.0;
+}
+
+void PerspectiveConverter::publishCameraInfo(const builtin_interfaces::msg::Time& timestamp) {
+    sensor_msgs::msg::CameraInfo camera_info_msg;
+    camera_info_msg.header.stamp = timestamp;
+    camera_info_msg.header.frame_id = camera_frame_;
+    
+    // Image dimensions
+    camera_info_msg.width = output_width_;
+    camera_info_msg.height = output_height_;
+    
+    // Distortion model
+    camera_info_msg.distortion_model = distortion_model_;
+    
+    // Camera matrix K (3x3 row-major)
+    // [fx  0  cx]
+    // [0  fy  cy]
+    // [0   0   1]
+    camera_info_msg.k[0] = fx_;  // fx
+    camera_info_msg.k[1] = 0.0;
+    camera_info_msg.k[2] = cx_;  // cx
+    camera_info_msg.k[3] = 0.0;
+    camera_info_msg.k[4] = fy_;  // fy
+    camera_info_msg.k[5] = cy_;  // cy
+    camera_info_msg.k[6] = 0.0;
+    camera_info_msg.k[7] = 0.0;
+    camera_info_msg.k[8] = 1.0;
+    
+    // Rectification matrix R (identity for unrectified images)
+    camera_info_msg.r[0] = 1.0;
+    camera_info_msg.r[1] = 0.0;
+    camera_info_msg.r[2] = 0.0;
+    camera_info_msg.r[3] = 0.0;
+    camera_info_msg.r[4] = 1.0;
+    camera_info_msg.r[5] = 0.0;
+    camera_info_msg.r[6] = 0.0;
+    camera_info_msg.r[7] = 0.0;
+    camera_info_msg.r[8] = 1.0;
+    
+    // Projection matrix P (3x4 row-major)
+    // Same as K for monocular camera
+    camera_info_msg.p[0] = fx_;  // fx
+    camera_info_msg.p[1] = 0.0;
+    camera_info_msg.p[2] = cx_;  // cx
+    camera_info_msg.p[3] = 0.0;  // Tx
+    camera_info_msg.p[4] = 0.0;
+    camera_info_msg.p[5] = fy_;  // fy
+    camera_info_msg.p[6] = cy_;  // cy
+    camera_info_msg.p[7] = 0.0;  // Ty
+    camera_info_msg.p[8] = 0.0;
+    camera_info_msg.p[9] = 0.0;
+    camera_info_msg.p[10] = 1.0;
+    camera_info_msg.p[11] = 0.0; // Tz
+    
+    // Distortion coefficients (plumb_bob: k1, k2, p1, p2, k3)
+    // For perspective projection without distortion, all zeros
+    camera_info_msg.d.resize(5);
+    camera_info_msg.d[0] = 0.0;  // k1
+    camera_info_msg.d[1] = 0.0;  // k2
+    camera_info_msg.d[2] = 0.0;  // p1
+    camera_info_msg.d[3] = 0.0;  // p2
+    camera_info_msg.d[4] = 0.0;  // k3
+    
+    camera_info_pub_->publish(camera_info_msg);
+    
+    RCLCPP_DEBUG(get_logger(), "Published camera_info: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f", 
+                fx_, fy_, cx_, cy_);
 }
 
 } // namespace theta_driver

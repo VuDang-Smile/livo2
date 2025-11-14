@@ -1,0 +1,48 @@
+{
+  "camera": {
+    "camera_model": "plumb_bob",
+    "distortion_coeffs": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "intrinsics": [
+      417.0321193091858,
+      417.0321193091858,
+      320.0,
+      240.0
+    ]
+  },
+  "meta": {
+    "bag_names": [
+      "calibration_20251114_095442_0.mcap"
+    ],
+    "camera_info_topic": "/camera_info",
+    "data_path": "/home/smile/Documents/code/livo/calibration_data/bags/calibration_20251114_095442",
+    "image_topic": "/image_perspective",
+    "intensity_channel": "intensity",
+    "points_topic": "/livox/points"
+  },
+  "results": {
+    "T_lidar_camera": [
+      -0.02198557656978769,
+      -0.001677771052602146,
+      0.0071127409591775,
+      -0.5017624119744252,
+      0.4855970021043376,
+      -0.5090942855925319,
+      0.5032425278669488
+    ],
+    "init_T_lidar_camera": [
+      0.0,
+      0.0,
+      0.0,
+      -0.4999999999999999,
+      0.5,
+      -0.5,
+      0.5000000000000001
+    ]
+  }
+}
