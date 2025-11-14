@@ -7,7 +7,13 @@ GUI với 2 tabs: Theta Driver và Livox Driver 2
 import os
 import sys
 
-import rclpy
+# Import rclpy nhưng không khởi tạo ngay
+# Chỉ khởi tạo khi cần (trong các tabs)
+try:
+    import rclpy
+except ImportError:
+    rclpy = None
+    print("Cảnh báo: rclpy không thể import. Một số tính năng có thể không hoạt động.")
 
 try:
     import tkinter as tk
@@ -66,8 +72,8 @@ class MainGUI:
             if self.calibration_tab.is_recording:
                 self.calibration_tab.stop_record()
         
-        # Shutdown ROS
-        if rclpy.ok():
+        # Shutdown ROS nếu đã được khởi tạo
+        if rclpy and rclpy.ok():
             try:
                 rclpy.shutdown()
             except:

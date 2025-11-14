@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 import os
+from functools import partial
 
 try:
     import tkinter as tk
@@ -408,19 +409,37 @@ class CalibrationTab(ttk.Frame):
         options_frame = ttk.LabelFrame(parent, text="Options", padding=10)
         options_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        self.auto_quit_var = tk.BooleanVar(value=False)
+        self.auto_quit_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             options_frame,
-            text="Auto quit sau khi calibration xong",
+            text="Auto quit sau khi calibration xong (khuyến nghị)",
             variable=self.auto_quit_var
         ).pack(anchor=tk.W)
         
-        self.background_var = tk.BooleanVar(value=False)
+        self.background_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             options_frame,
-            text="Chạy background (không hiển thị viewer)",
+            text="Chạy background (không hiển thị viewer) - khuyến nghị",
             variable=self.background_var
         ).pack(anchor=tk.W)
+        
+        # Registration type
+        reg_frame = ttk.Frame(options_frame)
+        reg_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(reg_frame, text="Registration type:").pack(side=tk.LEFT, padx=5)
+        self.registration_type_var = tk.StringVar(value="nid_bfgs")
+        ttk.Radiobutton(
+            reg_frame,
+            text="NID-BFGS (nhanh hơn, khuyến nghị)",
+            variable=self.registration_type_var,
+            value="nid_bfgs"
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(
+            reg_frame,
+            text="NID-Nelder-Mead (chậm hơn nhưng ổn định hơn)",
+            variable=self.registration_type_var,
+            value="nid_nelder_mead"
+        ).pack(side=tk.LEFT, padx=5)
         
         # Button
         button_frame = ttk.Frame(parent)
@@ -433,6 +452,14 @@ class CalibrationTab(ttk.Frame):
             style="Accent.TButton"
         )
         self.calibrate_btn.pack(side=tk.LEFT, padx=10)
+        
+        self.stop_calibrate_btn = ttk.Button(
+            button_frame,
+            text="Dừng Calibration",
+            command=self.stop_calibrate,
+            state=tk.DISABLED
+        )
+        self.stop_calibrate_btn.pack(side=tk.LEFT, padx=10)
         
         # Log
         log_frame = ttk.LabelFrame(parent, text="Log", padding=10)
@@ -607,16 +634,30 @@ class CalibrationTab(ttk.Frame):
         
         if self.record_process.poll() is not None:
             self.is_recording = False
-            self.after(0, lambda: self.record_btn.config(state=tk.NORMAL))
-            self.after(0, lambda: self.stop_record_btn.config(state=tk.DISABLED))
-            self.after(0, lambda: self.status_label.config(text="Trạng thái: Record đã hoàn thành", foreground="green"))
+            self.after(0, partial(self._update_record_complete))
+    
+    def _update_record_complete(self):
+        """Helper function để update UI sau khi record hoàn thành"""
+        try:
+            self.record_btn.config(state=tk.NORMAL)
+            self.stop_record_btn.config(state=tk.DISABLED)
+            self.status_label.config(text="Trạng thái: Record đã hoàn thành", foreground="green")
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
     
     def log_record(self, message):
-        """Log message vào record log"""
-        self.record_log.config(state=tk.NORMAL)
-        self.record_log.insert(tk.END, f"{message}\n")
-        self.record_log.see(tk.END)
-        self.record_log.config(state=tk.DISABLED)
+        """Log message vào record log (thread-safe)"""
+        self.after(0, partial(self._log_record_impl, message))
+    
+    def _log_record_impl(self, message):
+        """Implementation của log_record (chạy trong main thread)"""
+        try:
+            self.record_log.config(state=tk.NORMAL)
+            self.record_log.insert(tk.END, f"{message}\n")
+            self.record_log.see(tk.END)
+            self.record_log.config(state=tk.DISABLED)
+        except Exception as e:
+            print(f"Lỗi khi log: {e}")
     
     def launch_perspective_converter(self):
         """Launch perspective converter node"""
@@ -633,11 +674,17 @@ class CalibrationTab(ttk.Frame):
         # ROS2 launch format: ros2 launch <package_name> <launch_file_name>
         package_name = "theta_driver"
         launch_file_name = "theta_perspective_calibration.launch.py"
-        cmd = f"source {setup_script} && ros2 launch {package_name} {launch_file_name}"
+        ros2_setup = "/opt/ros/jazzy/setup.bash"
+        cmd = f"source {ros2_setup} && source {setup_script} && ros2 launch {package_name} {launch_file_name}"
         
         self.log_record("Đang launch perspective converter...")
         
         try:
+            # Sử dụng env để đảm bảo clean environment
+            env = os.environ.copy()
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
             self.perspective_converter_process = subprocess.Popen(
                 cmd,
                 shell=True,
@@ -645,7 +692,8 @@ class CalibrationTab(ttk.Frame):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
-                bufsize=1
+                bufsize=1,
+                env=env
             )
             
             self.is_perspective_converter_running = True
@@ -693,10 +741,17 @@ class CalibrationTab(ttk.Frame):
         
         if self.perspective_converter_process.poll() is not None:
             self.is_perspective_converter_running = False
-            self.after(0, lambda: self.launch_converter_btn.config(state=tk.NORMAL))
-            self.after(0, lambda: self.stop_converter_btn.config(state=tk.DISABLED))
-            self.after(0, lambda: self.converter_status_label.config(text="Trạng thái: Đã dừng", foreground="gray"))
-            self.after(0, lambda: self.log_record("Perspective converter đã dừng"))
+            self.after(0, partial(self._update_converter_stopped))
+    
+    def _update_converter_stopped(self):
+        """Helper function để update UI sau khi converter dừng"""
+        try:
+            self.launch_converter_btn.config(state=tk.NORMAL)
+            self.stop_converter_btn.config(state=tk.DISABLED)
+            self.converter_status_label.config(text="Trạng thái: Đã dừng", foreground="gray")
+            self.log_record("Perspective converter đã dừng")
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
     
     # ========== Preprocessing Methods ==========
     
@@ -751,7 +806,10 @@ class CalibrationTab(ttk.Frame):
         
         cmd_parts.extend([input_dir, output_dir])
         
-        cmd = f"source {setup_script} && {' '.join(cmd_parts)}"
+        # Build command với đầy đủ ROS2 environment
+        # Cần source cả ROS2 base và workspace setup
+        ros2_setup = "/opt/ros/jazzy/setup.bash"
+        cmd = f"source {ros2_setup} && source {setup_script} && {' '.join(cmd_parts)}"
         
         self.log_preprocess(f"Bắt đầu preprocessing...")
         self.log_preprocess(f"Input: {input_dir}")
@@ -759,6 +817,12 @@ class CalibrationTab(ttk.Frame):
         self.log_preprocess(f"Command: {' '.join(cmd_parts)}")
         
         try:
+            # Sử dụng env để đảm bảo clean environment
+            env = os.environ.copy()
+            # Đảm bảo không có ROS_DOMAIN_ID conflict
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
             self.preprocess_process = subprocess.Popen(
                 cmd,
                 shell=True,
@@ -766,7 +830,8 @@ class CalibrationTab(ttk.Frame):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
-                bufsize=1
+                bufsize=1,
+                env=env
             )
             
             self.preprocess_btn.config(state=tk.DISABLED)
@@ -784,29 +849,56 @@ class CalibrationTab(ttk.Frame):
         if not self.preprocess_process:
             return
         
-        for line in iter(self.preprocess_process.stdout.readline, ''):
-            if not line:
-                break
-            self.log_preprocess(line.strip())
+        try:
+            for line in iter(self.preprocess_process.stdout.readline, ''):
+                if not line:
+                    break
+                self.log_preprocess(line.strip())
+        except Exception as e:
+            self.log_preprocess(f"Lỗi khi đọc output: {e}")
         
         if self.preprocess_process.poll() is not None:
             exit_code = self.preprocess_process.poll()
             if exit_code == 0:
-                self.after(0, lambda: self.status_label.config(text="Trạng thái: Preprocessing hoàn thành", foreground="green"))
-                self.after(0, lambda: self.preprocess_btn.config(state=tk.NORMAL))
-                # Auto-fill initial guess directory
-                self.after(0, lambda: self.initial_guess_dir_var.set(self.preprocess_output_var.get()))
-                self.after(0, lambda: self.calibrate_dir_var.set(self.preprocess_output_var.get()))
+                # Sử dụng helper functions thay vì lambda để tránh closure issues
+                self.after(0, partial(self._update_preprocess_success))
             else:
-                self.after(0, lambda: self.status_label.config(text="Trạng thái: Preprocessing thất bại", foreground="red"))
-                self.after(0, lambda: self.preprocess_btn.config(state=tk.NORMAL))
+                self.after(0, partial(self._update_preprocess_failure))
+    
+    def _update_preprocess_success(self):
+        """Helper function để update UI sau khi preprocessing thành công"""
+        try:
+            self.status_label.config(text="Trạng thái: Preprocessing hoàn thành", foreground="green")
+            self.preprocess_btn.config(state=tk.NORMAL)
+            # Auto-fill initial guess directory
+            output_dir = self.preprocess_output_var.get()
+            self.initial_guess_dir_var.set(output_dir)
+            self.calibrate_dir_var.set(output_dir)
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
+    
+    def _update_preprocess_failure(self):
+        """Helper function để update UI sau khi preprocessing thất bại"""
+        try:
+            self.status_label.config(text="Trạng thái: Preprocessing thất bại", foreground="red")
+            self.preprocess_btn.config(state=tk.NORMAL)
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
     
     def log_preprocess(self, message):
-        """Log message vào preprocess log"""
-        self.preprocess_log.config(state=tk.NORMAL)
-        self.preprocess_log.insert(tk.END, f"{message}\n")
-        self.preprocess_log.see(tk.END)
-        self.preprocess_log.config(state=tk.DISABLED)
+        """Log message vào preprocess log (thread-safe)"""
+        # Sử dụng after để đảm bảo thread-safe
+        self.after(0, partial(self._log_preprocess_impl, message))
+    
+    def _log_preprocess_impl(self, message):
+        """Implementation của log_preprocess (chạy trong main thread)"""
+        try:
+            self.preprocess_log.config(state=tk.NORMAL)
+            self.preprocess_log.insert(tk.END, f"{message}\n")
+            self.preprocess_log.see(tk.END)
+            self.preprocess_log.config(state=tk.DISABLED)
+        except Exception as e:
+            print(f"Lỗi khi log: {e}")
     
     # ========== Initial Guess Methods ==========
     
@@ -835,7 +927,8 @@ class CalibrationTab(ttk.Frame):
         mode = self.initial_guess_mode.get()
         
         if mode == "manual":
-            cmd = f"source {setup_script} && ros2 run direct_visual_lidar_calibration initial_guess_manual {preprocessed_dir}"
+            ros2_setup = "/opt/ros/jazzy/setup.bash"
+            cmd = f"source {ros2_setup} && source {setup_script} && ros2 run direct_visual_lidar_calibration initial_guess_manual {preprocessed_dir}"
         else:  # auto
             # Cần chạy find_matches_superglue trước
             messagebox.showinfo("Thông tin", "Automatic mode cần SuperGlue. Vui lòng chạy find_matches_superglue trước.")
@@ -845,6 +938,11 @@ class CalibrationTab(ttk.Frame):
         self.log_initial_guess(f"Directory: {preprocessed_dir}")
         
         try:
+            # Sử dụng env để đảm bảo clean environment
+            env = os.environ.copy()
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
             self.initial_guess_process = subprocess.Popen(
                 cmd,
                 shell=True,
@@ -852,7 +950,8 @@ class CalibrationTab(ttk.Frame):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
-                bufsize=1
+                bufsize=1,
+                env=env
             )
             
             self.initial_guess_btn.config(state=tk.DISABLED)
@@ -870,26 +969,50 @@ class CalibrationTab(ttk.Frame):
         if not self.initial_guess_process:
             return
         
-        for line in iter(self.initial_guess_process.stdout.readline, ''):
-            if not line:
-                break
-            self.log_initial_guess(line.strip())
+        try:
+            for line in iter(self.initial_guess_process.stdout.readline, ''):
+                if not line:
+                    break
+                self.log_initial_guess(line.strip())
+        except Exception as e:
+            self.log_initial_guess(f"Lỗi khi đọc output: {e}")
         
         if self.initial_guess_process.poll() is not None:
             exit_code = self.initial_guess_process.poll()
             if exit_code == 0:
-                self.after(0, lambda: self.status_label.config(text="Trạng thái: Initial guess hoàn thành", foreground="green"))
-                self.after(0, lambda: self.initial_guess_btn.config(state=tk.NORMAL))
+                self.after(0, partial(self._update_initial_guess_success))
             else:
-                self.after(0, lambda: self.status_label.config(text="Trạng thái: Initial guess thất bại", foreground="red"))
-                self.after(0, lambda: self.initial_guess_btn.config(state=tk.NORMAL))
+                self.after(0, partial(self._update_initial_guess_failure))
+    
+    def _update_initial_guess_success(self):
+        """Helper function để update UI sau khi initial guess thành công"""
+        try:
+            self.status_label.config(text="Trạng thái: Initial guess hoàn thành", foreground="green")
+            self.initial_guess_btn.config(state=tk.NORMAL)
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
+    
+    def _update_initial_guess_failure(self):
+        """Helper function để update UI sau khi initial guess thất bại"""
+        try:
+            self.status_label.config(text="Trạng thái: Initial guess thất bại", foreground="red")
+            self.initial_guess_btn.config(state=tk.NORMAL)
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
     
     def log_initial_guess(self, message):
-        """Log message vào initial guess log"""
-        self.initial_guess_log.config(state=tk.NORMAL)
-        self.initial_guess_log.insert(tk.END, f"{message}\n")
-        self.initial_guess_log.see(tk.END)
-        self.initial_guess_log.config(state=tk.DISABLED)
+        """Log message vào initial guess log (thread-safe)"""
+        self.after(0, partial(self._log_initial_guess_impl, message))
+    
+    def _log_initial_guess_impl(self, message):
+        """Implementation của log_initial_guess (chạy trong main thread)"""
+        try:
+            self.initial_guess_log.config(state=tk.NORMAL)
+            self.initial_guess_log.insert(tk.END, f"{message}\n")
+            self.initial_guess_log.see(tk.END)
+            self.initial_guess_log.config(state=tk.DISABLED)
+        except Exception as e:
+            print(f"Lỗi khi log: {e}")
     
     # ========== Calibration Methods ==========
     
@@ -917,17 +1040,29 @@ class CalibrationTab(ttk.Frame):
         
         cmd_parts = ["ros2", "run", "direct_visual_lidar_calibration", "calibrate", preprocessed_dir]
         
+        # Add registration type
+        registration_type = self.registration_type_var.get()
+        cmd_parts.extend(["--registration_type", registration_type])
+        
         if self.auto_quit_var.get():
             cmd_parts.append("--auto_quit")
         if self.background_var.get():
             cmd_parts.append("--background")
         
-        cmd = f"source {setup_script} && {' '.join(cmd_parts)}"
+        # Build command với đầy đủ ROS2 environment
+        ros2_setup = "/opt/ros/jazzy/setup.bash"
+        cmd = f"source {ros2_setup} && source {setup_script} && {' '.join(cmd_parts)}"
         
         self.log_calibrate(f"Bắt đầu calibration...")
         self.log_calibrate(f"Directory: {preprocessed_dir}")
         
         try:
+            # Sử dụng env để đảm bảo clean environment
+            env = os.environ.copy()
+            # Đảm bảo không có ROS_DOMAIN_ID conflict
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
             self.calibrate_process = subprocess.Popen(
                 cmd,
                 shell=True,
@@ -935,10 +1070,12 @@ class CalibrationTab(ttk.Frame):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
-                bufsize=1
+                bufsize=1,
+                env=env
             )
             
             self.calibrate_btn.config(state=tk.DISABLED)
+            self.stop_calibrate_btn.config(state=tk.NORMAL)
             self.status_label.config(text="Trạng thái: Đang calibration...", foreground="orange")
             
             # Start thread để đọc output
@@ -953,30 +1090,77 @@ class CalibrationTab(ttk.Frame):
         if not self.calibrate_process:
             return
         
-        for line in iter(self.calibrate_process.stdout.readline, ''):
-            if not line:
-                break
-            self.log_calibrate(line.strip())
+        try:
+            for line in iter(self.calibrate_process.stdout.readline, ''):
+                if not line:
+                    break
+                self.log_calibrate(line.strip())
+        except Exception as e:
+            self.log_calibrate(f"Lỗi khi đọc output: {e}")
         
         if self.calibrate_process.poll() is not None:
             exit_code = self.calibrate_process.poll()
             if exit_code == 0:
-                self.after(0, lambda: self.status_label.config(text="Trạng thái: Calibration hoàn thành", foreground="green"))
-                self.after(0, lambda: self.calibrate_btn.config(state=tk.NORMAL))
-                # Auto-fill calib.json path
-                calib_json_path = Path(self.calibrate_dir_var.get()) / "calib.json"
-                if calib_json_path.exists():
-                    self.after(0, lambda: self.calib_json_var.set(str(calib_json_path)))
+                self.after(0, partial(self._update_calibrate_success))
             else:
-                self.after(0, lambda: self.status_label.config(text="Trạng thái: Calibration thất bại", foreground="red"))
-                self.after(0, lambda: self.calibrate_btn.config(state=tk.NORMAL))
+                self.after(0, partial(self._update_calibrate_failure))
+    
+    def stop_calibrate(self):
+        """Dừng calibration process"""
+        if self.calibrate_process:
+            try:
+                self.log_calibrate("Đang dừng calibration...")
+                self.calibrate_process.terminate()
+                self.calibrate_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    self.calibrate_process.kill()
+                except:
+                    pass
+            except Exception as e:
+                self.log_calibrate(f"Lỗi khi dừng calibration: {e}")
+            finally:
+                self.calibrate_process = None
+                self.calibrate_btn.config(state=tk.NORMAL)
+                self.stop_calibrate_btn.config(state=tk.DISABLED)
+                self.status_label.config(text="Trạng thái: Calibration đã dừng", foreground="orange")
+                self.log_calibrate("Calibration đã dừng")
+    
+    def _update_calibrate_success(self):
+        """Helper function để update UI sau khi calibration thành công"""
+        try:
+            self.status_label.config(text="Trạng thái: Calibration hoàn thành", foreground="green")
+            self.calibrate_btn.config(state=tk.NORMAL)
+            self.stop_calibrate_btn.config(state=tk.DISABLED)
+            # Auto-fill calib.json path
+            calib_json_path = Path(self.calibrate_dir_var.get()) / "calib.json"
+            if calib_json_path.exists():
+                self.calib_json_var.set(str(calib_json_path))
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
+    
+    def _update_calibrate_failure(self):
+        """Helper function để update UI sau khi calibration thất bại"""
+        try:
+            self.status_label.config(text="Trạng thái: Calibration thất bại", foreground="red")
+            self.calibrate_btn.config(state=tk.NORMAL)
+            self.stop_calibrate_btn.config(state=tk.DISABLED)
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
     
     def log_calibrate(self, message):
-        """Log message vào calibrate log"""
-        self.calibrate_log.config(state=tk.NORMAL)
-        self.calibrate_log.insert(tk.END, f"{message}\n")
-        self.calibrate_log.see(tk.END)
-        self.calibrate_log.config(state=tk.DISABLED)
+        """Log message vào calibrate log (thread-safe)"""
+        self.after(0, partial(self._log_calibrate_impl, message))
+    
+    def _log_calibrate_impl(self, message):
+        """Implementation của log_calibrate (chạy trong main thread)"""
+        try:
+            self.calibrate_log.config(state=tk.NORMAL)
+            self.calibrate_log.insert(tk.END, f"{message}\n")
+            self.calibrate_log.see(tk.END)
+            self.calibrate_log.config(state=tk.DISABLED)
+        except Exception as e:
+            print(f"Lỗi khi log: {e}")
     
     # ========== Export Methods ==========
     
