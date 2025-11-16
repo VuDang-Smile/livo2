@@ -12,6 +12,7 @@ import os
 import platform
 import yaml
 import shutil
+import signal
 
 try:
     import tkinter as tk
@@ -581,7 +582,8 @@ class MappingTab(ttk.Frame):
                 cwd=str(self.workspace_path),
                 bufsize=1,  # Line buffered
                 universal_newlines=True,
-                env=env
+                env=env,
+                preexec_fn=os.setsid if hasattr(os, 'setsid') else None  # Tạo process group mới
             )
             
             # Đợi một chút để process khởi động
@@ -638,28 +640,53 @@ class MappingTab(ttk.Frame):
             if not self.mapping_process or not self.mapping_process.stdout:
                 return
             
-            # Đọc output từ process
-            while self.is_mapping_running and self.mapping_process:
-                line = self.mapping_process.stdout.readline()
+            import select
+            import sys
+            
+            # Kiểm tra xem có thể dùng select không (chỉ trên Unix)
+            use_select = hasattr(select, 'select') and sys.platform != 'win32'
+            
+            # Sử dụng iter để đọc output, tự động break khi process kết thúc
+            for line in iter(self.mapping_process.stdout.readline, ''):
+                # Kiểm tra nếu mapping đã dừng
+                if not self.is_mapping_running:
+                    break
+                
                 if not line:
                     # Kiểm tra nếu process đã kết thúc
                     if self.mapping_process.poll() is not None:
                         return_code = self.mapping_process.returncode
-                        self.after(0, lambda rc=return_code: self.log(f"⚠️ Mapping process đã kết thúc với code: {rc}"))
+                        try:
+                            self.after(0, lambda rc=return_code: self.log(f"⚠️ Mapping process đã kết thúc với code: {rc}"))
+                        except:
+                            pass
                         break
-                    # Nếu chưa có output, đợi một chút
-                    import time
-                    time.sleep(0.1)
                     continue
                 
                 line = line.strip()
                 if line:
-                    # Sử dụng lambda với default argument để capture giá trị đúng
-                    self.after(0, lambda l=line: self.log(l))
+                    # Lọc các dòng không cần thiết để giảm spam
+                    # Bỏ qua các dòng INFO thông thường, chỉ log ERROR/WARNING và các dòng quan trọng
+                    line_lower = line.lower()
+                    should_log = (
+                        any(keyword in line_lower for keyword in ['error', 'fatal', 'exception', 'failed', 'warning', 'warn']) or
+                        any(keyword in line_lower for keyword in ['[lio]', '[vio]', 'update', 'save', 'mapping']) or
+                        len(line) < 100  # Log các dòng ngắn (thường là thông báo quan trọng)
+                    )
+                    
+                    if should_log:
+                        try:
+                            self.after(0, lambda l=line: self.log(l))
+                        except:
+                            # Nếu có lỗi khi gọi after (có thể do widget đã bị destroy), break
+                            break
                     
         except Exception as e:
             error_msg = str(e)
-            self.after(0, lambda msg=error_msg: self.log(f"Lỗi đọc output: {msg}"))
+            try:
+                self.after(0, lambda msg=error_msg: self.log(f"Lỗi đọc output: {msg}"))
+            except:
+                pass  # Widget có thể đã bị destroy
     
     def _monitor_output(self):
         """Giám sát và cập nhật thông tin output định kỳ"""
@@ -675,13 +702,49 @@ class MappingTab(ttk.Frame):
             return
         
         try:
+            # Đánh dấu đã dừng trước
+            self.is_mapping_running = False
+            
             if self.mapping_process:
-                self.mapping_process.terminate()
+                # Terminate process group nếu có
+                try:
+                    if hasattr(os, 'killpg'):
+                        os.killpg(os.getpgid(self.mapping_process.pid), signal.SIGTERM)
+                    else:
+                        self.mapping_process.terminate()
+                except:
+                    # Fallback nếu không thể kill process group
+                    try:
+                        self.mapping_process.terminate()
+                    except:
+                        pass
+                
                 try:
                     self.mapping_process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    self.mapping_process.kill()
-                    self.mapping_process.wait()
+                    # Force kill
+                    try:
+                        if hasattr(os, 'killpg'):
+                            os.killpg(os.getpgid(self.mapping_process.pid), signal.SIGKILL)
+                        else:
+                            self.mapping_process.kill()
+                    except:
+                        try:
+                            self.mapping_process.kill()
+                        except:
+                            pass
+                    try:
+                        self.mapping_process.wait(timeout=2)
+                    except:
+                        pass
+                
+                # Đóng stdout để thread đọc output có thể exit
+                try:
+                    if self.mapping_process.stdout:
+                        self.mapping_process.stdout.close()
+                except:
+                    pass
+                
                 self.mapping_process = None
             
             self.is_mapping_running = False
