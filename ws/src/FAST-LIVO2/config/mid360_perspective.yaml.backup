@@ -14,13 +14,10 @@
                     0.0, 1.0, 0.0,
                     0.0, 0.0, 1.0]
       # Calibration từ direct_visual_lidar_calibration
-      # Rcl: rotation matrix từ lidar sang camera (row-major)
-      Rcl: [0.01032985, -0.99223035, -0.12398482,
-            -0.01513897, 0.12382204, -0.99218895,
-            0.99983204, 0.01212617, -0.01374228]
-      # Pcl: translation vector từ lidar sang camera
-      Pcl: [-0.43255416, -0.05670129, 0.32875755]
-
+      Rcl: [-0.02354193, -0.99572777, -0.08928597,
+                  -0.04289612, 0.09023457, -0.99499630,
+                  0.99880213, -0.01959411, -0.04483716]
+      Pcl: [-0.11861629, -0.02130467, 0.13196738]
     time_offset: 
       imu_time_offset: 0.0
       img_time_offset: 0.1

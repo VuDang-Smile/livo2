@@ -13,6 +13,16 @@ import platform
 import yaml
 import shutil
 import signal
+import json
+import sys
+
+try:
+    import numpy as np
+    from scipy.spatial.transform import Rotation as R
+    HAS_NUMPY_SCIPY = True
+except ImportError as e:
+    HAS_NUMPY_SCIPY = False
+    print(f"Warning: numpy/scipy không được cài đặt. Chức năng convert JSON sẽ không hoạt động: {e}")
 
 try:
     import tkinter as tk
@@ -235,15 +245,17 @@ class MappingTab(ttk.Frame):
         self.log(f"Đã chọn config: {self.selected_config}")
     
     def browse_calibration_file(self):
-        """Browse để chọn file calibration yaml"""
+        """Browse để chọn file calibration (JSON hoặc YAML)"""
         initial_dir = self.workspace_path / "calibration_data" / "preprocessed"
         if not initial_dir.exists():
             initial_dir = self.workspace_path / "calibration_data"
         
         file_path = filedialog.askopenfilename(
-            title="Chọn file Calibration YAML",
+            title="Chọn file Calibration (JSON hoặc YAML)",
             initialdir=str(initial_dir),
             filetypes=[
+                ("Calibration files", "*.json *.yaml *.yml"),
+                ("JSON files", "*.json"),
                 ("YAML files", "*.yaml *.yml"),
                 ("All files", "*.*")
             ]
@@ -253,7 +265,63 @@ class MappingTab(ttk.Frame):
             self.calibration_path_var.set(file_path)
             self.calibration_file_path = file_path
             self.apply_calib_btn.config(state=tk.NORMAL)
-            self.log(f"Đã chọn file calibration: {file_path}")
+            file_type = Path(file_path).suffix.lower()
+            self.log(f"Đã chọn file calibration ({file_type}): {file_path}")
+    
+    def convert_calib_json_to_fast_livo2(self, calib_json_path):
+        """
+        Convert T_lidar_camera từ direct_visual_lidar_calibration sang Rcl và Pcl cho FAST-LIVO2
+        
+        Args:
+            calib_json_path: Đường dẫn đến file calib.json
+            
+        Returns:
+            tuple: (Rcl_list, Pcl_list) - Rcl là list 9 values, Pcl là list 3 values
+        """
+        try:
+            # Đọc file calib.json
+            with open(calib_json_path, 'r') as f:
+                calib_data = json.load(f)
+            
+            # Lấy T_lidar_camera từ results
+            if "results" not in calib_data or "T_lidar_camera" not in calib_data["results"]:
+                raise ValueError("Không tìm thấy T_lidar_camera trong calib.json")
+            
+            T_lidar_camera_values = calib_data["results"]["T_lidar_camera"]
+            
+            if len(T_lidar_camera_values) != 7:
+                raise ValueError(f"T_lidar_camera phải có 7 giá trị [x, y, z, qx, qy, qz, qw], nhưng có {len(T_lidar_camera_values)}")
+            
+            # Extract translation và quaternion
+            trans_lidar_camera = np.array(T_lidar_camera_values[0:3])  # [x, y, z]
+            quat_lidar_camera = T_lidar_camera_values[3:7]  # [qx, qy, qz, qw]
+            
+            # Tạo rotation matrix từ quaternion
+            quat = [quat_lidar_camera[3], quat_lidar_camera[0], quat_lidar_camera[1], quat_lidar_camera[2]]  # scipy uses [w, x, y, z] format
+            r = R.from_quat(quat)
+            R_lidar_camera = r.as_matrix()
+            
+            # Tạo transformation matrix T_lidar_camera (4x4)
+            T_lidar_camera_4x4 = np.eye(4)
+            T_lidar_camera_4x4[0:3, 0:3] = R_lidar_camera
+            T_lidar_camera_4x4[0:3, 3] = trans_lidar_camera
+            
+            # Inverse để có T_camera_lidar (từ lidar sang camera)
+            T_camera_lidar_4x4 = np.linalg.inv(T_lidar_camera_4x4)
+            
+            # Extract Rcl (rotation matrix từ lidar sang camera)
+            Rcl = T_camera_lidar_4x4[0:3, 0:3]
+            
+            # Extract Pcl (translation vector từ lidar sang camera)
+            Pcl = T_camera_lidar_4x4[0:3, 3]
+            
+            # Convert sang list format cho YAML (row-major cho rotation matrix)
+            Rcl_list = Rcl.flatten().tolist()  # [r11, r12, r13, r21, r22, r23, r31, r32, r33]
+            Pcl_list = Pcl.tolist()  # [x, y, z]
+            
+            return Rcl_list, Pcl_list
+        except Exception as e:
+            raise ValueError(f"Lỗi khi convert calib.json: {e}")
     
     def apply_calibration(self):
         """Apply calibration từ file đã chọn vào mid360_perspective.yaml"""
@@ -271,6 +339,10 @@ class MappingTab(ttk.Frame):
             return
         
         try:
+            self.log("=" * 70)
+            self.log("Bắt đầu quá trình tích hợp calibration...")
+            self.log(f"File calibration: {self.calibration_file_path}")
+            
             # Đường dẫn đến file config cần update (cả src và install)
             fast_livo_src_path = self.workspace_path / "src" / "FAST-LIVO2"
             config_file_src = fast_livo_src_path / "config" / "mid360_perspective.yaml"
@@ -286,8 +358,12 @@ class MappingTab(ttk.Frame):
                 config_files_to_update.append(("install", install_config_path))
             
             if not config_files_to_update:
-                messagebox.showerror("Lỗi", f"Không tìm thấy file config trong src hoặc install directory")
+                error_msg = "Không tìm thấy file config trong src hoặc install directory"
+                self.log(f"❌ {error_msg}")
+                messagebox.showerror("Lỗi", error_msg)
                 return
+            
+            self.log(f"Tìm thấy {len(config_files_to_update)} file config cần cập nhật")
             
             # Backup các file gốc
             backup_files = []
@@ -300,19 +376,63 @@ class MappingTab(ttk.Frame):
             # Sử dụng file đầu tiên để đọc (thường là src)
             config_file = config_files_to_update[0][1]
             
-            # Đọc file calibration
-            with open(self.calibration_file_path, 'r') as f:
-                calib_data = yaml.safe_load(f)
-            
-            # Extract extrin_calib data
+            # Detect loại file và extract extrin_calib data
             extrin_calib_data = None
-            if 'extrin_calib' in calib_data:
-                extrin_calib_data = calib_data['extrin_calib']
-            elif 'ros__parameters' in calib_data and 'extrin_calib' in calib_data['ros__parameters']:
-                extrin_calib_data = calib_data['ros__parameters']['extrin_calib']
+            file_ext = Path(self.calibration_file_path).suffix.lower()
             
-            if not extrin_calib_data:
-                messagebox.showerror("Lỗi", "Không tìm thấy extrin_calib trong file calibration")
+            if file_ext == '.json':
+                # File JSON từ direct_visual_lidar_calibration, cần convert
+                if not HAS_NUMPY_SCIPY:
+                    error_msg = "Cần cài đặt numpy và scipy để convert file JSON.\nChạy: pip3 install numpy scipy"
+                    self.log(f"❌ {error_msg}")
+                    messagebox.showerror("Lỗi", error_msg)
+                    return
+                
+                self.log("Phát hiện file JSON, đang convert sang format FAST-LIVO2...")
+                try:
+                    Rcl_list, Pcl_list = self.convert_calib_json_to_fast_livo2(self.calibration_file_path)
+                    extrin_calib_data = {
+                        'Rcl': Rcl_list,
+                        'Pcl': Pcl_list
+                    }
+                    self.log("✅ Convert thành công!")
+                    self.log(f"Rcl: {Rcl_list}")
+                    self.log(f"Pcl: {Pcl_list}")
+                except Exception as e:
+                    error_msg = f"Lỗi khi convert file JSON: {e}"
+                    self.log(f"❌ {error_msg}")
+                    messagebox.showerror("Lỗi", error_msg)
+                    return
+            elif file_ext in ['.yaml', '.yml']:
+                # File YAML, đọc trực tiếp
+                self.log("Phát hiện file YAML, đang đọc dữ liệu...")
+                with open(self.calibration_file_path, 'r') as f:
+                    calib_data = yaml.safe_load(f)
+                
+                # Extract extrin_calib data
+                if 'extrin_calib' in calib_data:
+                    extrin_calib_data = calib_data['extrin_calib']
+                elif 'ros__parameters' in calib_data and 'extrin_calib' in calib_data['ros__parameters']:
+                    extrin_calib_data = calib_data['ros__parameters']['extrin_calib']
+                
+                if not extrin_calib_data:
+                    error_msg = "Không tìm thấy extrin_calib trong file calibration YAML"
+                    self.log(f"❌ {error_msg}")
+                    messagebox.showerror("Lỗi", error_msg)
+                    return
+                
+                self.log("✅ Đọc dữ liệu YAML thành công!")
+            else:
+                error_msg = f"Định dạng file không được hỗ trợ: {file_ext}. Chỉ hỗ trợ .json, .yaml, .yml"
+                self.log(f"❌ {error_msg}")
+                messagebox.showerror("Lỗi", error_msg)
+                return
+            
+            # Kiểm tra Rcl và Pcl có tồn tại không
+            if 'Rcl' not in extrin_calib_data or 'Pcl' not in extrin_calib_data:
+                error_msg = "Không tìm thấy Rcl hoặc Pcl trong dữ liệu calibration"
+                self.log(f"❌ {error_msg}")
+                messagebox.showerror("Lỗi", error_msg)
                 return
             
             # Đọc file config hiện tại
@@ -343,6 +463,8 @@ class MappingTab(ttk.Frame):
             rcl_replaced = False
             pcl_replaced = False
             
+            self.log("Đang tìm và thay thế Rcl và Pcl trong file config...")
+            
             while i < len(original_lines):
                 line = original_lines[i]
                 stripped = line.strip()
@@ -353,12 +475,13 @@ class MappingTab(ttk.Frame):
                     rcl_val = extrin_calib_data.get('Rcl', [])
                     if len(rcl_val) == 9:  # 3x3 matrix
                         # Format multi-line như file gốc
-                        new_lines.append(f"{' ' * indent}Rcl: [{rcl_val[0]}, {rcl_val[1]}, {rcl_val[2]},\n")
-                        new_lines.append(f"{' ' * (indent + 12)}{rcl_val[3]}, {rcl_val[4]}, {rcl_val[5]},\n")
-                        new_lines.append(f"{' ' * (indent + 12)}{rcl_val[6]}, {rcl_val[7]}, {rcl_val[8]}]\n")
+                        new_lines.append(f"{' ' * indent}Rcl: [{rcl_val[0]:.8f}, {rcl_val[1]:.8f}, {rcl_val[2]:.8f},\n")
+                        new_lines.append(f"{' ' * (indent + 12)}{rcl_val[3]:.8f}, {rcl_val[4]:.8f}, {rcl_val[5]:.8f},\n")
+                        new_lines.append(f"{' ' * (indent + 12)}{rcl_val[6]:.8f}, {rcl_val[7]:.8f}, {rcl_val[8]:.8f}]\n")
                     else:
                         new_lines.append(f"{' ' * indent}Rcl: {rcl_val}\n")
                     rcl_replaced = True
+                    self.log("✅ Đã tìm thấy và thay thế Rcl")
                     i += 1
                     # Skip các dòng tiếp theo của Rcl cũ cho đến khi gặp dòng mới có indent <= rcl_indent
                     while i < len(original_lines):
@@ -374,8 +497,12 @@ class MappingTab(ttk.Frame):
                 # Tìm Pcl đầu tiên
                 elif 'Pcl:' in stripped and not pcl_replaced:
                     pcl_val = extrin_calib_data.get('Pcl', [])
-                    new_lines.append(f"{' ' * indent}Pcl: {pcl_val}\n")
+                    if len(pcl_val) == 3:
+                        new_lines.append(f"{' ' * indent}Pcl: [{pcl_val[0]:.8f}, {pcl_val[1]:.8f}, {pcl_val[2]:.8f}]\n")
+                    else:
+                        new_lines.append(f"{' ' * indent}Pcl: {pcl_val}\n")
                     pcl_replaced = True
+                    self.log("✅ Đã tìm thấy và thay thế Pcl")
                     i += 1
                     # Skip các dòng tiếp theo của Pcl cũ
                     while i < len(original_lines):
@@ -405,6 +532,13 @@ class MappingTab(ttk.Frame):
                     new_lines.append(line)
                     i += 1
             
+            # Kiểm tra xem đã thay thế được cả Rcl và Pcl chưa
+            if not rcl_replaced or not pcl_replaced:
+                error_msg = f"Không tìm thấy {'Rcl' if not rcl_replaced else ''} {'và ' if not rcl_replaced and not pcl_replaced else ''}{'Pcl' if not pcl_replaced else ''} trong file config để cập nhật"
+                self.log(f"❌ {error_msg}")
+                messagebox.showerror("Lỗi", error_msg)
+                return
+            
             # Ghi file mới cho tất cả các file cần update
             updated_files = []
             for location, config_file_path in config_files_to_update:
@@ -413,27 +547,50 @@ class MappingTab(ttk.Frame):
                 updated_files.append(f"{location}: {config_file_path}")
                 self.log(f"✅ Đã cập nhật file config {location}: {config_file_path}")
             
-            if rcl_replaced and pcl_replaced:
-                backup_info = "\n".join([f"{loc}: {bf}" for loc, bf in backup_files])
-                files_info = "\n".join(updated_files)
-                self.log("✅ Đã cập nhật Rcl và Pcl vào mid360_perspective.yaml")
-                messagebox.showinfo(
-                    "Thành công",
-                    f"Đã cập nhật calibration vào:\n{files_info}\n\n"
-                    f"File backup:\n{backup_info}\n\n"
-                    f"⚠️ Lưu ý: Nếu đã build package, file trong install đã được cập nhật.\n"
-                    f"Nếu chưa build, cần build lại để đồng bộ."
-                )
-            else:
-                self.log("⚠️ Không tìm thấy Rcl hoặc Pcl để cập nhật")
-                messagebox.showwarning("Cảnh báo", "Không tìm thấy Rcl hoặc Pcl trong file config để cập nhật")
+            # Hiển thị kết quả thành công
+            backup_info = "\n".join([f"  • {loc}: {bf}" for loc, bf in backup_files])
+            files_info = "\n".join([f"  • {f}" for f in updated_files])
+            
+            self.log("=" * 70)
+            self.log("✅ TÍCH HỢP CALIBRATION THÀNH CÔNG!")
+            self.log("=" * 70)
+            self.log(f"Đã cập nhật {len(updated_files)} file config:")
+            for f in updated_files:
+                self.log(f"  • {f}")
+            self.log(f"\nFile backup:")
+            for loc, bf in backup_files:
+                self.log(f"  • {loc}: {bf}")
+            self.log("=" * 70)
+            
+            messagebox.showinfo(
+                "✅ Thành công",
+                f"Đã tích hợp calibration vào mid360_perspective.yaml thành công!\n\n"
+                f"📁 File đã cập nhật:\n{files_info}\n\n"
+                f"💾 File backup:\n{backup_info}\n\n"
+                f"⚠️ Lưu ý:\n"
+                f"• Nếu đã build package, file trong install đã được cập nhật.\n"
+                f"• Nếu chưa build, cần build lại để đồng bộ.\n"
+                f"• Kiểm tra log để xem chi tiết."
+            )
             
         except Exception as e:
             import traceback
             error_msg = f"Lỗi khi apply calibration: {e}"
+            self.log("=" * 70)
+            self.log("❌ TÍCH HỢP CALIBRATION THẤT BẠI!")
+            self.log("=" * 70)
             self.log(f"❌ {error_msg}")
-            self.log(f"Chi tiết: {traceback.format_exc()}")
-            messagebox.showerror("Lỗi", error_msg)
+            self.log(f"Chi tiết lỗi:\n{traceback.format_exc()}")
+            self.log("=" * 70)
+            messagebox.showerror(
+                "❌ Thất bại",
+                f"Không thể tích hợp calibration!\n\n"
+                f"Lỗi: {error_msg}\n\n"
+                f"Vui lòng kiểm tra:\n"
+                f"• File calibration có đúng format không\n"
+                f"• File config có tồn tại không\n"
+                f"• Kiểm tra log để xem chi tiết"
+            )
     
     def get_output_path(self):
         """Lấy đường dẫn thư mục output của FAST-LIVO2"""
