@@ -7,6 +7,22 @@ GUI với 2 tabs: Theta Driver và Livox Driver 2
 import os
 import sys
 
+# Fix Qt plugin issue - set environment variables trước khi import bất kỳ module nào
+# Disable Qt plugin path từ OpenCV để tránh xung đột
+if 'QT_PLUGIN_PATH' in os.environ:
+    paths = os.environ['QT_PLUGIN_PATH'].split(':')
+    # Loại bỏ các path chứa cv2 hoặc opencv
+    paths = [p for p in paths if 'cv2' not in p and 'opencv' not in p.lower()]
+    if paths:
+        os.environ['QT_PLUGIN_PATH'] = ':'.join(paths)
+    else:
+        os.environ.pop('QT_PLUGIN_PATH', None)
+
+# Set QT_QPA_PLATFORM_PLUGIN_PATH nếu cần
+if 'QT_QPA_PLATFORM_PLUGIN_PATH' not in os.environ:
+    # Để trống hoặc set về system Qt plugins
+    os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = ''
+
 # Import rclpy nhưng không khởi tạo ngay
 # Chỉ khởi tạo khi cần (trong các tabs)
 try:

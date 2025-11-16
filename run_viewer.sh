@@ -42,6 +42,19 @@ else
     echo "Nếu chưa cài dependencies, chạy: ./install_dependencies.sh"
 fi
 
+# Fix Qt plugin issue với OpenCV
+# Unset hoặc clean QT_PLUGIN_PATH để tránh xung đột với OpenCV Qt plugins
+if [ -n "$QT_PLUGIN_PATH" ]; then
+    # Loại bỏ các path chứa cv2 hoặc opencv
+    export QT_PLUGIN_PATH=$(echo "$QT_PLUGIN_PATH" | tr ':' '\n' | grep -v cv2 | grep -v -i opencv | tr '\n' ':' | sed 's/:$//')
+    if [ -z "$QT_PLUGIN_PATH" ]; then
+        unset QT_PLUGIN_PATH
+    fi
+fi
+
+# Set QT_QPA_PLATFORM_PLUGIN_PATH để tránh load Qt plugins từ OpenCV
+export QT_QPA_PLATFORM_PLUGIN_PATH=""
+
 # Chạy GUI
 cd "$GUI_DIR"
 python3 theta_viewer.py

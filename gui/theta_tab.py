@@ -4,6 +4,20 @@ Theta Tab Module
 Chứa ThetaTab và ImageSubscriber cho Theta Driver
 """
 
+import os
+# Fix Qt plugin issue với OpenCV
+# Disable Qt backend của OpenCV để tránh xung đột với Qt plugins
+os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = ''
+# Hoặc có thể unset QT_PLUGIN_PATH nếu nó đang trỏ đến cv2/qt/plugins
+if 'QT_PLUGIN_PATH' in os.environ:
+    # Loại bỏ cv2/qt/plugins khỏi QT_PLUGIN_PATH
+    paths = os.environ['QT_PLUGIN_PATH'].split(':')
+    paths = [p for p in paths if 'cv2' not in p and 'opencv' not in p.lower()]
+    if paths:
+        os.environ['QT_PLUGIN_PATH'] = ':'.join(paths)
+    else:
+        os.environ.pop('QT_PLUGIN_PATH', None)
+
 import threading
 import subprocess
 from pathlib import Path
@@ -13,7 +27,14 @@ from rclpy.node import Node
 from rclpy.executors import SingleThreadedExecutor
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
+# Set OpenCV backend để không dùng Qt
+os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '0'
 import cv2
+# Disable Qt GUI backend của OpenCV nếu có
+try:
+    cv2.setNumThreads(1)  # Giảm thread để tránh xung đột
+except:
+    pass
 
 try:
     import tkinter as tk
