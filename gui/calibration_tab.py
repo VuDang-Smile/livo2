@@ -101,7 +101,7 @@ class CalibrationTab(ttk.Frame):
         # Instructions
         instructions = ttk.Label(
             parent,
-            text="Ghi lại rosbag với topics /image_perspective và /livox/points",
+            text="Ghi lại rosbag với topics /image_perspective và /livox/points2",
             font=("Arial", 10)
         )
         instructions.pack(pady=10)
@@ -164,7 +164,7 @@ class CalibrationTab(ttk.Frame):
         topics_frame = ttk.LabelFrame(parent, text="Topics", padding=10)
         topics_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
-        self.topics_var = tk.StringVar(value="/image_perspective /camera_info /livox/points")
+        self.topics_var = tk.StringVar(value="/image_perspective /camera_info /livox/points2")
         topics_entry = ttk.Entry(topics_frame, textvariable=self.topics_var, width=60)
         topics_entry.pack(pady=5)
         

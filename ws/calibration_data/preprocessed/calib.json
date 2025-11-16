@@ -17,23 +17,30 @@
   },
   "meta": {
     "bag_names": [
-      "calibration_20251114_104627_0.mcap"
+      "recording_20251116_104048_0.mcap",
+      "recording_20251116_104048_1.mcap",
+      "recording_20251116_104048_2.mcap",
+      "recording_20251116_104048_3.mcap",
+      "recording_20251116_104048_4.mcap",
+      "recording_20251116_104048_5.mcap",
+      "recording_20251116_104048_6.mcap",
+      "recording_20251116_104048_7.mcap"
     ],
     "camera_info_topic": "/camera_info",
-    "data_path": "/home/smile/Documents/code/livo/ws/calibration_data/bags/calibration_20251114_104627",
+    "data_path": "/home/smile/Documents/code/livo/ws/recordings/recording_20251116_104048",
     "image_topic": "/image_perspective",
     "intensity_channel": "intensity",
-    "points_topic": "/livox/points"
+    "points_topic": "/livox/points2"
   },
   "results": {
     "T_lidar_camera": [
-      -0.3250925155294142,
-      -0.42615906188936375,
-      -0.10537066126466108,
-      0.5308564957594633,
-      -0.4615478914810957,
-      0.5292470148575682,
-      -0.47440754846828764
+      -0.275678607449232,
+      -0.321581040474015,
+      0.5279843295521099,
+      0.6229241747451107,
+      -0.45189824024900777,
+      0.48075010457390005,
+      -0.42027703949913453
     ],
     "init_T_lidar_camera": [
       0.0,

@@ -1029,7 +1029,7 @@ int Preprocess::plane_judge(const PointCloudXYZI &pl, vector<orgtype> &types, ui
     return 0;
   }
 
-  if (lidar_type == AVIA)
+  if (lidar_type == AVIA || lidar_type == MID360)
   {
     double dismax_mid = disarr[0] / disarr[disarrsize / 2];
     double dismid_min = disarr[disarrsize / 2] / disarr[disarrsize - 2];

@@ -18,6 +18,7 @@ DRIVE_WS_DIR="$SCRIPT_DIR/drive_ws"
 WS_DIR="$SCRIPT_DIR/ws"
 DRIVER_BUILD_SCRIPT="$DRIVE_WS_DIR/src/livox_ros_driver2/build.sh"
 DRIVER_SETUP_SCRIPT="$DRIVE_WS_DIR/install/setup.sh"
+ROS2_SETUP_SCRIPT="/opt/ros/jazzy/setup.bash"
 
 # Danh sách packages trong ws/src
 declare -a PACKAGES=(
@@ -37,7 +38,16 @@ declare -a SELECTED=(
 # Hàm hiển thị menu
 show_menu() {
     local current_selection=$1
-    clear
+    local clear_screen=${2:-1}  # Mặc định clear, nhưng có thể tắt
+    
+    if [ "$clear_screen" -eq 1 ]; then
+        clear
+    else
+        # Không clear, chỉ in dòng phân cách
+        echo ""
+        echo -e "${BLUE}========================================${NC}"
+    fi
+    
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}    ROS2 Workspace Build Script${NC}"
     echo -e "${BLUE}========================================${NC}"
@@ -86,9 +96,16 @@ toggle_selection() {
 # Hàm xử lý input từ người dùng
 handle_menu_input() {
     local current_selection=0
+    local first_display=1  # Flag để biết lần đầu hiển thị menu
     
     while true; do
-        show_menu $current_selection
+        # Lần đầu không clear để giữ log, các lần sau clear để refresh menu
+        if [ $first_display -eq 1 ]; then
+            show_menu $current_selection 0  # Không clear
+            first_display=0
+        else
+            show_menu $current_selection 1  # Clear để refresh
+        fi
         
         # Đọc input
         IFS= read -rsn1 key
@@ -168,12 +185,57 @@ build_driver() {
         exit 1
     fi
     
+    # Tắt set -e tạm thời để xử lý lỗi tốt hơn và giữ nguyên log
+    set +e
+    
     cd "$DRIVE_WS_DIR/src/livox_ros_driver2"
+    # Chạy build và giữ nguyên toàn bộ log (không redirect)
     bash build.sh jazzy
+    local build_exit_code=$?
     cd "$SCRIPT_DIR"
     
-    echo -e "${GREEN}Build driver hoàn tất!${NC}"
-    echo ""
+    # Bật lại set -e
+    set -e
+    
+    # Kiểm tra kết quả build
+    if [ $build_exit_code -ne 0 ]; then
+        echo ""
+        echo -e "${RED}========================================${NC}"
+        echo -e "${RED}Build driver THẤT BẠI với exit code: $build_exit_code${NC}"
+        echo -e "${RED}========================================${NC}"
+        echo ""
+        echo -e "${YELLOW}Bạn có muốn tiếp tục build các packages khác không?${NC}"
+        echo -e "${YELLOW}(Lưu ý: Các packages có thể cần driver đã được build thành công)${NC}"
+        read -p "Tiếp tục? (y/n): " continue_choice
+        
+        if [[ ! "$continue_choice" =~ ^[Yy]$ ]]; then
+            echo -e "${YELLOW}Đã hủy build.${NC}"
+            exit 1
+        else
+            echo -e "${YELLOW}Tiếp tục build các packages...${NC}"
+            echo ""
+        fi
+    else
+        echo -e "${GREEN}Build driver hoàn tất!${NC}"
+        echo ""
+    fi
+}
+
+# Hàm source ROS2 base setup
+source_ros2_base() {
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}Source ROS2 Jazzy base setup...${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    
+    if [ ! -f "$ROS2_SETUP_SCRIPT" ]; then
+        echo -e "${RED}Lỗi: Không tìm thấy ROS2 Jazzy tại: $ROS2_SETUP_SCRIPT${NC}"
+        echo -e "${RED}Vui lòng cài đặt ROS2 Jazzy trước!${NC}"
+        exit 1
+    else
+        source "$ROS2_SETUP_SCRIPT"
+        echo -e "${GREEN}Đã source ROS2 Jazzy base setup thành công!${NC}"
+        echo ""
+    fi
 }
 
 # Hàm source setup.sh
@@ -247,6 +309,9 @@ main() {
     echo -e "${BLUE}ROS2 Workspace Build Script${NC}"
     echo ""
     
+    # Bước 0: Source ROS2 base setup (bắt buộc)
+    source_ros2_base
+    
     # Bước 1: Hỏi có build driver không
     echo -e "${YELLOW}Bước 1: Build livox_ros_driver2?${NC}"
     read -p "Có build driver không? (y/n): " build_driver_choice
@@ -268,6 +333,12 @@ main() {
     # Bước 4: Build packages
     echo -e "${YELLOW}Bước 4: Build packages${NC}"
     build_packages
+    
+    # Tạm dừng trước khi thoát
+    echo ""
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${YELLOW}Nhấn phím bất kỳ để thoát...${NC}"
+    read -n 1 -s
 }
 
 # Chạy main function

@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
   const double resolution = 0.02;
   std::unordered_map<Eigen::Vector3i, Eigen::Vector4d, gtsam_ext::Vector3iHash> voxelmap;
 
-  for(rosbag::MessageInstance const m : rosbag::View(bag, rosbag::TopicQuery("/livox/points"))) {
+  for(rosbag::MessageInstance const m : rosbag::View(bag, rosbag::TopicQuery("/livox/points2"))) {
     const auto points_msg = m.instantiate<sensor_msgs::PointCloud2>();
     const auto raw_points = glim::extract_raw_points(points_msg);
 

@@ -35,7 +35,7 @@ $ ros2 bag info livox/rosbag2_2023_03_09-13_42_46/
 # Start:             Mar  9 2023 13:42:46.665 (1678336966.665)
 # End:               Mar  9 2023 13:43:02.316 (1678336982.316)
 # Messages:          2972
-# Topic information: Topic: /livox/points | Type: sensor_msgs/msg/PointCloud2 | Count: 157 | Serialization Format: cdr
+# Topic information: Topic: /livox/points2 | Type: sensor_msgs/msg/PointCloud2 | Count: 157 | Serialization Format: cdr
 #                    Topic: /livox/imu | Type: sensor_msgs/msg/Imu | Count: 2597 | Serialization Format: cdr
 #                    Topic: /livox/lidar | Type: livox_interfaces/msg/CustomMsg | Count: 157 | Serialization Format: cdr
 #                    Topic: /image | Type: sensor_msgs/msg/Image | Count: 30 | Serialization Format: cdr
@@ -156,7 +156,7 @@ Once the calibration is completed, open ```livox_preprocessed/calib.json``` with
     "data_path": "livox",
     "image_topic": "/image",
     "intensity_channel": "intensity",
-    "points_topic": "/livox/points"
+    "points_topic": "/livox/points2"
   },
   "results": {
     "T_lidar_camera": [

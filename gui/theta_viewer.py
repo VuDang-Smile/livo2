@@ -27,6 +27,9 @@ except ImportError as e:
 from theta_tab import ThetaTab
 from livox_tab import LivoxTab
 from calibration_tab import CalibrationTab
+from mapping_tab import MappingTab
+from recording_tab import RecordingTab
+from replay_tab import ReplayTab
 
 
 class MainGUI:
@@ -53,6 +56,18 @@ class MainGUI:
         self.calibration_tab = CalibrationTab(self.notebook)
         self.notebook.add(self.calibration_tab, text="Calibration")
         
+        # Tạo tab Mapping
+        self.mapping_tab = MappingTab(self.notebook)
+        self.notebook.add(self.mapping_tab, text="Mapping")
+        
+        # Tạo tab Recording
+        self.recording_tab = RecordingTab(self.notebook)
+        self.notebook.add(self.recording_tab, text="Recording")
+        
+        # Tạo tab Replay
+        self.replay_tab = ReplayTab(self.notebook)
+        self.notebook.add(self.replay_tab, text="Replay")
+        
         # Bind events
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
     
@@ -71,6 +86,24 @@ class MainGUI:
         if hasattr(self.calibration_tab, 'stop_record'):
             if self.calibration_tab.is_recording:
                 self.calibration_tab.stop_record()
+        
+        # Dừng mapping nếu đang chạy
+        if hasattr(self.mapping_tab, 'stop_mapping'):
+            if self.mapping_tab.is_mapping_running:
+                self.mapping_tab.stop_mapping()
+        if hasattr(self.mapping_tab, 'stop_rviz'):
+            if self.mapping_tab.is_rviz_running:
+                self.mapping_tab.stop_rviz()
+        
+        # Dừng recording nếu đang chạy
+        if hasattr(self.recording_tab, 'stop_recording'):
+            if self.recording_tab.is_recording:
+                self.recording_tab.stop_recording()
+        
+        # Dừng replay nếu đang chạy
+        if hasattr(self.replay_tab, 'stop_replay'):
+            if self.replay_tab.is_replaying:
+                self.replay_tab.stop_replay()
         
         # Shutdown ROS nếu đã được khởi tạo
         if rclpy and rclpy.ok():
