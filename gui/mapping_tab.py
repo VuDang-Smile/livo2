@@ -15,6 +15,7 @@ import shutil
 import signal
 import json
 import sys
+import re
 
 try:
     import numpy as np
@@ -51,6 +52,7 @@ class MappingTab(ttk.Frame):
         self.is_mapping_running = False
         self.is_rviz_running = False
         self.selected_config = "mid360_perspective"  # Default
+        self.performance_mode = "performance"  # Default: performance mode
         self.output_path = None
         self.calibration_file_path = None
         
@@ -94,6 +96,27 @@ class MappingTab(ttk.Frame):
             variable=self.config_var,
             value="avia_perspective",
             command=self.on_config_change
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # Frame chọn Performance mode
+        perf_frame = ttk.LabelFrame(control_frame, text="Performance Mode", padding="5")
+        perf_frame.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        self.performance_mode_var = tk.StringVar(value="performance")
+        ttk.Radiobutton(
+            perf_frame,
+            text="⚡ Performance",
+            variable=self.performance_mode_var,
+            value="performance",
+            command=self.on_performance_mode_change
+        ).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Radiobutton(
+            perf_frame,
+            text="🎯 Quality",
+            variable=self.performance_mode_var,
+            value="quality",
+            command=self.on_performance_mode_change
         ).pack(side=tk.LEFT, padx=5)
         
         # Frame chọn file calibration
@@ -243,6 +266,14 @@ class MappingTab(ttk.Frame):
         """Xử lý khi thay đổi config"""
         self.selected_config = self.config_var.get()
         self.log(f"Đã chọn config: {self.selected_config}")
+    
+    def on_performance_mode_change(self):
+        """Xử lý khi thay đổi performance mode"""
+        self.performance_mode = self.performance_mode_var.get()
+        mode_name = "Performance" if self.performance_mode == "performance" else "Quality"
+        self.log(f"Đã chọn mode: {mode_name}")
+        if self.is_mapping_running:
+            self.log("⚠️ Cần restart mapping để áp dụng thay đổi")
     
     def browse_calibration_file(self):
         """Browse để chọn file calibration (JSON hoặc YAML)"""
@@ -694,6 +725,183 @@ class MappingTab(ttk.Frame):
             self.log(f"❌ {error_msg}")
             messagebox.showerror("Lỗi", error_msg)
     
+    def apply_performance_mode_to_config(self):
+        """Áp dụng performance mode vào config file"""
+        try:
+            if self.selected_config != "mid360_perspective":
+                # Chỉ hỗ trợ cho mid360_perspective hiện tại
+                return True
+            
+            config_file = self.workspace_path / "src" / "FAST-LIVO2" / "config" / "mid360_perspective.yaml"
+            if not config_file.exists():
+                self.log("⚠️ Không tìm thấy config file, bỏ qua điều chỉnh performance mode")
+                return True
+            
+            # Đọc config hiện tại
+            with open(config_file, 'r') as f:
+                config_data = yaml.safe_load(f)
+            
+            # Điều chỉnh tham số dựa trên performance mode
+            if self.performance_mode == "performance":
+                # Performance mode: tối ưu tốc độ
+                if 'publish' in config_data.get('/**', {}).get('ros__parameters', {}):
+                    config_data['/**']['ros__parameters']['publish']['dense_map_en'] = False
+                    config_data['/**']['ros__parameters']['publish']['pub_scan_num'] = 3
+                if 'preprocess' in config_data.get('/**', {}).get('ros__parameters', {}):
+                    config_data['/**']['ros__parameters']['preprocess']['point_filter_num'] = 2
+                    config_data['/**']['ros__parameters']['preprocess']['filter_size_surf'] = 0.15
+                if 'vio' in config_data.get('/**', {}).get('ros__parameters', {}):
+                    config_data['/**']['ros__parameters']['vio']['max_iterations'] = 3
+                    config_data['/**']['ros__parameters']['vio']['patch_size'] = 6
+                    config_data['/**']['ros__parameters']['vio']['patch_pyrimid_level'] = 3
+                if 'lio' in config_data.get('/**', {}).get('ros__parameters', {}):
+                    config_data['/**']['ros__parameters']['lio']['max_iterations'] = 3
+                    config_data['/**']['ros__parameters']['lio']['voxel_size'] = 0.6
+                    config_data['/**']['ros__parameters']['lio']['max_points_num'] = 40
+                if 'local_map' in config_data.get('/**', {}).get('ros__parameters', {}):
+                    config_data['/**']['ros__parameters']['local_map']['half_map_size'] = 80
+            else:
+                # Quality mode: tối ưu chất lượng
+                if 'publish' in config_data.get('/**', {}).get('ros__parameters', {}):
+                    config_data['/**']['ros__parameters']['publish']['dense_map_en'] = True
+                    config_data['/**']['ros__parameters']['publish']['pub_scan_num'] = 1
+                if 'preprocess' in config_data.get('/**', {}).get('ros__parameters', {}):
+                    config_data['/**']['ros__parameters']['preprocess']['point_filter_num'] = 1
+                    config_data['/**']['ros__parameters']['preprocess']['filter_size_surf'] = 0.1
+                if 'vio' in config_data.get('/**', {}).get('ros__parameters', {}):
+                    config_data['/**']['ros__parameters']['vio']['max_iterations'] = 5
+                    config_data['/**']['ros__parameters']['vio']['patch_size'] = 8
+                    config_data['/**']['ros__parameters']['vio']['patch_pyrimid_level'] = 4
+                if 'lio' in config_data.get('/**', {}).get('ros__parameters', {}):
+                    config_data['/**']['ros__parameters']['lio']['max_iterations'] = 5
+                    config_data['/**']['ros__parameters']['lio']['voxel_size'] = 0.5
+                    config_data['/**']['ros__parameters']['lio']['max_points_num'] = 50
+                if 'local_map' in config_data.get('/**', {}).get('ros__parameters', {}):
+                    config_data['/**']['ros__parameters']['local_map']['half_map_size'] = 100
+            
+            # Ghi lại config (giữ nguyên format YAML gốc bằng cách đọc và thay thế)
+            with open(config_file, 'r') as f:
+                original_lines = f.readlines()
+            
+            # Tìm và thay thế các giá trị (giữ nguyên format)
+            new_lines = []
+            in_publish_section = False
+            in_preprocess_section = False
+            in_vio_section = False
+            in_lio_section = False
+            in_local_map_section = False
+            
+            for i, line in enumerate(original_lines):
+                new_line = line
+                stripped = line.strip()
+                
+                # Detect sections
+                if 'publish:' in stripped:
+                    in_publish_section = True
+                    in_preprocess_section = False
+                    in_vio_section = False
+                    in_lio_section = False
+                    in_local_map_section = False
+                elif 'preprocess:' in stripped:
+                    in_publish_section = False
+                    in_preprocess_section = True
+                    in_vio_section = False
+                    in_lio_section = False
+                    in_local_map_section = False
+                elif 'vio:' in stripped:
+                    in_publish_section = False
+                    in_preprocess_section = False
+                    in_vio_section = True
+                    in_lio_section = False
+                    in_local_map_section = False
+                elif 'lio:' in stripped:
+                    in_publish_section = False
+                    in_preprocess_section = False
+                    in_vio_section = False
+                    in_lio_section = True
+                    in_local_map_section = False
+                elif 'local_map:' in stripped:
+                    in_publish_section = False
+                    in_preprocess_section = False
+                    in_vio_section = False
+                    in_lio_section = False
+                    in_local_map_section = True
+                
+                # Replace values based on section and mode
+                if in_publish_section:
+                    if 'dense_map_en:' in stripped:
+                        if self.performance_mode == "performance":
+                            new_line = re.sub(r'dense_map_en:\s*(true|false)', 'dense_map_en: false', line)
+                        else:
+                            new_line = re.sub(r'dense_map_en:\s*(true|false)', 'dense_map_en: true', line)
+                    elif 'pub_scan_num:' in stripped:
+                        if self.performance_mode == "performance":
+                            new_line = re.sub(r'pub_scan_num:\s*\d+', 'pub_scan_num: 3', line)
+                        else:
+                            new_line = re.sub(r'pub_scan_num:\s*\d+', 'pub_scan_num: 1', line)
+                elif in_preprocess_section:
+                    if 'point_filter_num:' in stripped:
+                        if self.performance_mode == "performance":
+                            new_line = re.sub(r'point_filter_num:\s*\d+', 'point_filter_num: 2', line)
+                        else:
+                            new_line = re.sub(r'point_filter_num:\s*\d+', 'point_filter_num: 1', line)
+                    elif 'filter_size_surf:' in stripped:
+                        if self.performance_mode == "performance":
+                            new_line = re.sub(r'filter_size_surf:\s*[\d.]+', 'filter_size_surf: 0.15', line)
+                        else:
+                            new_line = re.sub(r'filter_size_surf:\s*[\d.]+', 'filter_size_surf: 0.1', line)
+                elif in_vio_section:
+                    if 'max_iterations:' in stripped:
+                        if self.performance_mode == "performance":
+                            new_line = re.sub(r'max_iterations:\s*\d+', 'max_iterations: 3', line)
+                        else:
+                            new_line = re.sub(r'max_iterations:\s*\d+', 'max_iterations: 5', line)
+                    elif 'patch_size:' in stripped:
+                        if self.performance_mode == "performance":
+                            new_line = re.sub(r'patch_size:\s*\d+', 'patch_size: 6', line)
+                        else:
+                            new_line = re.sub(r'patch_size:\s*\d+', 'patch_size: 8', line)
+                    elif 'patch_pyrimid_level:' in stripped:
+                        if self.performance_mode == "performance":
+                            new_line = re.sub(r'patch_pyrimid_level:\s*\d+', 'patch_pyrimid_level: 3', line)
+                        else:
+                            new_line = re.sub(r'patch_pyrimid_level:\s*\d+', 'patch_pyrimid_level: 4', line)
+                elif in_lio_section:
+                    if 'max_iterations:' in stripped:
+                        if self.performance_mode == "performance":
+                            new_line = re.sub(r'max_iterations:\s*\d+', 'max_iterations: 3', line)
+                        else:
+                            new_line = re.sub(r'max_iterations:\s*\d+', 'max_iterations: 5', line)
+                    elif 'voxel_size:' in stripped:
+                        if self.performance_mode == "performance":
+                            new_line = re.sub(r'voxel_size:\s*[\d.]+', 'voxel_size: 0.6', line)
+                        else:
+                            new_line = re.sub(r'voxel_size:\s*[\d.]+', 'voxel_size: 0.5', line)
+                    elif 'max_points_num:' in stripped:
+                        if self.performance_mode == "performance":
+                            new_line = re.sub(r'max_points_num:\s*\d+', 'max_points_num: 40', line)
+                        else:
+                            new_line = re.sub(r'max_points_num:\s*\d+', 'max_points_num: 50', line)
+                elif in_local_map_section:
+                    if 'half_map_size:' in stripped:
+                        if self.performance_mode == "performance":
+                            new_line = re.sub(r'half_map_size:\s*\d+', 'half_map_size: 80', line)
+                        else:
+                            new_line = re.sub(r'half_map_size:\s*\d+', 'half_map_size: 100', line)
+                
+                new_lines.append(new_line)
+            
+            # Ghi lại file
+            with open(config_file, 'w') as f:
+                f.writelines(new_lines)
+            
+            mode_name = "Performance" if self.performance_mode == "performance" else "Quality"
+            self.log(f"✅ Đã áp dụng {mode_name} mode vào config")
+            return True
+        except Exception as e:
+            self.log(f"⚠️ Không thể áp dụng performance mode: {e}")
+            return True  # Vẫn tiếp tục start mapping
+    
     def start_mapping(self):
         """Start FAST-LIVO2 mapping"""
         if self.is_mapping_running:
@@ -709,6 +917,9 @@ class MappingTab(ttk.Frame):
                     "Vui lòng build workspace trước."
                 )
                 return
+            
+            # Áp dụng performance mode vào config
+            self.apply_performance_mode_to_config()
             
             # Chọn launch file dựa trên config
             if self.selected_config == "mid360_perspective":

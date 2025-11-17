@@ -19,23 +19,23 @@
                   0.99880213, -0.01959411, -0.04483716]
       Pcl: [-0.11861629, -0.02130467, 0.13196738]
     time_offset: 
-      imu_time_offset: 0.0
+      imu_time_offset: 0.0  # Có thể cần điều chỉnh nếu IMU/LiDAR không sync
       img_time_offset: 0.1
       exposure_time_init: 0.0
 
     preprocess:
-      point_filter_num: 1  # Tăng từ 1 lên 2 để giảm số points (skip mỗi 2 points)
-      filter_size_surf: 0.1  # Tăng từ 0.1 lên 0.15 để giảm số points
+      point_filter_num: 2  # Tăng từ 1 lên 2 để giảm số points (skip mỗi 2 points)
+      filter_size_surf: 0.15  # Tăng từ 0.1 lên 0.15 để giảm số points
       lidar_type: 8 # Livox MID360 LiDAR
       scan_line: 6  # MID360 có 6 scan lines
       blind: 0.8
 
     vio:
-      max_iterations: 5  # Giảm từ 5 xuống 3 để tăng tốc
-      outlier_threshold: 1000 # 78 100 156 #100 200 500 700 infinite
-      img_point_cov: 100 # 100 1000 
-      patch_size: 8  # Giảm từ 8 xuống 6 để tăng tốc
-      patch_pyrimid_level: 4  # Giảm từ 4 xuống 3 để tăng tốc
+      max_iterations: 3  # Giảm từ 5 xuống 3 để tăng tốc
+      outlier_threshold: 1000
+      img_point_cov: 100
+      patch_size: 6  # Giảm từ 8 xuống 6 để tăng tốc
+      patch_pyrimid_level: 3  # Giảm từ 4 xuống 3 để tăng tốc
       normal_en: true
       raycast_en: false
       inverse_composition_en: false
@@ -45,24 +45,24 @@
     imu:
       imu_en: true
       imu_int_frame: 30
-      acc_cov: 0.5 # 0.2
-      gyr_cov: 0.3 # 0.5
-      b_acc_cov: 0.0001 # 0.1
-      b_gyr_cov: 0.0001 # 0.1
+      acc_cov: 0.5
+      gyr_cov: 0.3
+      b_acc_cov: 0.0001
+      b_gyr_cov: 0.0001
 
     lio:
-      max_iterations: 5  # Giảm từ 5 xuống 3 để tăng tốc
+      max_iterations: 3  # Giảm từ 5 xuống 3 để tăng tốc
       dept_err: 0.02
       beam_err: 0.05
-      min_eigen_value: 0.0025 # 0.005
-      voxel_size: 0.5  # Tăng từ 0.5 lên 0.6 để giảm số voxels
+      min_eigen_value: 0.0025
+      voxel_size: 0.6  # Tăng từ 0.5 lên 0.6 để giảm số voxels
       max_layer: 2
-      max_points_num: 50  # Giảm từ 50 xuống 40 để tăng tốc
+      max_points_num: 40  # Giảm từ 50 xuống 40 để tăng tốc
       layer_init_num: [5, 5, 5, 5, 5]
 
     local_map:  
       map_sliding_en: false
-      half_map_size: 100  # Giảm từ 100 xuống 80 để giảm memory
+      half_map_size: 80  # Giảm từ 100 xuống 80 để giảm memory
       sliding_thresh: 8.0
 
     uav:
@@ -70,10 +70,10 @@
       gravity_align_en: false
 
     publish:
-      dense_map_en: true  # Tắt dense map để giảm tải RViz (chỉ publish sparse map)
+      dense_map_en: false  # Tắt dense map để giảm tải RViz (chỉ publish sparse map)
       pub_effect_point_en: false 
       pub_plane_en: false
-      pub_scan_num: 1  # Tăng từ 1 lên 3 để giảm tần suất publish (chỉ publish mỗi 3 scans)
+      pub_scan_num: 3  # Tăng từ 1 lên 3 để giảm tần suất publish (chỉ publish mỗi 3 scans)
       blind_rgb_points: 0.0
 
     evo:
@@ -82,9 +82,7 @@
 
     pcd_save:
       pcd_save_en: false
-      colmap_output_en: false # need to set interval = -1
+      colmap_output_en: false
       filter_size_pcd: 0.15
       interval: -1
-      # how many LiDAR frames saved in each pcd file;
-      # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.
 
