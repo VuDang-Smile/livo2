@@ -35,7 +35,6 @@ class CalibrationTab(ttk.Frame):
         self.preprocess_process = None
         self.initial_guess_process = None
         self.calibrate_process = None
-        self.perspective_converter_process = None
         
         # Paths
         self.bag_output_dir = None
@@ -43,7 +42,6 @@ class CalibrationTab(ttk.Frame):
         
         # State
         self.is_recording = False
-        self.is_perspective_converter_running = False
         self.current_step = "idle"  # idle, recording, preprocessing, calibrating
         
         self.create_widgets()
@@ -101,7 +99,7 @@ class CalibrationTab(ttk.Frame):
         # Instructions
         instructions = ttk.Label(
             parent,
-            text="Ghi lại rosbag với topics /image_perspective và /livox/points2",
+            text="Ghi lại rosbag với topics /image_raw (equirectangular) và /livox/points2 hoặc /livox/lidar",
             font=("Arial", 10)
         )
         instructions.pack(pady=10)
@@ -122,49 +120,11 @@ class CalibrationTab(ttk.Frame):
         )
         browse_btn.pack(side=tk.LEFT, padx=5)
         
-        # Perspective Converter Control
-        converter_frame = ttk.LabelFrame(parent, text="Perspective Converter", padding=10)
-        converter_frame.pack(fill=tk.X, padx=20, pady=10)
-        
-        ttk.Label(
-            converter_frame,
-            text="Cần chạy perspective converter để publish /camera_info topic trước khi record",
-            font=("Arial", 9),
-            foreground="blue"
-        ).pack(anchor=tk.W, pady=5)
-        
-        converter_btn_frame = ttk.Frame(converter_frame)
-        converter_btn_frame.pack(fill=tk.X, pady=5)
-        
-        self.launch_converter_btn = ttk.Button(
-            converter_btn_frame,
-            text="Launch Perspective Converter",
-            command=self.launch_perspective_converter,
-            style="Accent.TButton"
-        )
-        self.launch_converter_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.stop_converter_btn = ttk.Button(
-            converter_btn_frame,
-            text="Stop Converter",
-            command=self.stop_perspective_converter,
-            state=tk.DISABLED
-        )
-        self.stop_converter_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.converter_status_label = ttk.Label(
-            converter_frame,
-            text="Trạng thái: Chưa chạy",
-            font=("Arial", 9),
-            foreground="gray"
-        )
-        self.converter_status_label.pack(anchor=tk.W, pady=5)
-        
         # Topics to record
         topics_frame = ttk.LabelFrame(parent, text="Topics", padding=10)
         topics_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
-        self.topics_var = tk.StringVar(value="/image_perspective /camera_info /livox/points2")
+        self.topics_var = tk.StringVar(value="/image_raw /livox/points2")
         topics_entry = ttk.Entry(topics_frame, textvariable=self.topics_var, width=60)
         topics_entry.pack(pady=5)
         
@@ -249,16 +209,39 @@ class CalibrationTab(ttk.Frame):
         )
         browse_output_btn.pack(side=tk.LEFT, padx=5)
         
-        # Camera parameters (optional, có thể auto-detect)
-        camera_frame = ttk.LabelFrame(parent, text="Camera Parameters (Optional)", padding=10)
-        camera_frame.pack(fill=tk.X, padx=20, pady=10)
+        # Camera model selection
+        camera_model_frame = ttk.LabelFrame(parent, text="Camera Model", padding=10)
+        camera_model_frame.pack(fill=tk.X, padx=20, pady=10)
         
         ttk.Label(
-            camera_frame,
-            text="Nếu để trống, sẽ tự động detect từ camera_info topic",
-            font=("Arial", 9),
+            camera_model_frame,
+            text="Chọn loại camera model:",
+            font=("Arial", 9)
+        ).pack(anchor=tk.W, pady=5)
+        
+        self.camera_model_var = tk.StringVar(value="equirectangular")
+        camera_model_options = [
+            ("Equirectangular (360°)", "equirectangular"),
+            ("Pinhole/Plumb Bob", "plumb_bob"),
+            ("Fisheye/Equidistant", "fisheye"),
+            ("Omnidirectional", "omnidir"),
+            ("Auto-detect", "auto")
+        ]
+        
+        for text, value in camera_model_options:
+            ttk.Radiobutton(
+                camera_model_frame,
+                text=text,
+                variable=self.camera_model_var,
+                value=value
+            ).pack(anchor=tk.W, padx=20)
+        
+        ttk.Label(
+            camera_model_frame,
+            text="Lưu ý: Với equirectangular, intrinsics sẽ tự động được tính từ image size",
+            font=("Arial", 8),
             foreground="gray"
-        ).pack()
+        ).pack(anchor=tk.W, pady=5)
         
         # Options
         options_frame = ttk.LabelFrame(parent, text="Options", padding=10)
@@ -659,100 +642,6 @@ class CalibrationTab(ttk.Frame):
         except Exception as e:
             print(f"Lỗi khi log: {e}")
     
-    def launch_perspective_converter(self):
-        """Launch perspective converter node"""
-        if self.is_perspective_converter_running:
-            messagebox.showwarning("Cảnh báo", "Perspective converter đang chạy")
-            return
-        
-        setup_script = self.workspace_path / "install" / "setup.sh"
-        if not setup_script.exists():
-            messagebox.showerror("Lỗi", f"Không tìm thấy setup.sh tại: {setup_script}")
-            return
-        
-        # Build launch command
-        # ROS2 launch format: ros2 launch <package_name> <launch_file_name>
-        package_name = "theta_driver"
-        launch_file_name = "theta_perspective_calibration.launch.py"
-        ros2_setup = "/opt/ros/jazzy/setup.bash"
-        cmd = f"source {ros2_setup} && source {setup_script} && ros2 launch {package_name} {launch_file_name}"
-        
-        self.log_record("Đang launch perspective converter...")
-        
-        try:
-            # Sử dụng env để đảm bảo clean environment
-            env = os.environ.copy()
-            if 'ROS_DOMAIN_ID' not in env:
-                env['ROS_DOMAIN_ID'] = '0'
-            
-            self.perspective_converter_process = subprocess.Popen(
-                cmd,
-                shell=True,
-                executable="/bin/bash",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                bufsize=1,
-                env=env
-            )
-            
-            self.is_perspective_converter_running = True
-            self.launch_converter_btn.config(state=tk.DISABLED)
-            self.stop_converter_btn.config(state=tk.NORMAL)
-            self.converter_status_label.config(text="Trạng thái: Đang chạy", foreground="green")
-            self.log_record("Perspective converter đã được launch")
-            
-            # Start thread để monitor process
-            threading.Thread(target=self.monitor_converter_process, daemon=True).start()
-            
-        except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể launch perspective converter: {e}")
-            self.log_record(f"Lỗi: {e}")
-    
-    def stop_perspective_converter(self):
-        """Stop perspective converter node"""
-        if self.perspective_converter_process:
-            try:
-                self.perspective_converter_process.terminate()
-                self.perspective_converter_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.perspective_converter_process.kill()
-            except Exception as e:
-                self.log_record(f"Lỗi khi dừng converter: {e}")
-            
-            self.perspective_converter_process = None
-            self.is_perspective_converter_running = False
-            self.launch_converter_btn.config(state=tk.NORMAL)
-            self.stop_converter_btn.config(state=tk.DISABLED)
-            self.converter_status_label.config(text="Trạng thái: Đã dừng", foreground="gray")
-            self.log_record("Perspective converter đã dừng")
-    
-    def monitor_converter_process(self):
-        """Monitor perspective converter process"""
-        if not self.perspective_converter_process:
-            return
-        
-        for line in iter(self.perspective_converter_process.stdout.readline, ''):
-            if not line:
-                break
-            # Log important messages
-            if "error" in line.lower() or "warn" in line.lower():
-                self.log_record(f"Converter: {line.strip()}")
-        
-        if self.perspective_converter_process.poll() is not None:
-            self.is_perspective_converter_running = False
-            self.after(0, partial(self._update_converter_stopped))
-    
-    def _update_converter_stopped(self):
-        """Helper function để update UI sau khi converter dừng"""
-        try:
-            self.launch_converter_btn.config(state=tk.NORMAL)
-            self.stop_converter_btn.config(state=tk.DISABLED)
-            self.converter_status_label.config(text="Trạng thái: Đã dừng", foreground="gray")
-            self.log_record("Perspective converter đã dừng")
-        except Exception as e:
-            print(f"Lỗi khi update UI: {e}")
-    
     # ========== Preprocessing Methods ==========
     
     def browse_preprocess_input(self):
@@ -796,6 +685,11 @@ class CalibrationTab(ttk.Frame):
             return
         
         cmd_parts = ["ros2", "run", "direct_visual_lidar_calibration", "preprocess"]
+        
+        # Add camera model option
+        camera_model = self.camera_model_var.get()
+        if camera_model and camera_model != "auto":
+            cmd_parts.extend(["--camera_model", camera_model])
         
         if self.auto_topic_var.get():
             cmd_parts.append("-a")
