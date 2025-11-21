@@ -17,25 +17,23 @@
   },
   "meta": {
     "bag_names": [
-      "recording_20251116_205226_0.mcap",
-      "recording_20251116_205226_1.mcap",
-      "recording_20251116_205226_2.mcap"
+      "calibration_20251121_105353_0.mcap"
     ],
     "camera_info_topic": "/camera_info",
-    "data_path": "/home/smile/Documents/code/livo/ws/recordings/recording_20251116_205226",
+    "data_path": "/home/smile/Documents/code/livo/ws/calibration_data/bags/calibration_20251121_105353",
     "image_topic": "/image_perspective",
     "intensity_channel": "intensity",
     "points_topic": "/livox/points2"
   },
   "results": {
     "T_lidar_camera": [
-      -0.13551564794569096,
-      -0.11360133103136473,
-      -0.025871800954715578,
-      0.5381945891378962,
-      -0.47129348635943763,
-      0.5054343382535273,
-      -0.4824574215949806
+      -0.28666745552607165,
+      0.011781359826138559,
+      -0.013999155868721299,
+      0.5459523937266715,
+      -0.47405263467445996,
+      0.5444784193032133,
+      -0.4251509546683328
     ],
     "init_T_lidar_camera": [
       0.0,

@@ -1,8 +1,8 @@
     extrin_calib:
       # Calibration từ direct_visual_lidar_calibration
       # Rcl: rotation matrix từ lidar sang camera (row-major)
-      Rcl: [-0.02354193, -0.99572777, -0.08928597,
-            -0.04289612, 0.09023457, -0.99499630,
-            0.99880213, -0.01959411, -0.04483716]
+      Rcl: [-0.04557983, -0.98044722, -0.19143073,
+            0.05199850, 0.18904153, -0.98059138,
+            0.99760645, -0.05464930, 0.04236530]
       # Pcl: translation vector từ lidar sang camera
-      Pcl: [-0.11861629, -0.02130467, 0.13196738]
+      Pcl: [-0.00419512, -0.00104834, 0.28721823]

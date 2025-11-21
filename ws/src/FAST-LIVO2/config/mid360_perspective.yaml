@@ -6,7 +6,7 @@
       imu_topic: "/livox/imu"           # IMU từ Livox driver
       img_en: 1
       lidar_en: 1
-      ros_driver_bug_fix: false
+      ros_driver_bug_fix: true
 
     extrin_calib:
       extrinsic_T: [0.04165, 0.02326, -0.0284]  # IMU to LiDAR (giữ nguyên)
@@ -14,28 +14,28 @@
                     0.0, 1.0, 0.0,
                     0.0, 0.0, 1.0]
       # Calibration từ direct_visual_lidar_calibration
-      Rcl: [-0.02354193, -0.99572777, -0.08928597,
-                  -0.04289612, 0.09023457, -0.99499630,
-                  0.99880213, -0.01959411, -0.04483716]
-      Pcl: [-0.11861629, -0.02130467, 0.13196738]
+      Rcl: [-0.04557983, -0.98044722, -0.19143073,
+                  0.05199850, 0.18904153, -0.98059138,
+                  0.99760645, -0.05464930, 0.04236530]
+      Pcl: [-0.00419512, -0.00104834, 0.28721823]
     time_offset: 
       imu_time_offset: 0.0
       img_time_offset: 0.1
       exposure_time_init: 0.0
 
     preprocess:
-      point_filter_num: 1  # Tăng từ 1 lên 2 để giảm số points (skip mỗi 2 points)
-      filter_size_surf: 0.1  # Tăng từ 0.1 lên 0.15 để giảm số points
+      point_filter_num: 2  # Tăng từ 1 lên 2 để giảm số points (skip mỗi 2 points)
+      filter_size_surf: 0.15  # Tăng từ 0.1 lên 0.15 để giảm số points
       lidar_type: 8 # Livox MID360 LiDAR
       scan_line: 6  # MID360 có 6 scan lines
       blind: 0.8
 
     vio:
-      max_iterations: 5  # Giảm từ 5 xuống 3 để tăng tốc
+      max_iterations: 3  # Giảm từ 5 xuống 3 để tăng tốc
       outlier_threshold: 1000 # 78 100 156 #100 200 500 700 infinite
       img_point_cov: 100 # 100 1000 
-      patch_size: 8  # Giảm từ 8 xuống 6 để tăng tốc
-      patch_pyrimid_level: 4  # Giảm từ 4 xuống 3 để tăng tốc
+      patch_size: 6  # Giảm từ 8 xuống 6 để tăng tốc
+      patch_pyrimid_level: 3  # Giảm từ 4 xuống 3 để tăng tốc
       normal_en: true
       raycast_en: false
       inverse_composition_en: false
@@ -51,18 +51,18 @@
       b_gyr_cov: 0.0001 # 0.1
 
     lio:
-      max_iterations: 5  # Giảm từ 5 xuống 3 để tăng tốc
+      max_iterations: 3  # Giảm từ 5 xuống 3 để tăng tốc
       dept_err: 0.02
       beam_err: 0.05
       min_eigen_value: 0.0025 # 0.005
-      voxel_size: 0.5  # Tăng từ 0.5 lên 0.6 để giảm số voxels
+      voxel_size: 0.6  # Tăng từ 0.5 lên 0.6 để giảm số voxels
       max_layer: 2
-      max_points_num: 50  # Giảm từ 50 xuống 40 để tăng tốc
+      max_points_num: 40  # Giảm từ 50 xuống 40 để tăng tốc
       layer_init_num: [5, 5, 5, 5, 5]
 
     local_map:  
       map_sliding_en: false
-      half_map_size: 100  # Giảm từ 100 xuống 80 để giảm memory
+      half_map_size: 80  # Giảm từ 100 xuống 80 để giảm memory
       sliding_thresh: 8.0
 
     uav:
@@ -70,10 +70,10 @@
       gravity_align_en: false
 
     publish:
-      dense_map_en: true  # Tắt dense map để giảm tải RViz (chỉ publish sparse map)
+      dense_map_en: false  # Tắt dense map để giảm tải RViz (chỉ publish sparse map)
       pub_effect_point_en: false 
       pub_plane_en: false
-      pub_scan_num: 1  # Tăng từ 1 lên 3 để giảm tần suất publish (chỉ publish mỗi 3 scans)
+      pub_scan_num: 3  # Tăng từ 1 lên 3 để giảm tần suất publish (chỉ publish mỗi 3 scans)
       blind_rgb_points: 0.0
 
     evo:
