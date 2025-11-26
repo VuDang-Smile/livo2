@@ -63,14 +63,6 @@ ament_target_dependencies(theta_driver_lib
   Boost
 )
 
-# Add cubemap converter library and dependencies
-add_library(cubemap_converter_lib SHARED src/cubemap_converter_lib.cpp)
-rclcpp_components_register_nodes(cubemap_converter_lib "theta_driver::CubemapConverter")
-ament_target_dependencies(cubemap_converter_lib
-  ${dependencies}
-  OpenCV
-)
-
 # Add QR detector library and dependencies
 add_library(qr_detector_lib SHARED src/qr_detector_lib.cpp)
 rclcpp_components_register_nodes(qr_detector_lib "theta_driver::QRDetector")
@@ -84,14 +76,6 @@ target_link_libraries(qr_detector_lib ${ZBAR_LIBRARIES})
 add_library(qr_detector_optimized_lib SHARED src/qr_detector_optimized.cpp)
 rclcpp_components_register_nodes(qr_detector_optimized_lib "theta_driver::QRDetectorOptimized")
 ament_target_dependencies(qr_detector_optimized_lib
-  ${dependencies}
-  OpenCV
-)
-
-# Add optimized cubemap converter library and dependencies
-add_library(cubemap_converter_optimized_lib SHARED src/cubemap_converter_optimized.cpp)
-rclcpp_components_register_nodes(cubemap_converter_optimized_lib "theta_driver::CubemapConverterOptimized")
-ament_target_dependencies(cubemap_converter_optimized_lib
   ${dependencies}
   OpenCV
 )
@@ -111,11 +95,6 @@ add_executable(theta_driver_node
 target_link_libraries(theta_driver_node theta_driver_lib)
 ament_target_dependencies(theta_driver_node ${dependencies})
 
-# Add cubemap converter executable
-add_executable(cubemap_converter_node src/cubemap_converter_node.cpp)
-target_link_libraries(cubemap_converter_node cubemap_converter_lib)
-ament_target_dependencies(cubemap_converter_node ${dependencies})
-
 # Add QR detector executable
 add_executable(qr_detector_node src/qr_detector_node.cpp)
 target_link_libraries(qr_detector_node qr_detector_lib)
@@ -125,11 +104,6 @@ ament_target_dependencies(qr_detector_node ${dependencies})
 add_executable(qr_detector_optimized_node src/qr_detector_optimized_node.cpp)
 target_link_libraries(qr_detector_optimized_node qr_detector_optimized_lib)
 ament_target_dependencies(qr_detector_optimized_node ${dependencies})
-
-# Add optimized cubemap converter executable
-add_executable(cubemap_converter_optimized_node src/cubemap_converter_optimized_node.cpp)
-target_link_libraries(cubemap_converter_optimized_node cubemap_converter_optimized_lib)
-ament_target_dependencies(cubemap_converter_optimized_node ${dependencies})
 
 # Add perspective converter executable
 add_executable(perspective_converter_node src/perspective_converter_node.cpp)
@@ -144,10 +118,8 @@ endif()
 # Install lib
 install(TARGETS
   theta_driver_lib
-  cubemap_converter_lib
   qr_detector_lib
   qr_detector_optimized_lib
-  cubemap_converter_optimized_lib
   perspective_converter_lib
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -157,10 +129,8 @@ install(TARGETS
 # Install exec
 install(TARGETS
   theta_driver_node
-  cubemap_converter_node
   qr_detector_node
   qr_detector_optimized_node
-  cubemap_converter_optimized_node
   perspective_converter_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
