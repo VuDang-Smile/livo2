@@ -979,11 +979,11 @@ class MappingTab(ttk.Frame):
             # Cập nhật thông tin output path
             self.update_output_info()
             
-            # Start thread để đọc output
-            threading.Thread(
-                target=self._read_mapping_output,
-                daemon=True
-            ).start()
+            # Không đọc output từ mapping process để tránh quá tải CPU
+            # threading.Thread(
+            #     target=self._read_mapping_output,
+            #     daemon=True
+            # ).start()
             
             # Start thread để cập nhật output info định kỳ
             threading.Thread(
@@ -993,7 +993,7 @@ class MappingTab(ttk.Frame):
             
             self.log("✅ Mapping đã được khởi động")
             self.log(f"Kết quả sẽ được lưu tại: {self.get_output_path()}")
-            self.log("📝 Đang đọc log từ mapping process...")
+            self.log("💡 Log từ mapping process đã được tắt để giảm tải CPU")
             
         except Exception as e:
             self.log(f"❌ Lỗi khởi động mapping: {e}")
