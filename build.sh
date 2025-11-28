@@ -284,13 +284,9 @@ build_packages() {
     cd "$WS_DIR"
     
     # Build với colcon
-    local packages_arg=""
+    local packages_arg="--packages-select"
     for pkg in "${packages_to_build[@]}"; do
-        if [ -z "$packages_arg" ]; then
-            packages_arg="--packages-select $pkg"
-        else
-            packages_arg="$packages_arg --packages-select $pkg"
-        fi
+        packages_arg="$packages_arg $pkg"
     done
     
     echo -e "${BLUE}Chạy lệnh: colcon build $packages_arg --symlink-install${NC}"
