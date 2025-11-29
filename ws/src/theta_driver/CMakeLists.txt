@@ -88,6 +88,14 @@ ament_target_dependencies(perspective_converter_lib
   OpenCV
 )
 
+# Add equidistant converter library and dependencies
+add_library(equidistant_converter_lib SHARED src/equidistant_converter_lib.cpp)
+rclcpp_components_register_nodes(equidistant_converter_lib "theta_driver::EquidistantConverter")
+ament_target_dependencies(equidistant_converter_lib
+  ${dependencies}
+  OpenCV
+)
+
 # Add executable and dependencies
 add_executable(theta_driver_node 
   src/theta_driver_node.cpp
@@ -110,6 +118,11 @@ add_executable(perspective_converter_node src/perspective_converter_node.cpp)
 target_link_libraries(perspective_converter_node perspective_converter_lib)
 ament_target_dependencies(perspective_converter_node ${dependencies})
 
+# Add equidistant converter executable
+add_executable(equidistant_converter_node src/equidistant_converter_node.cpp)
+target_link_libraries(equidistant_converter_node equidistant_converter_lib)
+ament_target_dependencies(equidistant_converter_node ${dependencies})
+
 if(NOT WIN32)
   ament_environment_hooks(
     "${ament_cmake_package_templates_ENVIRONMENT_HOOK_LIBRARY_PATH}")
@@ -121,6 +134,7 @@ install(TARGETS
   qr_detector_lib
   qr_detector_optimized_lib
   perspective_converter_lib
+  equidistant_converter_lib
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -132,6 +146,7 @@ install(TARGETS
   qr_detector_node
   qr_detector_optimized_node
   perspective_converter_node
+  equidistant_converter_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 

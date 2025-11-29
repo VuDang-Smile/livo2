@@ -74,24 +74,40 @@ class SingleImageSubscriber(Node):
             self._callback_count += 1
             if self._callback_count % 30 == 0:
                 self.get_logger().info(f'Đã nhận {self._callback_count} frames từ {self.topic_name}')
+                print(f'[SingleImageSubscriber] Đã nhận {self._callback_count} frames từ {self.topic_name}')
+            
+            # Debug: log encoding
+            if self._callback_count == 1:
+                print(f'[SingleImageSubscriber] Encoding: {msg.encoding}, Size: {msg.width}x{msg.height}')
             
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
+            
+            # Debug: log image shape
+            if self._callback_count == 1:
+                print(f'[SingleImageSubscriber] CV Image shape: {cv_image.shape}')
+            
             self.callback(cv_image)
         except Exception as e:
-            self.get_logger().error(f'Lỗi xử lý ảnh từ {self.topic_name}: {e}')
+            error_msg = f'Lỗi xử lý ảnh từ {self.topic_name}: {e}'
+            self.get_logger().error(error_msg)
+            print(f'[SingleImageSubscriber] ERROR: {error_msg}')
             import traceback
+            traceback.print_exc()
             self.get_logger().error(traceback.format_exc())
 
 
 class CameraModelTab(ttk.Frame):
     """Tab cho một camera model cụ thể"""
     
-    def __init__(self, parent, model_name, topic_name, camera_info_topic, node_name):
+    def __init__(self, parent, model_name, topic_name, camera_info_topic, node_name, parameters=None):
         super().__init__(parent)
         self.model_name = model_name
         self.topic_name = topic_name
         self.camera_info_topic = camera_info_topic
         self.node_name = node_name
+        
+        # Parameters (default values)
+        self.parameters = parameters if parameters else {}
         
         # State
         self.converter_process = None
@@ -134,6 +150,12 @@ class CameraModelTab(ttk.Frame):
         )
         self.stop_btn.pack(side=tk.LEFT, padx=5)
         
+        # Parameters frame (nếu có parameters)
+        self.param_entries = {}  # Initialize empty dict
+        self.node_name_for_params = None  # Will be set when converter is launched
+        if self.parameters:
+            self.create_parameters_frame()
+        
         # Image canvas
         self.canvas = tk.Canvas(
             self,
@@ -150,6 +172,178 @@ class CameraModelTab(ttk.Frame):
         )
         self.status_label.pack(fill=tk.X, padx=5, pady=5)
     
+    def create_parameters_frame(self):
+        """Tạo frame để edit parameters"""
+        # Collapsible parameters frame
+        params_frame = ttk.LabelFrame(self, text="Parameters", padding="5")
+        params_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Store entry widgets
+        self.param_entries = {}
+        
+        row = 0
+        col = 0
+        max_cols = 3
+        
+        for param_name, param_value in self.parameters.items():
+            # Create label and entry
+            label = ttk.Label(params_frame, text=f"{param_name}:", width=15)
+            label.grid(row=row, column=col*2, padx=2, pady=2, sticky=tk.W)
+            
+            entry = ttk.Entry(params_frame, width=12)
+            entry.insert(0, str(param_value))
+            entry.grid(row=row, column=col*2+1, padx=2, pady=2, sticky=tk.W)
+            
+            self.param_entries[param_name] = entry
+            
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
+        
+        # Add one more row if needed
+        if col > 0:
+            row += 1
+        
+        # Add Update Parameters button
+        update_btn = ttk.Button(
+            params_frame,
+            text="Update Parameters (Realtime)",
+            command=self.update_parameters_realtime,
+            state=tk.DISABLED
+        )
+        update_btn.grid(row=row, column=0, columnspan=max_cols*2, padx=5, pady=5, sticky=tk.EW)
+        self.update_params_btn = update_btn
+    
+    def get_parameters(self):
+        """Lấy parameters từ UI entries"""
+        params = {}
+        for param_name, entry in self.param_entries.items():
+            value = entry.get().strip()
+            # Try to convert to appropriate type
+            original_value = self.parameters[param_name]
+            if isinstance(original_value, int):
+                try:
+                    params[param_name] = int(value)
+                except ValueError:
+                    params[param_name] = original_value
+            elif isinstance(original_value, float):
+                try:
+                    params[param_name] = float(value)
+                except ValueError:
+                    params[param_name] = original_value
+            else:
+                params[param_name] = value
+        return params
+    
+    def update_parameters_realtime(self):
+        """Update parameters realtime khi converter đang chạy"""
+        if not self.converter_process or self.converter_process.poll() is not None:
+            messagebox.showwarning("Cảnh báo", "Converter chưa được launch hoặc đã dừng")
+            return
+        
+        try:
+            params = self.get_parameters()
+            
+            # Get node name - try to find from running nodes
+            # ROS2 node name format: usually "equidistant_converter" or similar
+            node_name = self.node_name_for_params or "equidistant_converter"
+            
+            # Try to find actual node name from running nodes
+            result = subprocess.run(
+                ['ros2', 'node', 'list'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            
+            # Find matching node
+            actual_node_name = None
+            for line in result.stdout.split('\n'):
+                if node_name in line.lower() or self.node_name.replace('_node', '') in line.lower():
+                    actual_node_name = line.strip()
+                    break
+            
+            if not actual_node_name:
+                # Try common node name patterns
+                possible_names = [
+                    node_name,
+                    f"/{node_name}",
+                    f"/equidistant_converter",
+                    f"/{self.node_name.replace('_node', '')}"
+                ]
+                for name in possible_names:
+                    test_result = subprocess.run(
+                        ['ros2', 'param', 'list', name],
+                        capture_output=True,
+                        text=True,
+                        timeout=1
+                    )
+                    if test_result.returncode == 0:
+                        actual_node_name = name
+                        break
+            
+            if not actual_node_name:
+                messagebox.showerror(
+                    "Lỗi",
+                    f"Không tìm thấy node {node_name}.\n"
+                    "Vui lòng đảm bảo converter đang chạy."
+                )
+                return
+            
+            # Update each parameter
+            success_count = 0
+            error_count = 0
+            
+            for param_name, param_value in params.items():
+                try:
+                    # Use ros2 param set command
+                    cmd = ['ros2', 'param', 'set', actual_node_name, param_name, str(param_value)]
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=2
+                    )
+                    
+                    if result.returncode == 0:
+                        success_count += 1
+                        print(f"✓ Updated {param_name} = {param_value}")
+                    else:
+                        error_count += 1
+                        print(f"✗ Failed to update {param_name}: {result.stderr}")
+                        
+                except Exception as e:
+                    error_count += 1
+                    print(f"✗ Error updating {param_name}: {e}")
+            
+            # Show result
+            if success_count > 0:
+                self.status_label.config(
+                    text=f"{self.model_name}: Updated {success_count} parameters",
+                    foreground="green"
+                )
+                if error_count > 0:
+                    messagebox.showwarning(
+                        "Một phần thành công",
+                        f"Đã update {success_count} parameters.\n"
+                        f"{error_count} parameters failed."
+                    )
+            else:
+                messagebox.showerror(
+                    "Lỗi",
+                    f"Không thể update parameters.\n"
+                    f"Node: {actual_node_name}\n"
+                    f"Lỗi: {result.stderr if 'result' in locals() else 'Unknown'}"
+                )
+                
+        except Exception as e:
+            error_msg = f"Lỗi khi update parameters: {e}"
+            print(f"✗ {error_msg}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Lỗi", error_msg)
+    
     def launch_converter(self):
         """Launch converter node cho camera model này"""
         try:
@@ -164,9 +358,29 @@ class CameraModelTab(ttk.Frame):
                 )
                 return
             
-            # TODO: Update khi có universal_camera_converter_node
-            # Hiện tại dùng perspective_converter_node làm placeholder
-            cmd = f"source {setup_script} && ros2 run theta_driver {self.node_name}"
+            # Build command with parameters
+            cmd_parts = [f"source {setup_script}"]
+            
+            # Build ros2 run command with parameters
+            ros_cmd = f"ros2 run theta_driver {self.node_name}"
+            
+            # Add parameters if available
+            if self.param_entries:
+                params = self.get_parameters()
+                param_args = []
+                for param_name, param_value in params.items():
+                    # ROS2 parameter format: --ros-args -p param_name:=value
+                    if isinstance(param_value, str):
+                        # Quote string values
+                        param_args.append(f"-p {param_name}:=\"{param_value}\"")
+                    else:
+                        param_args.append(f"-p {param_name}:={param_value}")
+                
+                if param_args:
+                    ros_cmd += " --ros-args " + " ".join(param_args)
+            
+            cmd_parts.append(ros_cmd)
+            cmd = " && ".join(cmd_parts)
             
             self.converter_process = subprocess.Popen(
                 cmd,
@@ -182,6 +396,14 @@ class CameraModelTab(ttk.Frame):
             )
             self.launch_btn.config(state=tk.DISABLED)
             self.start_btn.config(state=tk.NORMAL)
+            
+            # Enable update parameters button
+            if hasattr(self, 'update_params_btn'):
+                self.update_params_btn.config(state=tk.NORMAL)
+            
+            # Store node name for parameter updates
+            # ROS2 node name is usually the executable name
+            self.node_name_for_params = self.node_name.replace('_node', '')
             
             # Kiểm tra process sau 2 giây
             self.after(2000, self.check_converter_process)
@@ -287,6 +509,10 @@ class CameraModelTab(ttk.Frame):
     def on_image_received(self, cv_image):
         """Callback khi nhận được ảnh từ ROS"""
         try:
+            # Debug: log first frame
+            if self.frame_count == 0:
+                print(f"[{self.model_name}] on_image_received: First frame received, shape: {cv_image.shape}")
+            
             self.current_image = cv_image
             self.frame_count += 1
             
@@ -385,6 +611,10 @@ class CameraModelTab(ttk.Frame):
         self.launch_btn.config(state=tk.NORMAL)
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.DISABLED)
+        
+        # Disable update parameters button
+        if hasattr(self, 'update_params_btn'):
+            self.update_params_btn.config(state=tk.DISABLED)
         
         self.canvas.delete("all")
         self.frame_count = 0
@@ -672,13 +902,27 @@ class ThetaTab(ttk.Frame):
         self.notebook.add(self.tab_pinhole, text="Pinhole")
         self.camera_tabs["Pinhole"] = self.tab_pinhole
         
-        # Tab EquidistantCamera
+        # Tab EquidistantCamera với parameters
+        equidistant_params = {
+            "camera_frame": "camera_link",
+            "input_topic": "image_raw",
+            "output_topic": "image_equidistant",
+            "camera_info_topic": "camera_info_equidistant",
+            "output_width": 640,
+            "output_height": 480,
+            "fov_degrees": 180.0,
+            "k1": 0.0,
+            "k2": 0.0,
+            "k3": 0.0,
+            "k4": 0.0
+        }
         self.tab_equidistant = CameraModelTab(
             self.notebook,
             "EquidistantCamera",
             "image_equidistant",
             "camera_info_equidistant",
-            "equidistant_converter_node"  # TODO: Update when implemented
+            "equidistant_converter_node",
+            parameters=equidistant_params
         )
         self.notebook.add(self.tab_equidistant, text="Equidistant")
         self.camera_tabs["EquidistantCamera"] = self.tab_equidistant
