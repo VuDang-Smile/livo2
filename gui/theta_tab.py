@@ -927,24 +927,61 @@ class ThetaTab(ttk.Frame):
         self.notebook.add(self.tab_equidistant, text="Equidistant")
         self.camera_tabs["EquidistantCamera"] = self.tab_equidistant
         
-        # Tab PolynomialCamera
+        # Tab PolynomialCamera với parameters
+        polynomial_params = {
+            "camera_frame": "camera_link",
+            "input_topic": "image_raw",
+            "output_topic": "image_polynomial",
+            "camera_info_topic": "camera_info_polynomial",
+            "output_width": 640,
+            "output_height": 480,
+            "fov_degrees": 180.0,
+            "fx": 0.0,  # 0 means calculate from FOV
+            "fy": 0.0,
+            "cx": 0.0,  # 0 means use center
+            "cy": 0.0,
+            "skew": 0.0,
+            "rotation_offset_degrees": 0.0,  # Rotation to align inner circle with outer border
+            "k2": 0.0,
+            "k3": 0.0,
+            "k4": 0.0,
+            "k5": 0.0,
+            "k6": 0.0,
+            "k7": 0.0
+        }
         self.tab_polynomial = CameraModelTab(
             self.notebook,
             "PolynomialCamera",
             "image_polynomial",
             "camera_info_polynomial",
-            "polynomial_converter_node"  # TODO: Update when implemented
+            "polynomial_converter_node",
+            parameters=polynomial_params
         )
         self.notebook.add(self.tab_polynomial, text="Polynomial")
         self.camera_tabs["PolynomialCamera"] = self.tab_polynomial
         
-        # Tab ATAN
+        # Tab ATAN với parameters
+        atan_params = {
+            "camera_frame": "camera_link",
+            "input_topic": "image_raw",
+            "output_topic": "image_atan",
+            "camera_info_topic": "camera_info_atan",
+            "output_width": 640,
+            "output_height": 480,
+            "fov_degrees": 180.0,
+            "fx": 0.0,  # 0 means calculate from FOV
+            "fy": 0.0,
+            "cx": 0.0,  # 0 means use center
+            "cy": 0.0,
+            "d0": 0.0   # ATAN distortion coefficient (s)
+        }
         self.tab_atan = CameraModelTab(
             self.notebook,
             "ATAN",
             "image_atan",
             "camera_info_atan",
-            "atan_converter_node"  # TODO: Update when implemented
+            "atan_converter_node",
+            parameters=atan_params
         )
         self.notebook.add(self.tab_atan, text="ATAN")
         self.camera_tabs["ATAN"] = self.tab_atan

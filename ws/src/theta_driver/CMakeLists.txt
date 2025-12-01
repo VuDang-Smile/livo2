@@ -96,6 +96,22 @@ ament_target_dependencies(equidistant_converter_lib
   OpenCV
 )
 
+# Add polynomial converter library and dependencies
+add_library(polynomial_converter_lib SHARED src/polynomial_converter_lib.cpp)
+rclcpp_components_register_nodes(polynomial_converter_lib "theta_driver::PolynomialConverter")
+ament_target_dependencies(polynomial_converter_lib
+  ${dependencies}
+  OpenCV
+)
+
+# Add ATAN converter library and dependencies
+add_library(atan_converter_lib SHARED src/atan_converter_lib.cpp)
+rclcpp_components_register_nodes(atan_converter_lib "theta_driver::ATANConverter")
+ament_target_dependencies(atan_converter_lib
+  ${dependencies}
+  OpenCV
+)
+
 # Add executable and dependencies
 add_executable(theta_driver_node 
   src/theta_driver_node.cpp
@@ -123,6 +139,16 @@ add_executable(equidistant_converter_node src/equidistant_converter_node.cpp)
 target_link_libraries(equidistant_converter_node equidistant_converter_lib)
 ament_target_dependencies(equidistant_converter_node ${dependencies})
 
+# Add polynomial converter executable
+add_executable(polynomial_converter_node src/polynomial_converter_node.cpp)
+target_link_libraries(polynomial_converter_node polynomial_converter_lib)
+ament_target_dependencies(polynomial_converter_node ${dependencies})
+
+# Add ATAN converter executable
+add_executable(atan_converter_node src/atan_converter_node.cpp)
+target_link_libraries(atan_converter_node atan_converter_lib)
+ament_target_dependencies(atan_converter_node ${dependencies})
+
 if(NOT WIN32)
   ament_environment_hooks(
     "${ament_cmake_package_templates_ENVIRONMENT_HOOK_LIBRARY_PATH}")
@@ -135,6 +161,8 @@ install(TARGETS
   qr_detector_optimized_lib
   perspective_converter_lib
   equidistant_converter_lib
+  polynomial_converter_lib
+  atan_converter_lib
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -147,6 +175,8 @@ install(TARGETS
   qr_detector_optimized_node
   perspective_converter_node
   equidistant_converter_node
+  polynomial_converter_node
+  atan_converter_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
