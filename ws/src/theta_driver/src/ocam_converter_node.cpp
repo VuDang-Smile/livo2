@@ -1,4 +1,4 @@
-#include "theta_driver/atan_converter_lib.hpp"
+#include "theta_driver/ocam_converter_lib.hpp"
 #include <rclcpp/rclcpp.hpp>
 
 int main(int argc, char * argv[])
@@ -6,7 +6,7 @@ int main(int argc, char * argv[])
     rclcpp::init(argc, argv);
     
     rclcpp::NodeOptions options;
-    auto node = std::make_shared<theta_driver::ATANConverter>(options);
+    auto node = std::make_shared<theta_driver::OcamConverter>(options);
     
     rclcpp::spin(node);
     

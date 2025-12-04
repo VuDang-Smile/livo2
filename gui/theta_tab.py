@@ -222,7 +222,12 @@ class CameraModelTab(ttk.Frame):
             value = entry.get().strip()
             # Try to convert to appropriate type
             original_value = self.parameters[param_name]
-            if isinstance(original_value, int):
+            
+            # Special handling for array parameters (pol_coeffs, invpol_coeffs)
+            if param_name in ["pol_coeffs", "invpol_coeffs"]:
+                # Keep as comma-separated string, converter will parse it
+                params[param_name] = value
+            elif isinstance(original_value, int):
                 try:
                     params[param_name] = int(value)
                 except ValueError:
@@ -369,10 +374,15 @@ class CameraModelTab(ttk.Frame):
                 params = self.get_parameters()
                 param_args = []
                 for param_name, param_value in params.items():
+                    # Skip empty string parameters (ROS2 can't parse them)
+                    if isinstance(param_value, str) and not param_value.strip():
+                        continue
+                    
                     # ROS2 parameter format: --ros-args -p param_name:=value
                     if isinstance(param_value, str):
-                        # Quote string values
-                        param_args.append(f"-p {param_name}:=\"{param_value}\"")
+                        # Quote string values, escape quotes inside
+                        escaped_value = param_value.replace('"', '\\"')
+                        param_args.append(f"-p {param_name}:=\"{escaped_value}\"")
                     else:
                         param_args.append(f"-p {param_name}:={param_value}")
                 
@@ -382,13 +392,48 @@ class CameraModelTab(ttk.Frame):
             cmd_parts.append(ros_cmd)
             cmd = " && ".join(cmd_parts)
             
+            print(f"Launching {self.model_name} converter with command: {cmd}")
+            
+            # Use subprocess with proper environment
+            env = os.environ.copy()
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
+            # Launch process - redirect stderr to stdout for easier debugging
             self.converter_process = subprocess.Popen(
                 cmd,
                 shell=True,
                 executable="/bin/bash",
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stderr=subprocess.STDOUT,  # Merge stderr into stdout
+                universal_newlines=True,
+                bufsize=1,
+                env=env
             )
+            
+            # Check if process started successfully
+            import time
+            time.sleep(0.5)  # Wait a bit for process to start
+            
+            if self.converter_process.poll() is not None:
+                # Process exited immediately - there's an error
+                try:
+                    stdout, _ = self.converter_process.communicate(timeout=1)
+                    error_msg = stdout if stdout else f"Process exited with code {self.converter_process.returncode}"
+                except subprocess.TimeoutExpired:
+                    error_msg = "Process exited immediately (timeout reading output)"
+                
+                print(f"✗ {self.model_name} converter failed to start:")
+                print(f"  Output: {error_msg}")
+                
+                messagebox.showerror(
+                    "Lỗi Launch",
+                    f"Không thể launch {self.model_name} converter:\n\n{error_msg[:500]}"
+                )
+                self.launch_btn.config(state=tk.NORMAL)
+                return
+            
+            print(f"✓ {self.model_name} converter process started (PID: {self.converter_process.pid})")
             
             self.status_label.config(
                 text=f"{self.model_name}: Converter đang chạy",
@@ -404,6 +449,8 @@ class CameraModelTab(ttk.Frame):
             # Store node name for parameter updates
             # ROS2 node name is usually the executable name
             self.node_name_for_params = self.node_name.replace('_node', '')
+            
+            print(f"✓ {self.model_name} converter launched successfully (PID: {self.converter_process.pid})")
             
             # Kiểm tra process sau 2 giây
             self.after(2000, self.check_converter_process)
@@ -968,10 +1015,9 @@ class ThetaTab(ttk.Frame):
             "camera_info_topic": "camera_info_atan",
             "output_width": 640,
             "output_height": 480,
-            "fov_degrees": 180.0,
-            "fx": 0.0,  # 0 means calculate from FOV
+            "fx": 0.0,  # 0 means calculate default (normalized 0-1)
             "fy": 0.0,
-            "cx": 0.0,  # 0 means use center
+            "cx": 0.0,  # 0 means use center (normalized 0-1)
             "cy": 0.0,
             "d0": 0.0   # ATAN distortion coefficient (s)
         }
@@ -986,13 +1032,32 @@ class ThetaTab(ttk.Frame):
         self.notebook.add(self.tab_atan, text="ATAN")
         self.camera_tabs["ATAN"] = self.tab_atan
         
-        # Tab Ocam
+        # Tab Ocam với parameters
+        ocam_params = {
+            "camera_frame": "camera_link",
+            "input_topic": "image_raw",
+            "output_topic": "image_ocam",
+            "camera_info_topic": "camera_info_ocam",
+            "output_width": 640,
+            "output_height": 480,
+            "calib_file": "",  # Optional: path to calibration file
+            "xc": 0.0,  # 0 means use center
+            "yc": 0.0,
+            "c": 1.0,   # Affine parameter
+            "d": 0.0,   # Affine parameter
+            "e": 0.0,   # Affine parameter
+            # Polynomial coefficients (default fisheye-like)
+            # pol[0] = base focal length, pol[1] = linear, pol[2] = quadratic
+            "pol_coeffs": "200.0,0.0,0.0001",  # Comma-separated string
+            "invpol_coeffs": "0.005,0.0,-0.0000001"  # Comma-separated string
+        }
         self.tab_ocam = CameraModelTab(
             self.notebook,
             "Ocam",
             "image_ocam",
             "camera_info_ocam",
-            "ocam_converter_node"  # TODO: Update when implemented
+            "ocam_converter_node",
+            parameters=ocam_params
         )
         self.notebook.add(self.tab_ocam, text="Ocam")
         self.camera_tabs["Ocam"] = self.tab_ocam

@@ -14,24 +14,25 @@
                     0.0, 1.0, 0.0,
                     0.0, 0.0, 1.0]
       # Calibration từ direct_visual_lidar_calibration
-      Rcl: [-0.04557983, -0.98044722, -0.19143073,
-                  0.05199850, 0.18904153, -0.98059138,
-                  0.99760645, -0.05464930, 0.04236530]
-      Pcl: [-0.00419512, -0.00104834, 0.28721823]
+      Rcl: [-0.06037884, -0.99176372, -0.11295630,
+            -0.05990356, 0.11655904, -0.99137559,
+            0.99637641, -0.05309162, -0.06644788]
+      # Pcl: translation vector từ lidar sang camera
+      Pcl: [-0.27679981, 0.10934134, 0.09907265]
     time_offset: 
       imu_time_offset: 0.0
       img_time_offset: 0.1
       exposure_time_init: 0.0
 
     preprocess:
-      point_filter_num: 2  # Giữ đầy đủ points để tăng chất lượng
-      filter_size_surf: 0.15  # Giữ chi tiết bề mặt tốt hơn
+      point_filter_num: 1  # Giảm từ 2 xuống 1 để giữ nhiều điểm hơn (tăng mật độ điểm)
+      filter_size_surf: 0.12  # Giảm từ 0.15 xuống 0.12 để tăng mật độ điểm nhưng vẫn nhẹ
       lidar_type: 8 # Livox MID360 LiDAR
       scan_line: 6  # MID360 có 6 scan lines
       blind: 0.8
 
     vio:
-      max_iterations: 3  # Tăng số vòng lặp để hội tụ tốt hơn
+      max_iterations: 3  # Giữ nguyên để duy trì hiệu năng
       outlier_threshold: 1000 # 78 100 156 #100 200 500 700 infinite
       img_point_cov: 100 # 100 1000 
       patch_size: 6  # Miếng vá lớn hơn cho nhiều ràng buộc
@@ -55,9 +56,9 @@
       dept_err: 0.02
       beam_err: 0.05
       min_eigen_value: 0.0025 # 0.005
-      voxel_size: 0.6  # Lưới mảnh hơn để giữ chi tiết
+      voxel_size: 0.5  # Giảm từ 0.6 xuống 0.5 để tăng độ phân giải voxel (mật độ điểm cao hơn)
       max_layer: 2
-      max_points_num: 40  # Giữ nhiều điểm hơn trong tối ưu
+      max_points_num: 55  # Tăng từ 40 lên 55 để giữ nhiều điểm hơn trong mỗi voxel
       layer_init_num: [5, 5, 5, 5, 5]
 
     local_map:  
@@ -83,8 +84,7 @@
     pcd_save:
       pcd_save_en: false
       colmap_output_en: false # need to set interval = -1
-      filter_size_pcd: 0.15
+      filter_size_pcd: 0.12  # Giảm từ 0.15 xuống 0.12 để lưu điểm dày đặc hơn
       interval: -1
       # how many LiDAR frames saved in each pcd file;
       # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.
-
