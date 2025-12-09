@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Theta Tab Module
-Chứa ThetaTab với Notebook sub-tabs cho 5 camera models
+Chứa ThetaTab với Notebook sub-tabs cho các camera models
 """
 
 import os
@@ -251,8 +251,8 @@ class CameraModelTab(ttk.Frame):
             params = self.get_parameters()
             
             # Get node name - try to find from running nodes
-            # ROS2 node name format: usually "equidistant_converter" or similar
-            node_name = self.node_name_for_params or "equidistant_converter"
+            # ROS2 node name format: usually "perspective_converter" or similar
+            node_name = self.node_name_for_params or self.node_name.replace('_node', '')
             
             # Try to find actual node name from running nodes
             result = subprocess.run(
@@ -274,7 +274,6 @@ class CameraModelTab(ttk.Frame):
                 possible_names = [
                     node_name,
                     f"/{node_name}",
-                    f"/equidistant_converter",
                     f"/{self.node_name.replace('_node', '')}"
                 ]
                 for name in possible_names:
@@ -904,6 +903,12 @@ class ThetaTab(ttk.Frame):
         self.theta_driver_process = None
         self.camera_tabs = {}  # {model_name: CameraModelTab}
         
+        # Default parameters
+        self.use4k = tk.BooleanVar(value=True)
+        self.image_quality = tk.StringVar(value="high")
+        self.jpeg_compress_value = tk.IntVar(value=85)
+        self.fps_limit = tk.DoubleVar(value=0.0)
+        
         # UI
         self.create_control_panel()
         self.create_notebook()
@@ -913,13 +918,61 @@ class ThetaTab(ttk.Frame):
         control_frame = ttk.Frame(self, padding="10")
         control_frame.pack(fill=tk.X)
         
-        # Launch Theta Driver
+        # Parameters frame
+        params_frame = ttk.LabelFrame(control_frame, text="Theta Driver Parameters", padding="5")
+        params_frame.pack(side=tk.LEFT, padx=5)
+        
+        # Use4K checkbox
+        use4k_check = ttk.Checkbutton(
+            params_frame,
+            text="Use 4K",
+            variable=self.use4k
+        )
+        use4k_check.grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
+        
+        # Image quality dropdown
+        ttk.Label(params_frame, text="Image Quality:").grid(row=0, column=1, padx=5, pady=2, sticky=tk.W)
+        quality_combo = ttk.Combobox(
+            params_frame,
+            textvariable=self.image_quality,
+            values=["raw", "high", "medium", "low", "tiny"],
+            state="readonly",
+            width=10
+        )
+        quality_combo.grid(row=0, column=2, padx=5, pady=2, sticky=tk.W)
+        
+        # JPEG compress value
+        ttk.Label(params_frame, text="JPEG Quality:").grid(row=0, column=3, padx=5, pady=2, sticky=tk.W)
+        jpeg_spin = ttk.Spinbox(
+            params_frame,
+            from_=0,
+            to=100,
+            textvariable=self.jpeg_compress_value,
+            width=8
+        )
+        jpeg_spin.grid(row=0, column=4, padx=5, pady=2, sticky=tk.W)
+        ttk.Label(params_frame, text="(0=disabled)").grid(row=0, column=5, padx=2, pady=2, sticky=tk.W)
+        
+        # FPS limit
+        ttk.Label(params_frame, text="FPS Limit:").grid(row=1, column=0, padx=5, pady=2, sticky=tk.W)
+        fps_spin = ttk.Spinbox(
+            params_frame,
+            from_=0.0,
+            to=60.0,
+            textvariable=self.fps_limit,
+            width=8,
+            increment=1.0
+        )
+        fps_spin.grid(row=1, column=1, padx=5, pady=2, sticky=tk.W)
+        ttk.Label(params_frame, text="(0=no limit)").grid(row=1, column=2, padx=2, pady=2, sticky=tk.W)
+        
+        # Launch Theta Driver button
         self.launch_theta_btn = ttk.Button(
             control_frame,
             text="Launch Theta Driver",
             command=self.launch_theta_driver
         )
-        self.launch_theta_btn.pack(side=tk.LEFT, padx=5)
+        self.launch_theta_btn.pack(side=tk.LEFT, padx=10)
         
         # Status label
         self.status_label = ttk.Label(
@@ -949,119 +1002,6 @@ class ThetaTab(ttk.Frame):
         self.notebook.add(self.tab_pinhole, text="Pinhole")
         self.camera_tabs["Pinhole"] = self.tab_pinhole
         
-        # Tab EquidistantCamera với parameters
-        equidistant_params = {
-            "camera_frame": "camera_link",
-            "input_topic": "image_raw",
-            "output_topic": "image_equidistant",
-            "camera_info_topic": "camera_info_equidistant",
-            "output_width": 640,
-            "output_height": 480,
-            "fov_degrees": 180.0,
-            "k1": 0.0,
-            "k2": 0.0,
-            "k3": 0.0,
-            "k4": 0.0
-        }
-        self.tab_equidistant = CameraModelTab(
-            self.notebook,
-            "EquidistantCamera",
-            "image_equidistant",
-            "camera_info_equidistant",
-            "equidistant_converter_node",
-            parameters=equidistant_params
-        )
-        self.notebook.add(self.tab_equidistant, text="Equidistant")
-        self.camera_tabs["EquidistantCamera"] = self.tab_equidistant
-        
-        # Tab PolynomialCamera với parameters
-        polynomial_params = {
-            "camera_frame": "camera_link",
-            "input_topic": "image_raw",
-            "output_topic": "image_polynomial",
-            "camera_info_topic": "camera_info_polynomial",
-            "output_width": 640,
-            "output_height": 480,
-            "fov_degrees": 180.0,
-            "fx": 0.0,  # 0 means calculate from FOV
-            "fy": 0.0,
-            "cx": 0.0,  # 0 means use center
-            "cy": 0.0,
-            "skew": 0.0,
-            "rotation_offset_degrees": 0.0,  # Rotation to align inner circle with outer border
-            "k2": 0.0,
-            "k3": 0.0,
-            "k4": 0.0,
-            "k5": 0.0,
-            "k6": 0.0,
-            "k7": 0.0
-        }
-        self.tab_polynomial = CameraModelTab(
-            self.notebook,
-            "PolynomialCamera",
-            "image_polynomial",
-            "camera_info_polynomial",
-            "polynomial_converter_node",
-            parameters=polynomial_params
-        )
-        self.notebook.add(self.tab_polynomial, text="Polynomial")
-        self.camera_tabs["PolynomialCamera"] = self.tab_polynomial
-        
-        # Tab ATAN với parameters
-        atan_params = {
-            "camera_frame": "camera_link",
-            "input_topic": "image_raw",
-            "output_topic": "image_atan",
-            "camera_info_topic": "camera_info_atan",
-            "output_width": 640,
-            "output_height": 480,
-            "fx": 0.0,  # 0 means calculate default (normalized 0-1)
-            "fy": 0.0,
-            "cx": 0.0,  # 0 means use center (normalized 0-1)
-            "cy": 0.0,
-            "d0": 0.0   # ATAN distortion coefficient (s)
-        }
-        self.tab_atan = CameraModelTab(
-            self.notebook,
-            "ATAN",
-            "image_atan",
-            "camera_info_atan",
-            "atan_converter_node",
-            parameters=atan_params
-        )
-        self.notebook.add(self.tab_atan, text="ATAN")
-        self.camera_tabs["ATAN"] = self.tab_atan
-        
-        # Tab Ocam với parameters
-        ocam_params = {
-            "camera_frame": "camera_link",
-            "input_topic": "image_raw",
-            "output_topic": "image_ocam",
-            "camera_info_topic": "camera_info_ocam",
-            "output_width": 640,
-            "output_height": 480,
-            "calib_file": "",  # Optional: path to calibration file
-            "xc": 0.0,  # 0 means use center
-            "yc": 0.0,
-            "c": 1.0,   # Affine parameter
-            "d": 0.0,   # Affine parameter
-            "e": 0.0,   # Affine parameter
-            # Polynomial coefficients (default fisheye-like)
-            # pol[0] = base focal length, pol[1] = linear, pol[2] = quadratic
-            "pol_coeffs": "200.0,0.0,0.0001",  # Comma-separated string
-            "invpol_coeffs": "0.005,0.0,-0.0000001"  # Comma-separated string
-        }
-        self.tab_ocam = CameraModelTab(
-            self.notebook,
-            "Ocam",
-            "image_ocam",
-            "camera_info_ocam",
-            "ocam_converter_node",
-            parameters=ocam_params
-        )
-        self.notebook.add(self.tab_ocam, text="Ocam")
-        self.camera_tabs["Ocam"] = self.tab_ocam
-        
         self.notebook.pack(fill=tk.BOTH, expand=True)
     
     def launch_theta_driver(self):
@@ -1078,7 +1018,22 @@ class ThetaTab(ttk.Frame):
                 )
                 return
             
-            cmd = f"source {setup_script} && ros2 run theta_driver theta_driver_node --ros-args -p use4k:=true"
+            # Build command with parameters
+            use4k_val = "true" if self.use4k.get() else "false"
+            image_quality_val = self.image_quality.get()
+            jpeg_compress_val = self.jpeg_compress_value.get()
+            fps_limit_val = self.fps_limit.get()
+            
+            cmd = (
+                f"source {setup_script} && "
+                f"ros2 run theta_driver theta_driver_node --ros-args "
+                f"-p use4k:={use4k_val} "
+                f"-p image_quality:={image_quality_val} "
+                f"-p jpeg_compress_value:={jpeg_compress_val} "
+                f"-p fps_limit:={fps_limit_val}"
+            )
+            
+            print(f"Launching theta_driver with command: {cmd}")
             
             self.theta_driver_process = subprocess.Popen(
                 cmd,
@@ -1089,7 +1044,7 @@ class ThetaTab(ttk.Frame):
             )
             
             self.status_label.config(
-                text="Trạng thái: Theta Driver đang chạy",
+                text=f"Trạng thái: Theta Driver đang chạy (4K:{use4k_val}, Quality:{image_quality_val}, JPEG:{jpeg_compress_val}, FPS:{fps_limit_val})",
                 foreground="orange"
             )
             self.launch_theta_btn.config(state=tk.DISABLED)

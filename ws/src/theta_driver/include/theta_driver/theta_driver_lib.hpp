@@ -9,6 +9,8 @@
 #include <libuvc/libuvc.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <vector>
 #include "thetauvc.h"
 
 namespace theta_driver {
@@ -32,6 +34,7 @@ public:
     std::string pipeline_;
     std::string image_quality_ = "raw";  // raw, high, medium, low
     double fps_limit_ = 0.0;  // 0.0 means no limit, otherwise limit to specified FPS
+    int jpeg_compress_value_ = 0;  // 0 = no compression, 1-100 = JPEG quality (higher = better quality)
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_pub_;
     
     // FPS limiting variables

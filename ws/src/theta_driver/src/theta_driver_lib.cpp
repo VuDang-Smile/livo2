@@ -143,6 +143,26 @@ void ThetaDriver::publishImage(GstMapInfo map) {
         encoding = "rgb8";
     }
 
+    // Apply JPEG compression if enabled
+    std::vector<uchar> compressed_data;
+    if (jpeg_compress_value_ > 0 && jpeg_compress_value_ <= 100) {
+        // JPEG compression parameters
+        std::vector<int> compression_params;
+        compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
+        compression_params.push_back(jpeg_compress_value_);
+        
+        // Compress image to JPEG (processed_image is already RGB from GStreamer pipeline)
+        cv::imencode(".jpg", processed_image, compressed_data, compression_params);
+        
+        if (!compressed_data.empty()) {
+            // Use compressed JPEG data
+            encoding = "jpeg";
+        } else {
+            RCLCPP_WARN(get_logger(), "JPEG compression failed, using uncompressed image");
+            encoding = "rgb8";
+        }
+    }
+
     // Publish processed image
     sensor_msgs::msg::Image image;
     image.header.stamp = this->get_clock()->now();
@@ -152,11 +172,18 @@ void ThetaDriver::publishImage(GstMapInfo map) {
     image.encoding = encoding;
     image.is_bigendian = false;
     
-    image.step = processed_image.cols * 3;  // 3 bytes per pixel (RGB24)
-
-    size_t data_size = processed_image.total() * processed_image.elemSize();
-    image.data.resize(data_size);
-    memcpy(image.data.data(), processed_image.data, data_size);
+    if (jpeg_compress_value_ > 0 && jpeg_compress_value_ <= 100 && !compressed_data.empty()) {
+        // Use compressed JPEG data
+        image.step = compressed_data.size();  // JPEG is single row
+        image.data.resize(compressed_data.size());
+        memcpy(image.data.data(), compressed_data.data(), compressed_data.size());
+    } else {
+        // Use uncompressed RGB24 data
+        image.step = processed_image.cols * 3;  // 3 bytes per pixel (RGB24)
+        size_t data_size = processed_image.total() * processed_image.elemSize();
+        image.data.resize(data_size);
+        memcpy(image.data.data(), processed_image.data, data_size);
+    }
     
     image_pub_->publish(image);
 }
@@ -185,13 +212,16 @@ void ThetaDriver::onInit() {
     get_parameter("serial",serial_);
     declare_parameter<std::string>("camera_frame", camera_frame_);
     get_parameter("camera_frame",camera_frame_);
-    declare_parameter<std::string>("image_quality", "raw");
+    declare_parameter<std::string>("image_quality", "high");
     get_parameter("image_quality", image_quality_);
     declare_parameter<double>("fps_limit", 0.0);
     get_parameter("fps_limit", fps_limit_);
+    declare_parameter<int>("jpeg_compress_value", 85);
+    get_parameter("jpeg_compress_value", jpeg_compress_value_);
     
     RCLCPP_INFO(get_logger(), "Image quality setting: %s", image_quality_.c_str());
     RCLCPP_INFO(get_logger(), "FPS limit setting: %.1f", fps_limit_);
+    RCLCPP_INFO(get_logger(), "JPEG compression: %d (0 = disabled, 1-100 = quality)", jpeg_compress_value_);
     
     // Initialize FPS limiting variables
     last_publish_time_ = this->get_clock()->now();
