@@ -26,7 +26,7 @@ public:
     uvc_device_handle_t* devh_;
     uvc_stream_ctrl_t ctrl_;
     uvc_context_t* ctx_;
-    bool use4k_ = false;
+    bool use4k_ = true;
     std::string serial_ = "";
     std::string camera_frame_ = "camera_link";
     std::string pipeline_;

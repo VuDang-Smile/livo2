@@ -179,7 +179,7 @@ ThetaDriver::~ThetaDriver() {
 void ThetaDriver::onInit() {
     image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("image_raw", 10);
 
-    declare_parameter<bool>("use4k",false);
+    declare_parameter<bool>("use4k",true);
     get_parameter("use4k",use4k_);
     declare_parameter<std::string>("serial","");
     get_parameter("serial",serial_);

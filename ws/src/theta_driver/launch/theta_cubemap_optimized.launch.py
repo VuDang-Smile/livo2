@@ -7,7 +7,7 @@ def generate_launch_description():
     # Declare launch arguments
     use4k_arg = DeclareLaunchArgument(
         'use4k',
-        default_value='false',
+        default_value='true',
         description='Use 4K resolution (true/false)'
     )
     

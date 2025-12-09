@@ -1078,7 +1078,7 @@ class ThetaTab(ttk.Frame):
                 )
                 return
             
-            cmd = f"source {setup_script} && ros2 run theta_driver theta_driver_node"
+            cmd = f"source {setup_script} && ros2 run theta_driver theta_driver_node --ros-args -p use4k:=true"
             
             self.theta_driver_process = subprocess.Popen(
                 cmd,
