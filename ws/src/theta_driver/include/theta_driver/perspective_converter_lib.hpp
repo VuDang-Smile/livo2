@@ -6,6 +6,8 @@
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <vector>
 #include <string>
 
 namespace theta_driver {

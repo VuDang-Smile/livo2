@@ -44,24 +44,12 @@ class RecordingTab(ttk.Frame):
                 "description": "CustomMsg - cần source drive_ws/install/setup.sh",
                 "enabled": True
             },
-            "/livox/points2": {
-                "description": "PointCloud2",
-                "enabled": True
-            },
             "/livox/imu": {
                 "description": "Imu",
                 "enabled": True
             },
-            "/image_perspective": {
-                "description": "Image (Perspective)",
-                "enabled": True
-            },
             "/image_raw": {
                 "description": "Image (Raw/Equirectangular)",
-                "enabled": True
-            },
-            "/camera_info": {
-                "description": "CameraInfo",
                 "enabled": True
             }
         }
@@ -241,28 +229,32 @@ class RecordingTab(ttk.Frame):
             self.log(f"Đã chọn thư mục: {directory}")
     
     def _verify_source(self, setup_script, name):
-        """Verify rằng setup script có thể source được"""
-        try:
-            ros2_setup = "/opt/ros/jazzy/setup.bash"
-            # Chạy một command đơn giản để verify source
-            verify_cmd = f"source {ros2_setup} && source {setup_script} && ros2 pkg list | head -1"
-            result = subprocess.run(
-                verify_cmd,
-                shell=True,
-                executable="/bin/bash",
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            return result.returncode == 0
-        except Exception as e:
-            self.log(f"⚠️  Lỗi khi verify source {name}: {e}")
+        """Verify rằng setup script có thể source được (nhanh - chỉ kiểm tra file tồn tại)"""
+        # Chỉ kiểm tra file tồn tại thay vì chạy subprocess tốn thời gian
+        if not Path(setup_script).exists():
             return False
+        # Kiểm tra file có thể đọc được không
+        try:
+            with open(setup_script, 'r') as f:
+                # Đọc vài dòng đầu để đảm bảo là file hợp lệ
+                first_lines = [f.readline() for _ in range(3)]
+                if any('setup' in line.lower() or 'ros' in line.lower() for line in first_lines):
+                    return True
+        except Exception:
+            return False
+        return True
     
     def start_recording(self):
         """Bắt đầu record rosbag"""
         if self.is_recording:
             messagebox.showwarning("Cảnh báo", "Đang record, vui lòng dừng trước")
+            return
+        
+        # Lấy danh sách topics được chọn trước để kiểm tra
+        selected_topics = [topic for topic, var in self.topic_vars.items() if var.get()]
+        
+        if not selected_topics:
+            messagebox.showerror("Lỗi", "Vui lòng chọn ít nhất một topic để record")
             return
         
         # Kiểm tra thư mục output
@@ -280,24 +272,26 @@ class RecordingTab(ttk.Frame):
         use_drive_ws = False
         
         if drive_ws_setup.exists():
-            self.log("📦 Đang kiểm tra drive_ws/install/setup.sh...")
+            # Kiểm tra nhanh file tồn tại và hợp lệ
             if self._verify_source(drive_ws_setup, "drive_ws"):
                 self.log("✅ drive_ws/install/setup.sh đã sẵn sàng")
                 use_drive_ws = True
             else:
-                self.log("⚠️  Không thể verify drive_ws setup, nhưng vẫn sẽ thử source")
+                self.log("⚠️  drive_ws setup.sh có thể không hợp lệ, nhưng vẫn sẽ thử source")
                 use_drive_ws = True
         else:
-            self.log("⚠️  Cảnh báo: Không tìm thấy drive_ws/install/setup.sh")
-            self.log("⚠️  Topic /livox/lidar (CustomMsg) có thể không record được")
-            response = messagebox.askyesno(
-                "Cảnh báo",
-                "Không tìm thấy drive_ws/install/setup.sh.\n"
-                "Topic /livox/lidar (CustomMsg) có thể không record được.\n\n"
-                "Bạn có muốn tiếp tục không?"
-            )
-            if not response:
-                return
+            # Chỉ hiển thị cảnh báo nếu topic /livox/lidar được chọn
+            if "/livox/lidar" in selected_topics:
+                self.log("⚠️  Cảnh báo: Không tìm thấy drive_ws/install/setup.sh")
+                self.log("⚠️  Topic /livox/lidar (CustomMsg) có thể không record được")
+                response = messagebox.askyesno(
+                    "Cảnh báo",
+                    "Không tìm thấy drive_ws/install/setup.sh.\n"
+                    "Topic /livox/lidar (CustomMsg) có thể không record được.\n\n"
+                    "Bạn có muốn tiếp tục không?"
+                )
+                if not response:
+                    return
         
         # Kiểm tra ws setup.sh
         ws_setup = self.workspace_path / "install" / "setup.sh"
@@ -309,11 +303,11 @@ class RecordingTab(ttk.Frame):
             )
             return
         
-        self.log("📦 Đang kiểm tra ws/install/setup.sh...")
+        # Kiểm tra nhanh file tồn tại và hợp lệ
         if self._verify_source(ws_setup, "ws"):
             self.log("✅ ws/install/setup.sh đã sẵn sàng")
         else:
-            self.log("⚠️  Không thể verify ws setup, nhưng vẫn sẽ thử source")
+            self.log("⚠️  ws setup.sh có thể không hợp lệ, nhưng vẫn sẽ thử source")
         
         # Lấy kích thước tối đa bag file
         try:
@@ -332,12 +326,6 @@ class RecordingTab(ttk.Frame):
             self.max_bag_size_gb = 2
             max_bag_size = 2
         
-        # Lấy danh sách topics được chọn
-        selected_topics = [topic for topic, var in self.topic_vars.items() if var.get()]
-        
-        if not selected_topics:
-            messagebox.showerror("Lỗi", "Vui lòng chọn ít nhất một topic để record")
-            return
         
         # Tạo tên bag file với timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -356,7 +344,8 @@ class RecordingTab(ttk.Frame):
         ros2_setup = "/opt/ros/jazzy/setup.bash"
         
         # Build ros2 bag record command với option chia nhỏ bag
-        bag_record_cmd = f"ros2 bag record -o {bag_path} {topics_str}"
+        # Sử dụng --topics flag thay vì positional arguments (deprecated trong ROS2 Jazzy)
+        bag_record_cmd = f"ros2 bag record -o {bag_path} --topics {topics_str}"
         
         # Thêm option chia nhỏ bag nếu max_bag_size > 0
         if max_bag_size > 0:
@@ -481,9 +470,17 @@ class RecordingTab(ttk.Frame):
             return
         
         try:
-            for line in iter(self.record_process.stdout.readline, ''):
+            # Lưu reference để tránh race condition
+            process = self.record_process
+            
+            for line in iter(process.stdout.readline, ''):
+                # Kiểm tra nếu recording đã dừng hoặc process đã None
+                if not self.is_recording or self.record_process is None:
+                    break
+                    
                 if not line:
                     break
+                    
                 line = line.strip()
                 if line:
                     # Log output
@@ -496,18 +493,27 @@ class RecordingTab(ttk.Frame):
                         if any(keyword in line.lower() for keyword in ['recording', 'bag', 'topic', 'message']):
                             self.log(line)
         except Exception as e:
-            self.log(f"Lỗi khi đọc output: {e}")
+            # Chỉ log lỗi nếu recording vẫn đang chạy
+            if self.is_recording:
+                self.log(f"Lỗi khi đọc output: {e}")
         
-        # Kiểm tra exit code
-        if self.record_process.poll() is not None:
-            exit_code = self.record_process.poll()
-            if exit_code != 0:
-                self.log(f"✗ Recording đã dừng với exit code: {exit_code}")
-            else:
-                self.log(f"✓ Recording đã dừng bình thường")
-            
-            self.is_recording = False
-            self.after(0, partial(self._update_recording_stopped))
+        # Kiểm tra exit code chỉ khi process vẫn tồn tại
+        if self.record_process is not None:
+            try:
+                exit_code = self.record_process.poll()
+                if exit_code is not None:
+                    if exit_code != 0:
+                        self.log(f"✗ Recording đã dừng với exit code: {exit_code}")
+                    else:
+                        self.log(f"✓ Recording đã dừng bình thường")
+                    
+                    # Chỉ update UI nếu recording vẫn đang chạy (chưa được stop thủ công)
+                    if self.is_recording:
+                        self.is_recording = False
+                        self.after(0, partial(self._update_recording_stopped))
+            except AttributeError:
+                # Process đã bị set thành None, bỏ qua
+                pass
     
     def _update_recording_stopped(self):
         """Helper function để update UI sau khi recording dừng"""

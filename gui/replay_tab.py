@@ -229,6 +229,7 @@ class ReplayTab(ttk.Frame):
                 return
             
             ros2_setup = "/opt/ros/jazzy/setup.bash"
+            # Lấy thông tin đầy đủ về bag
             cmd = f"source {ros2_setup} && source {ws_setup} && ros2 bag info {bag_path}"
             
             result = subprocess.run(
@@ -237,22 +238,88 @@ class ReplayTab(ttk.Frame):
                 executable="/bin/bash",
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=10
             )
             
             if result.returncode == 0:
                 # Parse thông tin từ output
                 output_lines = result.stdout.split('\n')
-                info_text = "Bag info:\n"
-                for line in output_lines[:10]:  # Lấy 10 dòng đầu
-                    if line.strip():
-                        info_text += f"  {line}\n"
+                
+                # Lấy danh sách topics bằng cách riêng (chính xác hơn)
+                cmd_topics = f"source {ros2_setup} && source {ws_setup} && ros2 bag info -t {bag_path}"
+                result_topics = subprocess.run(
+                    cmd_topics,
+                    shell=True,
+                    executable="/bin/bash",
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                
+                topics_list = []
+                if result_topics.returncode == 0:
+                    topics_list = [line.strip() for line in result_topics.stdout.split('\n') 
+                                 if line.strip() and line.strip().startswith('/')]
+                
+                # Parse thông tin chung từ output đầy đủ
+                info_dict = {}
+                for line in output_lines:
+                    line_stripped = line.strip()
+                    if not line_stripped:
+                        continue
+                    
+                    # Parse các thông tin chính
+                    if ':' in line_stripped:
+                        parts = line_stripped.split(':', 1)
+                        if len(parts) == 2:
+                            key = parts[0].strip()
+                            value = parts[1].strip()
+                            info_dict[key] = value
+                
+                # Tạo text hiển thị
+                info_text = "📦 Bag Information:\n"
+                
+                # Hiển thị thông tin chính
+                for key in ['Files', 'Bag size', 'Storage id', 'Duration', 'Start', 'End', 'Messages']:
+                    if key in info_dict:
+                        info_text += f"  {key}: {info_dict[key]}\n"
+                
+                # Hiển thị danh sách topics
+                if topics_list:
+                    info_text += f"\n📡 Topics trong bag ({len(topics_list)}):\n"
+                    for topic in topics_list:
+                        info_text += f"  • {topic}\n"
+                else:
+                    # Fallback: parse từ output đầy đủ nếu không lấy được bằng -t
+                    topics_section = False
+                    for line in output_lines:
+                        if 'Topic information:' in line or 'Topic:' in line:
+                            topics_section = True
+                        if topics_section and 'Topic:' in line:
+                            # Parse format: "Topic: /topic_name | Type: ... | Count: ..."
+                            parts = line.split('|')
+                            if parts:
+                                topic_part = parts[0].strip()
+                                if 'Topic:' in topic_part:
+                                    topic_name = topic_part.split('Topic:')[1].strip()
+                                    if topic_name.startswith('/'):
+                                        topics_list.append(topic_name)
+                    
+                    if topics_list:
+                        info_text += f"\n📡 Topics trong bag ({len(topics_list)}):\n"
+                        for topic in topics_list:
+                            info_text += f"  • {topic}\n"
+                    else:
+                        info_text += "\n📡 Không tìm thấy topics\n"
+                
                 self.info_label.config(text=info_text)
-                self.log("✓ Đã lấy thông tin bag thành công")
+                self.log(f"✓ Đã lấy thông tin bag thành công ({len(topics_list)} topics)")
             else:
                 self.log(f"⚠️  Không thể lấy thông tin bag: {result.stderr}")
+                self.info_label.config(text=f"⚠️  Không thể đọc bag info\n{result.stderr[:100]}")
         except Exception as e:
             self.log(f"⚠️  Lỗi khi lấy thông tin bag: {e}")
+            self.info_label.config(text=f"⚠️  Lỗi: {str(e)[:100]}")
     
     def start_replay(self):
         """Bắt đầu replay bag"""

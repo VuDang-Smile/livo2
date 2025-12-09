@@ -54,23 +54,24 @@ void uvc_streaming_callback(uvc_frame_t* frame, void* ptr) {
 
 GstFlowReturn new_sample_callback(GstAppSink* sink, gpointer data) {
     GstSample* sample = gst_app_sink_pull_sample(sink);
+    if (sample == NULL) {
+        return GST_FLOW_EOS;
+    }
+    
     GstBuffer* buffer = gst_sample_get_buffer(sample);
-    GstBuffer* app_buffer = gst_buffer_copy_deep(buffer);
+    // Map buffer trực tiếp thay vì copy để tăng performance
     GstMapInfo map;
-    gst_buffer_map(app_buffer, &map, GST_MAP_WRITE);
+    if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+        gst_sample_unref(sample);
+        return GST_FLOW_ERROR;
+    }
 
     ThetaDriver* driver = static_cast<ThetaDriver*>(data);
     driver->publishImage(map);
 
+    gst_buffer_unmap(buffer, &map);
     gst_sample_unref(sample);
-    gst_buffer_unmap(app_buffer, &map);
-    gst_buffer_unref(app_buffer);
-    if (sample == NULL) {
-        return GST_FLOW_EOS;
-    }
-    else {
-        return GST_FLOW_OK;
-    }
+    return GST_FLOW_OK;
 }
 
 void ThetaDriver::publishImage(GstMapInfo map) {
@@ -99,47 +100,76 @@ void ThetaDriver::publishImage(GstMapInfo map) {
         original_height = 960;
     }
 
-    // Create OpenCV Mat from raw data
-    cv::Mat original_image(original_height, original_width, CV_8UC3, rdata);
+    // Tối ưu đặc biệt cho raw quality: copy trực tiếp từ buffer, tránh Mat clone
+    if (image_quality_ == "raw" && jpeg_compress_value_ <= 0) {
+        // Raw quality không nén: copy trực tiếp từ buffer vào message, tránh Mat clone
+        size_t data_size = original_width * original_height * 3; // RGB24
+        
+        sensor_msgs::msg::Image image;
+        image.header.stamp = this->get_clock()->now();
+        image.header.frame_id = camera_frame_;
+        image.width = original_width;
+        image.height = original_height;
+        image.encoding = "rgb8";
+        image.is_bigendian = false;
+        image.step = original_width * 3;
+        
+        // Pre-allocate và copy trực tiếp từ map.data
+        // Sử dụng reserve() trước resize() để tránh reallocation không cần thiết
+        image.data.reserve(data_size);
+        image.data.resize(data_size);
+        // memcpy được optimize tốt cho large blocks, nhanh hơn std::copy
+        memcpy(image.data.data(), rdata, data_size);
+        
+        image_pub_->publish(image);
+        return; // Early return để tránh xử lý không cần thiết
+    }
+    
+    // Create OpenCV Mat from raw data cho các quality khác hoặc khi có JPEG compression
+    cv::Mat original_image(original_height, original_width, CV_8UC3, const_cast<guint8*>(rdata));
     cv::Mat processed_image;
     std::string encoding = "rgb8";
     
     // Apply quality settings - RGB24 only (100% compatible)
     if (image_quality_ == "raw") {
-        // No processing, use original RGB24
-        processed_image = original_image;
+        // Raw quality với JPEG compression: cần clone để xử lý
+        processed_image = original_image.clone();
         encoding = "rgb8";
     }
     else if (image_quality_ == "high") {
         // High quality: 75% size RGB24
-        int new_width = original_width * 0.75;
-        int new_height = original_height * 0.75;
-        cv::resize(original_image, processed_image, cv::Size(new_width, new_height), 0, 0, cv::INTER_LINEAR);
+        // Sử dụng INTER_AREA cho downscale - nhanh hơn và chất lượng tốt hơn INTER_LINEAR
+        int new_width = static_cast<int>(original_width * 0.75);
+        int new_height = static_cast<int>(original_height * 0.75);
+        cv::resize(original_image, processed_image, cv::Size(new_width, new_height), 0, 0, cv::INTER_AREA);
         encoding = "rgb8";
     }
     else if (image_quality_ == "medium") {
         // Medium quality: 50% size RGB24
-        int new_width = original_width * 0.5;
-        int new_height = original_height * 0.5;
-        cv::resize(original_image, processed_image, cv::Size(new_width, new_height), 0, 0, cv::INTER_LINEAR);
+        // Sử dụng INTER_AREA cho downscale - nhanh hơn và chất lượng tốt hơn INTER_LINEAR
+        int new_width = static_cast<int>(original_width * 0.5);
+        int new_height = static_cast<int>(original_height * 0.5);
+        cv::resize(original_image, processed_image, cv::Size(new_width, new_height), 0, 0, cv::INTER_AREA);
         encoding = "rgb8";
     }
     else if (image_quality_ == "low") {
         // Low quality: 25% size RGB24
-        int new_width = original_width * 0.25;
-        int new_height = original_height * 0.25;
-        cv::resize(original_image, processed_image, cv::Size(new_width, new_height), 0, 0, cv::INTER_LINEAR);
+        // Sử dụng INTER_AREA cho downscale - nhanh hơn và chất lượng tốt hơn INTER_LINEAR
+        int new_width = static_cast<int>(original_width * 0.25);
+        int new_height = static_cast<int>(original_height * 0.25);
+        cv::resize(original_image, processed_image, cv::Size(new_width, new_height), 0, 0, cv::INTER_AREA);
         encoding = "rgb8";
     }
     else if (image_quality_ == "tiny") {
         // Tiny quality: 320x180 (ultra lightweight for long recordings)
-        cv::resize(original_image, processed_image, cv::Size(320, 180), 0, 0, cv::INTER_LINEAR);
+        // Sử dụng INTER_AREA cho downscale lớn - nhanh hơn và chất lượng tốt hơn INTER_LINEAR
+        cv::resize(original_image, processed_image, cv::Size(320, 180), 0, 0, cv::INTER_AREA);
         encoding = "rgb8";
     }
     else {
         // Default to raw if unknown quality
         RCLCPP_WARN_ONCE(get_logger(), "Unknown image quality '%s', using raw", image_quality_.c_str());
-        processed_image = original_image;
+        processed_image = original_image.clone();
         encoding = "rgb8";
     }
 
@@ -151,8 +181,16 @@ void ThetaDriver::publishImage(GstMapInfo map) {
         compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
         compression_params.push_back(jpeg_compress_value_);
         
-        // Compress image to JPEG (processed_image is already RGB from GStreamer pipeline)
-        cv::imencode(".jpg", processed_image, compressed_data, compression_params);
+        // cv::imencode() expects BGR format, but processed_image is RGB from GStreamer pipeline
+        // Convert RGB to BGR before encoding
+        // Sử dụng in-place conversion nếu có thể để tối ưu memory
+        cv::Mat bgr_image;
+        cv::cvtColor(processed_image, bgr_image, cv::COLOR_RGB2BGR);
+        
+        // Compress image to JPEG (now in BGR format)
+        // Pre-allocate compressed_data với kích thước ước tính để tránh reallocation
+        compressed_data.reserve(processed_image.total() * processed_image.elemSize() / 4); // Ước tính ~25% của original
+        cv::imencode(".jpg", bgr_image, compressed_data, compression_params);
         
         if (!compressed_data.empty()) {
             // Use compressed JPEG data
@@ -181,8 +219,22 @@ void ThetaDriver::publishImage(GstMapInfo map) {
         // Use uncompressed RGB24 data
         image.step = processed_image.cols * 3;  // 3 bytes per pixel (RGB24)
         size_t data_size = processed_image.total() * processed_image.elemSize();
+        
+        // Tối ưu: resize() sẽ allocate memory, sau đó assign trực tiếp từ Mat data
         image.data.resize(data_size);
-        memcpy(image.data.data(), processed_image.data, data_size);
+        
+        // Kiểm tra xem Mat có continuous memory không để tối ưu copy
+        if (processed_image.isContinuous()) {
+            // Continuous memory: copy trực tiếp
+            memcpy(image.data.data(), processed_image.data, data_size);
+        } else {
+            // Non-continuous: copy từng row
+            size_t row_size = processed_image.cols * processed_image.elemSize();
+            uint8_t* dst = image.data.data();
+            for (int i = 0; i < processed_image.rows; ++i) {
+                memcpy(dst + i * row_size, processed_image.ptr(i), row_size);
+            }
+        }
     }
     
     image_pub_->publish(image);
@@ -234,9 +286,16 @@ void ThetaDriver::onInit() {
         RCLCPP_INFO(get_logger(), "FPS limiting disabled");
     }
     
+    // Tối ưu pipeline cho 4K: tăng queue sizes để tránh drop frames
+    // max-size-buffers=0: không giới hạn số buffer
+    // max-size-time=0: không giới hạn thời gian
+    // leaky=downstream: drop buffer cũ nếu queue đầy để tránh latency
     pipeline_ =
-        "appsrc name=ap ! queue ! h264parse ! queue ! "
-        "decodebin ! queue ! videoconvert n_threads=8 ! queue ! video/x-raw,format=RGB ! appsink name=appsink emit-signals=true";
+        "appsrc name=ap ! queue max-size-buffers=0 max-size-time=0 leaky=downstream ! "
+        "h264parse ! queue max-size-buffers=0 max-size-time=0 leaky=downstream ! "
+        "decodebin ! queue max-size-buffers=0 max-size-time=0 leaky=downstream ! "
+        "videoconvert n_threads=8 ! queue max-size-buffers=0 max-size-time=0 leaky=downstream ! "
+        "video/x-raw,format=RGB ! appsink name=appsink emit-signals=true max-buffers=1 drop=true sync=false";
     declare_parameter<std::string>("pipeline", pipeline_);
     get_parameter("pipeline",pipeline_);
 

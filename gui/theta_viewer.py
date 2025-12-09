@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Multi-Tab GUI Viewer
-GUI với 2 tabs: Theta Driver và Livox Driver 2
+GUI với tabs: Theta Driver, Livox Driver, Recording và Replay
 """
 
 import os
@@ -41,11 +41,9 @@ except ImportError as e:
 
 # Import các tab modules
 from theta_tab import ThetaTab
-from livox_tab import LivoxTab
-from calibration_tab import CalibrationTab
-from mapping_tab import MappingTab
 from recording_tab import RecordingTab
 from replay_tab import ReplayTab
+from livox_tab import LivoxTab
 
 
 class MainGUI:
@@ -53,7 +51,7 @@ class MainGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("Multi-Tab ROS2 Viewer - Theta & Livox")
+        self.root.title("Multi-Tab ROS2 Viewer - Theta Driver")
         self.root.geometry("1600x900")
         
         # Tạo notebook cho tabs
@@ -64,17 +62,9 @@ class MainGUI:
         self.theta_tab = ThetaTab(self.notebook)
         self.notebook.add(self.theta_tab, text="Theta Driver")
         
-        # Tạo tab Livox
+        # Tạo tab Livox Driver
         self.livox_tab = LivoxTab(self.notebook)
-        self.notebook.add(self.livox_tab, text="Livox Driver 2")
-        
-        # Tạo tab Calibration
-        self.calibration_tab = CalibrationTab(self.notebook)
-        self.notebook.add(self.calibration_tab, text="Calibration")
-        
-        # Tạo tab Mapping
-        self.mapping_tab = MappingTab(self.notebook)
-        self.notebook.add(self.mapping_tab, text="Mapping")
+        self.notebook.add(self.livox_tab, text="Livox Driver")
         
         # Tạo tab Recording
         self.recording_tab = RecordingTab(self.notebook)
@@ -93,24 +83,6 @@ class MainGUI:
         if hasattr(self.theta_tab, 'stop_all'):
             self.theta_tab.stop_all()
         
-        if hasattr(self.livox_tab, 'stop_livox_driver'):
-            self.livox_tab.stop_livox_driver()
-        if hasattr(self.livox_tab, 'stop_ros_subscriber'):
-            self.livox_tab.stop_ros_subscriber()
-        
-        # Dừng các process trong calibration tab
-        if hasattr(self.calibration_tab, 'stop_record'):
-            if self.calibration_tab.is_recording:
-                self.calibration_tab.stop_record()
-        
-        # Dừng mapping nếu đang chạy
-        if hasattr(self.mapping_tab, 'stop_mapping'):
-            if self.mapping_tab.is_mapping_running:
-                self.mapping_tab.stop_mapping()
-        if hasattr(self.mapping_tab, 'stop_rviz'):
-            if self.mapping_tab.is_rviz_running:
-                self.mapping_tab.stop_rviz()
-        
         # Dừng recording nếu đang chạy
         if hasattr(self.recording_tab, 'stop_recording'):
             if self.recording_tab.is_recording:
@@ -120,6 +92,17 @@ class MainGUI:
         if hasattr(self.replay_tab, 'stop_replay'):
             if self.replay_tab.is_replaying:
                 self.replay_tab.stop_replay()
+        
+        # Dừng Livox driver và subscriber nếu đang chạy
+        if hasattr(self.livox_tab, 'stop_livox_driver'):
+            if self.livox_tab.livox_driver_process:
+                self.livox_tab.stop_livox_driver()
+        if hasattr(self.livox_tab, 'stop_ros_subscriber'):
+            if self.livox_tab.is_ros_running:
+                self.livox_tab.stop_ros_subscriber()
+        if hasattr(self.livox_tab, 'stop_converter'):
+            if self.livox_tab.converter_process:
+                self.livox_tab.stop_converter()
         
         # Shutdown ROS nếu đã được khởi tạo
         if rclpy and rclpy.ok():

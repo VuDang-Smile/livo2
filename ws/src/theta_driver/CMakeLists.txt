@@ -59,25 +59,12 @@ ament_target_dependencies(theta_driver_lib
   Boost
 )
 
-# Add perspective converter library and dependencies
-add_library(perspective_converter_lib SHARED src/perspective_converter_lib.cpp)
-rclcpp_components_register_nodes(perspective_converter_lib "theta_driver::PerspectiveConverter")
-ament_target_dependencies(perspective_converter_lib
-  ${dependencies}
-  OpenCV
-)
-
 # Add executable and dependencies
 add_executable(theta_driver_node 
   src/theta_driver_node.cpp
   3rd/libuvc-theta-sample/gst/thetauvc.c)
 target_link_libraries(theta_driver_node theta_driver_lib)
 ament_target_dependencies(theta_driver_node ${dependencies})
-
-# Add perspective converter executable
-add_executable(perspective_converter_node src/perspective_converter_node.cpp)
-target_link_libraries(perspective_converter_node perspective_converter_lib)
-ament_target_dependencies(perspective_converter_node ${dependencies})
 
 if(NOT WIN32)
   ament_environment_hooks(
@@ -87,7 +74,6 @@ endif()
 # Install lib
 install(TARGETS
   theta_driver_lib
-  perspective_converter_lib
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -96,7 +82,6 @@ install(TARGETS
 # Install exec
 install(TARGETS
   theta_driver_node
-  perspective_converter_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 

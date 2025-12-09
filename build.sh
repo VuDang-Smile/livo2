@@ -16,24 +16,21 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRIVE_WS_DIR="$SCRIPT_DIR/drive_ws"
 WS_DIR="$SCRIPT_DIR/ws"
-DRIVER_BUILD_SCRIPT="$DRIVE_WS_DIR/src/livox_ros_driver2/build.sh"
-DRIVER_SETUP_SCRIPT="$DRIVE_WS_DIR/install/setup.sh"
 ROS2_SETUP_SCRIPT="/opt/ros/jazzy/setup.bash"
 
 # Danh sách packages trong ws/src
 declare -a PACKAGES=(
-    "fast_livo"
-    "direct_visual_lidar_calibration"
     "theta_driver"
-    "vikit_common"
-    "vikit_ros"
     "livox_msg_converter"
 )
 
 # Mảng lưu trạng thái chọn của từng package (0 = chưa chọn, 1 = đã chọn)
 declare -a SELECTED=(
-    0 0 0 0 0 0
+    0 0
 )
+
+# Biến lưu trạng thái có build Livox driver không (0 = không, 1 = có)
+BUILD_LIVOX_DRIVER=0
 
 # Hàm hiển thị menu
 show_menu() {
@@ -174,50 +171,91 @@ handle_menu_input() {
     done
 }
 
+# Hàm hỏi có build Livox driver không
+ask_build_livox_driver() {
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}    Build Livox Driver${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    echo ""
+    echo -e "${YELLOW}Bạn có muốn build Livox driver (drive_ws) không?${NC}"
+    echo ""
+    echo -e "  ${GREEN}[Y]${NC} - Có, build Livox driver"
+    echo -e "  ${RED}[N]${NC} - Không, bỏ qua build driver"
+    echo ""
+    echo -e "${YELLOW}Nhập lựa chọn (Y/n): ${NC}"
+    
+    while true; do
+        read -r response
+        case "$response" in
+            [Yy]|[Yy][Ee][Ss]|"")
+                BUILD_LIVOX_DRIVER=1
+                echo -e "${GREEN}Đã chọn: Build Livox driver${NC}"
+                echo ""
+                return 0
+                ;;
+            [Nn]|[Nn][Oo])
+                BUILD_LIVOX_DRIVER=0
+                echo -e "${YELLOW}Đã chọn: Bỏ qua build Livox driver${NC}"
+                echo ""
+                return 0
+                ;;
+            *)
+                echo -e "${RED}Lựa chọn không hợp lệ. Vui lòng nhập Y (có) hoặc N (không): ${NC}"
+                ;;
+        esac
+    done
+}
+
 # Hàm build driver
 build_driver() {
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}Bắt đầu build livox_ros_driver2...${NC}"
+    echo -e "${BLUE}Bắt đầu build Livox driver (drive_ws)...${NC}"
     echo -e "${BLUE}========================================${NC}"
     
-    if [ ! -f "$DRIVER_BUILD_SCRIPT" ]; then
-        echo -e "${RED}Lỗi: Không tìm thấy file build.sh tại: $DRIVER_BUILD_SCRIPT${NC}"
-        exit 1
+    if [ ! -d "$DRIVE_WS_DIR" ]; then
+        echo -e "${RED}Lỗi: Không tìm thấy drive_ws tại: $DRIVE_WS_DIR${NC}"
+        echo -e "${YELLOW}Bỏ qua build driver.${NC}"
+        echo ""
+        return 1
     fi
     
-    # Tắt set -e tạm thời để xử lý lỗi tốt hơn và giữ nguyên log
-    set +e
+    if [ ! -d "$DRIVE_WS_DIR/src/livox_ros_driver2" ]; then
+        echo -e "${RED}Lỗi: Không tìm thấy livox_ros_driver2 tại: $DRIVE_WS_DIR/src/livox_ros_driver2${NC}"
+        echo -e "${YELLOW}Bỏ qua build driver.${NC}"
+        echo ""
+        return 1
+    fi
     
+    # Lưu thư mục hiện tại
+    local current_dir=$(pwd)
+    
+    # Chuyển đến thư mục livox_ros_driver2 và chạy build.sh
     cd "$DRIVE_WS_DIR/src/livox_ros_driver2"
-    # Chạy build và giữ nguyên toàn bộ log (không redirect)
+    
+    echo -e "${GREEN}Đang build livox_ros_driver2 cho ROS2 Jazzy...${NC}"
+    echo ""
+    
+    # Chạy build.sh với argument "jazzy"
     bash build.sh jazzy
-    local build_exit_code=$?
-    cd "$SCRIPT_DIR"
+    local build_result=$?
     
-    # Bật lại set -e
-    set -e
+    # Quay lại thư mục gốc
+    cd "$current_dir"
     
-    # Kiểm tra kết quả build
-    if [ $build_exit_code -ne 0 ]; then
+    if [ $build_result -eq 0 ]; then
         echo ""
-        echo -e "${RED}========================================${NC}"
-        echo -e "${RED}Build driver THẤT BẠI với exit code: $build_exit_code${NC}"
-        echo -e "${RED}========================================${NC}"
+        echo -e "${GREEN}========================================${NC}"
+        echo -e "${GREEN}Build Livox driver thành công!${NC}"
+        echo -e "${GREEN}========================================${NC}"
         echo ""
-        echo -e "${YELLOW}Bạn có muốn tiếp tục build các packages khác không?${NC}"
-        echo -e "${YELLOW}(Lưu ý: Các packages có thể cần driver đã được build thành công)${NC}"
-        read -p "Tiếp tục? (y/n): " continue_choice
-        
-        if [[ ! "$continue_choice" =~ ^[Yy]$ ]]; then
-            echo -e "${YELLOW}Đã hủy build.${NC}"
-            exit 1
-        else
-            echo -e "${YELLOW}Tiếp tục build các packages...${NC}"
-            echo ""
-        fi
+        return 0
     else
-        echo -e "${GREEN}Build driver hoàn tất!${NC}"
         echo ""
+        echo -e "${RED}========================================${NC}"
+        echo -e "${RED}Build Livox driver thất bại!${NC}"
+        echo -e "${RED}========================================${NC}"
+        echo ""
+        return 1
     fi
 }
 
@@ -241,17 +279,22 @@ source_ros2_base() {
 # Hàm source setup.sh
 source_setup() {
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}Source drive_ws/install/setup.sh...${NC}"
+    echo -e "${BLUE}Source drive_ws setup.sh...${NC}"
     echo -e "${BLUE}========================================${NC}"
     
-    if [ ! -f "$DRIVER_SETUP_SCRIPT" ]; then
-        echo -e "${YELLOW}Cảnh báo: Không tìm thấy file setup.sh tại: $DRIVER_SETUP_SCRIPT${NC}"
-        echo -e "${YELLOW}Có thể driver chưa được build.${NC}"
+    local drive_ws_setup="$DRIVE_WS_DIR/install/setup.sh"
+    
+    if [ ! -f "$drive_ws_setup" ]; then
+        echo -e "${YELLOW}Cảnh báo: Không tìm thấy drive_ws/install/setup.sh tại: $drive_ws_setup${NC}"
+        echo -e "${YELLOW}Có thể drive_ws chưa được build hoặc build thất bại.${NC}"
+        echo -e "${YELLOW}Bỏ qua source drive_ws setup.${NC}"
         echo ""
+        return 1
     else
-        source "$DRIVER_SETUP_SCRIPT"
-        echo -e "${GREEN}Đã source setup.sh thành công!${NC}"
+        source "$drive_ws_setup"
+        echo -e "${GREEN}Đã source drive_ws setup.sh thành công!${NC}"
         echo ""
+        return 0
     fi
 }
 
@@ -308,26 +351,32 @@ main() {
     # Bước 0: Source ROS2 base setup (bắt buộc)
     source_ros2_base
     
-    # Bước 1: Hỏi có build driver không
-    echo -e "${YELLOW}Bước 1: Build livox_ros_driver2?${NC}"
-    read -p "Có build driver không? (y/n): " build_driver_choice
+    # Bước 1: Hỏi có build Livox driver không
+    echo -e "${YELLOW}Bước 1: Xác nhận build Livox driver${NC}"
+    ask_build_livox_driver
     
-    if [[ "$build_driver_choice" =~ ^[Yy]$ ]]; then
+    # Bước 2: Build driver (nếu được chọn)
+    if [ "$BUILD_LIVOX_DRIVER" -eq 1 ]; then
+        echo -e "${YELLOW}Bước 2: Build Livox driver (drive_ws)${NC}"
         build_driver
+        
+        # Bước 3: Source drive_ws setup.sh
+        echo -e "${YELLOW}Bước 3: Source drive_ws setup.sh${NC}"
+        source_setup
     else
-        echo -e "${YELLOW}Bỏ qua build driver.${NC}"
+        echo -e "${YELLOW}Bước 2: Bỏ qua build Livox driver${NC}"
         echo ""
+        # Vẫn thử source drive_ws setup.sh nếu đã được build trước đó
+        echo -e "${YELLOW}Bước 3: Kiểm tra và source drive_ws setup.sh (nếu có)${NC}"
+        source_setup
     fi
     
-    # Bước 2: Source setup.sh
-    source_setup
-    
-    # Bước 3: Chọn packages
-    echo -e "${YELLOW}Bước 3: Chọn packages để build${NC}"
+    # Bước 4: Chọn packages
+    echo -e "${YELLOW}Bước 4: Chọn packages để build${NC}"
     handle_menu_input
     
-    # Bước 4: Build packages
-    echo -e "${YELLOW}Bước 4: Build packages${NC}"
+    # Bước 5: Build packages
+    echo -e "${YELLOW}Bước 5: Build packages${NC}"
     build_packages
     
     # Tạm dừng trước khi thoát

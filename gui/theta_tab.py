@@ -18,6 +18,7 @@ if 'QT_PLUGIN_PATH' in os.environ:
 import threading
 import subprocess
 from pathlib import Path
+import numpy as np
 
 import rclpy
 from rclpy.node import Node
@@ -71,22 +72,99 @@ class SingleImageSubscriber(Node):
             # Debug: log mỗi 30 frame
             if not hasattr(self, '_callback_count'):
                 self._callback_count = 0
+                print(f'[SingleImageSubscriber] ✅ Callback được gọi lần đầu từ {self.topic_name}')
             self._callback_count += 1
+            
+            # Log ngay frame đầu tiên để confirm callback được gọi
+            if self._callback_count == 1:
+                print(f'[SingleImageSubscriber] ✅ Đã nhận frame đầu tiên từ {self.topic_name}')
+                print(f'[SingleImageSubscriber]   Encoding: {msg.encoding}, Size: {msg.width}x{msg.height}, Data size: {len(msg.data)} bytes')
+            
             if self._callback_count % 30 == 0:
                 self.get_logger().info(f'Đã nhận {self._callback_count} frames từ {self.topic_name}')
                 print(f'[SingleImageSubscriber] Đã nhận {self._callback_count} frames từ {self.topic_name}')
             
-            # Debug: log encoding
+            # Debug: log encoding (bao gồm JPEG)
             if self._callback_count == 1:
-                print(f'[SingleImageSubscriber] Encoding: {msg.encoding}, Size: {msg.width}x{msg.height}')
+                encoding_info = f'Encoding: {msg.encoding}, Size: {msg.width}x{msg.height}'
+                encoding_lower = msg.encoding.lower()
+                if 'jpeg' in encoding_lower:
+                    encoding_info += ' (JPEG compressed)'
+                print(f'[SingleImageSubscriber] {encoding_info}')
             
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
+            # Xử lý JPEG encoding đặc biệt vì cv_bridge không hỗ trợ
+            # Hỗ trợ các encoding: "jpeg", "JPEG", "jpeg2000", etc.
+            encoding_lower = msg.encoding.lower()
+            if 'jpeg' in encoding_lower:
+                # Decode JPEG data thủ công bằng OpenCV
+                # msg.data có thể là bytes, list, tuple, hoặc array.array
+                # Chuyển đổi sang bytes trước
+                if isinstance(msg.data, bytes):
+                    jpeg_bytes = msg.data
+                elif isinstance(msg.data, (list, tuple)):
+                    jpeg_bytes = bytes(msg.data)
+                elif hasattr(msg.data, 'tobytes'):
+                    # Xử lý array.array hoặc numpy array
+                    jpeg_bytes = msg.data.tobytes()
+                else:
+                    # Thử convert sang bytes
+                    try:
+                        jpeg_bytes = bytes(msg.data)
+                    except Exception as e:
+                        raise RuntimeError(f"Không thể convert data sang bytes. Type: {type(msg.data)}, Error: {e}")
+                
+                # Kiểm tra data không rỗng
+                if not jpeg_bytes or len(jpeg_bytes) == 0:
+                    raise RuntimeError("JPEG data rỗng")
+                
+                # Debug: log data size
+                if self._callback_count == 1:
+                    print(f'[SingleImageSubscriber] JPEG data size: {len(jpeg_bytes)} bytes')
+                
+                # Chuyển đổi data từ bytes sang numpy array
+                jpeg_data = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+                
+                # Decode JPEG
+                cv_image_bgr = cv2.imdecode(jpeg_data, cv2.IMREAD_COLOR)
+                
+                if cv_image_bgr is None:
+                    # Debug: log thêm thông tin khi decode fail
+                    error_detail = f"Data size: {len(jpeg_bytes)}, First 10 bytes: {jpeg_bytes[:10] if len(jpeg_bytes) >= 10 else jpeg_bytes}"
+                    raise RuntimeError(f"Không thể decode JPEG data. {error_detail}")
+                
+                # Chuyển từ BGR sang RGB (OpenCV decode trả về BGR)
+                cv_image = cv2.cvtColor(cv_image_bgr, cv2.COLOR_BGR2RGB)
+                
+                # Debug: log image shape
+                if self._callback_count == 1:
+                    print(f'[SingleImageSubscriber] JPEG decoded, CV Image shape: {cv_image.shape}')
+            else:
+                # Sử dụng cv_bridge cho các encoding khác (rgb8, bgr8, etc.)
+                cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
+                
+                # Debug: log image shape
+                if self._callback_count == 1:
+                    print(f'[SingleImageSubscriber] CV Image shape: {cv_image.shape}')
             
-            # Debug: log image shape
-            if self._callback_count == 1:
-                print(f'[SingleImageSubscriber] CV Image shape: {cv_image.shape}')
-            
-            self.callback(cv_image)
+            # Truyền thêm encoding info nếu callback hỗ trợ
+            if callable(self.callback):
+                # Kiểm tra xem callback có nhận encoding không bằng cách xem số lượng parameters
+                import inspect
+                try:
+                    sig = inspect.signature(self.callback)
+                    param_count = len(sig.parameters)
+                    # Nếu callback có 2 parameters trở lên, truyền encoding
+                    if param_count >= 2:
+                        self.callback(cv_image, msg.encoding)
+                    else:
+                        self.callback(cv_image)
+                except (ValueError, TypeError):
+                    # Nếu không thể inspect, thử gọi với encoding trước
+                    try:
+                        self.callback(cv_image, msg.encoding)
+                    except TypeError:
+                        # Nếu callback không nhận encoding, gọi không có encoding
+                        self.callback(cv_image)
         except Exception as e:
             error_msg = f'Lỗi xử lý ảnh từ {self.topic_name}: {e}'
             self.get_logger().error(error_msg)
@@ -667,7 +745,8 @@ class CameraModelTab(ttk.Frame):
 
 
 class EquirectangularTab(ttk.Frame):
-    """Tab cho equirectangular (original) - chỉ subscribe, không có converter"""
+    """Tab cho equirectangular (original) - chỉ subscribe, không có converter
+    Hỗ trợ cả RGB8 và JPEG encoding"""
     
     def __init__(self, parent):
         super().__init__(parent)
@@ -679,6 +758,8 @@ class EquirectangularTab(ttk.Frame):
         self.is_running = False
         self.frame_count = 0
         self.current_image = None
+        self.current_encoding = None  # Lưu encoding hiện tại
+        self.topic_var = None  # Sẽ được tạo trong create_widgets
         
         # UI
         self.create_widgets()
@@ -689,11 +770,28 @@ class EquirectangularTab(ttk.Frame):
         control_frame = ttk.Frame(self, padding="5")
         control_frame.pack(fill=tk.X)
         
+        # Topic selection frame
+        topic_frame = ttk.Frame(control_frame)
+        topic_frame.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(topic_frame, text="Topic:").pack(side=tk.LEFT, padx=2)
+        self.topic_var = tk.StringVar(value="/image_raw")
+        topic_entry = ttk.Entry(topic_frame, textvariable=self.topic_var, width=20)
+        topic_entry.pack(side=tk.LEFT, padx=2)
+        
+        refresh_topics_btn = ttk.Button(
+            topic_frame,
+            text="🔄 Refresh Topics",
+            command=self.refresh_topics_list,
+            width=15
+        )
+        refresh_topics_btn.pack(side=tk.LEFT, padx=2)
+        
         self.start_btn = ttk.Button(
             control_frame,
             text="Start Subscriber",
             command=self.start_subscriber,
-            state=tk.DISABLED
+            state=tk.NORMAL  # Enable ngay từ đầu để có thể subscribe từ bag hoặc driver khác
         )
         self.start_btn.pack(side=tk.LEFT, padx=5)
         
@@ -716,10 +814,48 @@ class EquirectangularTab(ttk.Frame):
         # Status label
         self.status_label = ttk.Label(
             self,
-            text="Equirectangular: Chưa có ảnh",
+            text="Equirectangular: Chưa có ảnh (Có thể subscribe từ bag hoặc theta driver)\n💡 Tip: Click 'Refresh Topics' để xem các topics có sẵn",
             font=("Arial", 9)
         )
         self.status_label.pack(fill=tk.X, padx=5, pady=5)
+    
+    def refresh_topics_list(self):
+        """Refresh danh sách topics và hiển thị các image topics"""
+        try:
+            result = subprocess.run(
+                ['ros2', 'topic', 'list'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            
+            if result.returncode == 0:
+                all_topics = [line.strip() for line in result.stdout.split('\n') if line.strip()]
+                image_topics = [t for t in all_topics if 'image' in t.lower() or 'camera' in t.lower()]
+                
+                if image_topics:
+                    print("📡 Các image topics có sẵn:")
+                    for topic in image_topics:
+                        print(f"   - {topic}")
+                    
+                    # Hiển thị trong messagebox
+                    topics_text = "\n".join(image_topics)
+                    messagebox.showinfo(
+                        "Image Topics",
+                        f"Các image topics có sẵn:\n\n{topics_text}\n\n"
+                        f"Bạn có thể copy topic name và paste vào ô Topic ở trên."
+                    )
+                else:
+                    print("⚠️  Không tìm thấy image topics")
+                    messagebox.showinfo(
+                        "Không có Image Topics",
+                        "Không tìm thấy image topics nào.\n\n"
+                        "Các topics có sẵn:\n" + "\n".join(all_topics[:10])
+                    )
+            else:
+                messagebox.showerror("Lỗi", f"Không thể lấy danh sách topics: {result.stderr}")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi khi refresh topics: {e}")
     
     def start_subscriber(self):
         """Start ROS subscriber"""
@@ -731,9 +867,19 @@ class EquirectangularTab(ttk.Frame):
                 print("Khởi tạo ROS2...")
                 rclpy.init()
             
-            print("Tạo ROS2 node subscriber cho /image_raw...")
+            # Lấy topic name từ UI
+            topic_name = self.topic_var.get().strip()
+            if not topic_name:
+                messagebox.showerror("Lỗi", "Vui lòng nhập topic name")
+                return
+            
+            # Đảm bảo topic name có / prefix
+            if not topic_name.startswith('/'):
+                topic_name = '/' + topic_name
+            
+            print(f"Tạo ROS2 node subscriber cho {topic_name}...")
             self.ros_node = SingleImageSubscriber(
-                '/image_raw',  # Đảm bảo có / prefix
+                topic_name,
                 self.on_image_received,
                 'equirectangular_subscriber'
             )
@@ -742,20 +888,60 @@ class EquirectangularTab(ttk.Frame):
             self.ros_executor = SingleThreadedExecutor()
             self.ros_executor.add_node(self.ros_node)
             
-            # Kiểm tra topic có tồn tại không
-            print("Kiểm tra topic /image_raw...")
+            # Kiểm tra topic có tồn tại không (không bắt buộc, có thể subscribe từ bag sau)
+            print(f"Kiểm tra topic {topic_name}...")
             result = subprocess.run(
                 ['ros2', 'topic', 'list'],
                 capture_output=True,
                 text=True,
                 timeout=2
             )
-            if '/image_raw' in result.stdout:
-                print("✓ Topic /image_raw đã tồn tại")
+            
+            # Kiểm tra ROS2 domain ID
+            ros_domain_id = os.environ.get('ROS_DOMAIN_ID', '0')
+            print(f"ROS_DOMAIN_ID hiện tại: {ros_domain_id}")
+            
+            if topic_name in result.stdout:
+                print(f"✓ Topic {topic_name} đã tồn tại")
+                # Kiểm tra topic type và hz
+                try:
+                    type_result = subprocess.run(
+                        ['ros2', 'topic', 'type', topic_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=2
+                    )
+                    if type_result.returncode == 0:
+                        print(f"✓ Topic type: {type_result.stdout.strip()}")
+                    
+                    # Kiểm tra hz (chỉ 1 lần, không chờ lâu)
+                    hz_result = subprocess.run(
+                        ['ros2', 'topic', 'hz', topic_name, '--window', '5'],
+                        capture_output=True,
+                        text=True,
+                        timeout=6
+                    )
+                    if hz_result.returncode == 0 and 'average rate' in hz_result.stdout:
+                        print(f"✓ Topic hz: {hz_result.stdout.strip()}")
+                except Exception as e:
+                    print(f"⚠️  Không thể kiểm tra topic info: {e}")
             else:
-                print("⚠️  Cảnh báo: Topic /image_raw chưa tồn tại")
+                print(f"⚠️  Cảnh báo: Topic {topic_name} chưa tồn tại")
+                print("   Bạn có thể:")
+                print("   - Play bag file: ros2 bag play <bag_file>")
+                print("   - Launch theta driver từ GUI")
+                print("   - Hoặc subscribe sẽ đợi topic xuất hiện")
+                print("   - Hoặc click 'Refresh Topics' để xem các topics có sẵn")
                 print("Các topics có sẵn:")
                 print(result.stdout)
+                
+                # Gợi ý các topic image có thể có
+                image_topics = [line.strip() for line in result.stdout.split('\n') 
+                               if 'image' in line.lower() or 'camera' in line.lower()]
+                if image_topics:
+                    print("\n💡 Các topic image có thể có:")
+                    for topic in image_topics:
+                        print(f"   - {topic}")
             
             print("Khởi động ROS thread...")
             self.ros_thread = threading.Thread(target=self.ros_spin, daemon=True)
@@ -763,14 +949,25 @@ class EquirectangularTab(ttk.Frame):
             
             self.is_running = True
             self.frame_count = 0
+            
+            # Cập nhật status dựa trên topic có tồn tại không
+            topic_exists = topic_name in result.stdout if 'result' in locals() else False
+            if topic_exists:
+                status_text = f"Equirectangular: Đang subscribe {topic_name} (topic đã có sẵn)"
+            else:
+                status_text = f"Equirectangular: Đang subscribe {topic_name} (đợi topic từ bag/driver)..."
+            
             self.status_label.config(
-                text="Equirectangular: Đang subscribe /image_raw...",
+                text=status_text,
                 foreground="green"
             )
             self.start_btn.config(state=tk.DISABLED)
             self.stop_btn.config(state=tk.NORMAL)
             
             print("✓ ROS subscriber đã khởi động")
+            
+            # Kiểm tra sau 3 giây xem có nhận được messages không
+            self.after(3000, self.check_subscriber_status)
             
         except Exception as e:
             error_msg = f"Không thể start subscriber: {e}"
@@ -783,11 +980,17 @@ class EquirectangularTab(ttk.Frame):
         """Spin ROS node trong thread riêng"""
         try:
             print("ROS spin thread đã bắt đầu cho Equirectangular")
+            spin_count = 0
             while rclpy.ok() and self.is_running:
                 if self.ros_executor is not None:
                     self.ros_executor.spin_once(timeout_sec=0.1)
                 else:
                     rclpy.spin_once(self.ros_node, timeout_sec=0.1)
+                
+                # Debug: log mỗi 100 spins để confirm thread đang chạy
+                spin_count += 1
+                if spin_count % 100 == 0:
+                    print(f"[Equirectangular] ROS spin đang chạy ({spin_count} spins)")
         except Exception as e:
             error_msg = f"Lỗi trong ROS spin: {e}"
             print(f"✗ {error_msg}")
@@ -799,23 +1002,88 @@ class EquirectangularTab(ttk.Frame):
                     foreground="red"
                 ))
     
-    def on_image_received(self, cv_image):
-        """Callback khi nhận được ảnh"""
+    def check_subscriber_status(self):
+        """Kiểm tra xem subscriber có nhận được messages không"""
+        if not self.is_running:
+            return
+        
+        if self.frame_count == 0:
+            # Chưa nhận được frame nào
+            print("⚠️  Chưa nhận được frame nào sau 3 giây")
+            print("   Kiểm tra:")
+            print("   1. Bag file có đang play không?")
+            print("   2. Topic name có đúng không? (kiểm tra: ros2 topic list)")
+            print("   3. ROS_DOMAIN_ID có khớp không? (bag và GUI phải cùng domain)")
+            
+            # Kiểm tra topic lại
+            try:
+                result = subprocess.run(
+                    ['ros2', 'topic', 'list'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                topic_name = self.topic_var.get().strip()
+                if not topic_name.startswith('/'):
+                    topic_name = '/' + topic_name
+                
+                if topic_name in result.stdout:
+                    print(f"   ✓ Topic {topic_name} đang tồn tại")
+                    # Kiểm tra hz
+                    try:
+                        hz_result = subprocess.run(
+                            ['ros2', 'topic', 'hz', topic_name, '--window', '3'],
+                            capture_output=True,
+                            text=True,
+                            timeout=4
+                        )
+                        if hz_result.returncode == 0:
+                            print(f"   Topic hz: {hz_result.stdout.strip()}")
+                    except:
+                        pass
+                else:
+                    print(f"   ✗ Topic {topic_name} không tồn tại")
+                    print("   Các topics có sẵn:")
+                    for line in result.stdout.split('\n'):
+                        if line.strip() and ('image' in line.lower() or 'camera' in line.lower()):
+                            print(f"     - {line.strip()}")
+            except Exception as e:
+                print(f"   Lỗi khi kiểm tra topic: {e}")
+            
+            # Cập nhật status
+            self.status_label.config(
+                text="Equirectangular: ⚠️ Chưa nhận được frames (kiểm tra topic name và ROS_DOMAIN_ID)",
+                foreground="orange"
+            )
+            
+            # Kiểm tra lại sau 5 giây nữa
+            self.after(5000, self.check_subscriber_status)
+        else:
+            print(f"✓ Subscriber đang hoạt động: đã nhận {self.frame_count} frames")
+    
+    def on_image_received(self, cv_image, encoding=None):
+        """Callback khi nhận được ảnh (hỗ trợ JPEG và RGB8)"""
         try:
             self.current_image = cv_image
+            self.current_encoding = encoding or "rgb8"  # Mặc định là rgb8
             self.frame_count += 1
             
             # Debug: log mỗi 30 frame
             if self.frame_count % 30 == 0:
-                print(f"✓ Equirectangular: Đã nhận {self.frame_count} frames")
+                encoding_info = f" ({encoding})" if encoding and 'jpeg' in encoding.lower() else ""
+                print(f"✓ Equirectangular: Đã nhận {self.frame_count} frames{encoding_info}")
             
             # Cập nhật UI trong main thread
             self.after(0, self.update_image_display, cv_image)
             
-            # Cập nhật status mỗi 30 frame
+            # Cập nhật status mỗi 30 frame với encoding info
             if self.frame_count % 30 == 0:
+                encoding_display = f" | {encoding}" if encoding and 'jpeg' in encoding.lower() else ""
+                topic_name = self.topic_var.get().strip() if self.topic_var else "/image_raw"
+                if not topic_name.startswith('/'):
+                    topic_name = '/' + topic_name
                 self.after(0, lambda: self.status_label.config(
-                    text=f"Equirectangular: {self.frame_count} frames | /image_raw",
+                    text=f"Equirectangular: {self.frame_count} frames | {topic_name}{encoding_display}",
                     foreground="green"
                 ))
         except Exception as e:
@@ -854,10 +1122,15 @@ class EquirectangularTab(ttk.Frame):
             
             self.canvas.image = photo
             
+            # Hiển thị encoding info nếu là JPEG
+            encoding_info = ""
+            if self.current_encoding and 'jpeg' in self.current_encoding.lower():
+                encoding_info = f" | {self.current_encoding.upper()}"
+            
             self.status_label.config(
                 text=f"Equirectangular: {img_width}x{img_height} | "
                      f"Hiển thị: {new_width}x{new_height} | "
-                     f"Scale: {scale:.2f} | Frames: {self.frame_count}",
+                     f"Scale: {scale:.2f} | Frames: {self.frame_count}{encoding_info}",
                 foreground="green"
             )
             
@@ -990,18 +1263,6 @@ class ThetaTab(ttk.Frame):
         self.tab_equirect = EquirectangularTab(self.notebook)
         self.notebook.add(self.tab_equirect, text="Equirectangular")
         
-        # Tab Pinhole
-        # Note: perspective_converter_node publishes to /image_perspective by default
-        self.tab_pinhole = CameraModelTab(
-            self.notebook,
-            "Pinhole",
-            "image_perspective",  # Changed from image_pinhole to match perspective_converter_node output
-            "camera_info",
-            "perspective_converter_node"
-        )
-        self.notebook.add(self.tab_pinhole, text="Pinhole")
-        self.camera_tabs["Pinhole"] = self.tab_pinhole
-        
         self.notebook.pack(fill=tk.BOTH, expand=True)
     
     def launch_theta_driver(self):
@@ -1048,7 +1309,13 @@ class ThetaTab(ttk.Frame):
                 foreground="orange"
             )
             self.launch_theta_btn.config(state=tk.DISABLED)
-            self.tab_equirect.start_btn.config(state=tk.NORMAL)
+            # Không cần enable start_btn ở đây vì đã enable từ đầu để có thể subscribe từ bag
+            # Cập nhật status của equirectangular tab nếu đang subscribe
+            if self.tab_equirect.is_running:
+                self.tab_equirect.status_label.config(
+                    text="Equirectangular: Đang subscribe /image_raw (topic từ theta driver)",
+                    foreground="green"
+                )
             
             # Kiểm tra process sau 2 giây
             self.after(2000, self.check_theta_driver_process)

@@ -10,22 +10,20 @@ alwaysApply: true
 
 ## Quy tắc Build
 
-### Quan trọng về livox_ros_driver2
-- **KHÔNG được build** `livox_ros_driver2/` khi update các ROS node trong `ws/`
-- `livox_ros_driver2/` cần lệnh build riêng (không dùng colcon build thông thường)
-- **LUÔN source** `ws/install/setup.sh` trước mỗi lần build để lấy class của driver2
-
 ### Quy trình Build
-1. Source setup.sh trước:
+1. Source ROS2 base setup:
    ```bash
-   source ws/install/setup.sh
+   source /opt/ros/jazzy/setup.bash
    ```
-2. Build các ROS node trong ws/ (KHÔNG bao gồm livox_ros_driver2):
+2. Build các ROS node trong ws/:
    ```bash
    colcon build --packages-select <package_name> --symlink-install
    ```
-3. Nếu cần build livox_ros_driver2, sử dụng lệnh build riêng của nó (không dùng colcon build)
+3. Source workspace setup sau khi build:
+   ```bash
+   source ws/install/setup.sh
+   ```
 
 ### Lưu ý
-- Luôn đảm bảo đã source setup.sh trước khi build để có đầy đủ dependencies từ livox_ros_driver2
-- Không thêm livox_ros_driver2 vào danh sách packages khi dùng colcon build
+- Luôn đảm bảo đã source ROS2 base setup trước khi build
+- Source workspace setup sau khi build để sử dụng các packages đã build
