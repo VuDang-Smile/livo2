@@ -75,6 +75,31 @@ check_ros2_jazzy_installed() {
     return 1  # Not installed
 }
 
+# Function to add ROS2 Jazzy source to .bashrc
+add_to_bashrc() {
+    local bashrc_file="$HOME/.bashrc"
+    local source_line="source /opt/ros/jazzy/setup.bash"
+    
+    # Check if the line already exists in .bashrc
+    if grep -Fxq "$source_line" "$bashrc_file" 2>/dev/null; then
+        print_info "ROS2 Jazzy source is already in ~/.bashrc"
+        return 0
+    fi
+    
+    # Add the line to .bashrc
+    print_info "Adding ROS2 Jazzy source to ~/.bashrc..."
+    if echo "$source_line" >> "$bashrc_file"; then
+        print_success "Added ROS2 Jazzy source to ~/.bashrc"
+        print_info "The changes will take effect in new terminal sessions."
+        return 0
+    else
+        print_warning "Failed to add ROS2 Jazzy source to ~/.bashrc"
+        print_info "You can manually add it by running:"
+        echo -e "  ${GREEN}echo '$source_line' >> ~/.bashrc${NC}"
+        return 1
+    fi
+}
+
 # Function to install UTF-8 locale
 install_locale() {
     print_info "Checking and installing UTF-8 locale..."
@@ -236,8 +261,18 @@ main() {
         print_success "ROS2 Jazzy is already installed!"
         print_info "Location: /opt/ros/jazzy/"
         echo ""
-        print_info "To use ROS2 Jazzy, run:"
+        
+        # Check and add to .bashrc if not already there
+        echo -e "${BLUE}========================================${NC}"
+        echo -e "${BLUE}Checking .bashrc Configuration${NC}"
+        echo -e "${BLUE}========================================${NC}"
+        add_to_bashrc
+        echo ""
+        
+        print_info "To use ROS2 Jazzy in current session, run:"
         echo -e "  ${GREEN}source /opt/ros/jazzy/setup.bash${NC}"
+        echo ""
+        print_info "Or open a new terminal - ROS2 Jazzy will be automatically sourced."
         echo ""
         confirm_exit 0 "ROS2 Jazzy is ready to use!"
     fi
@@ -310,11 +345,18 @@ main() {
         echo ""
         print_success "ROS2 Jazzy has been installed successfully!"
         echo ""
-        print_info "To use ROS2 Jazzy, run:"
+        
+        # Automatically add to .bashrc
+        echo -e "${BLUE}========================================${NC}"
+        echo -e "${BLUE}Configuring .bashrc${NC}"
+        echo -e "${BLUE}========================================${NC}"
+        add_to_bashrc
+        echo ""
+        
+        print_info "To use ROS2 Jazzy in current session, run:"
         echo -e "  ${GREEN}source /opt/ros/jazzy/setup.bash${NC}"
         echo ""
-        print_info "Or add to ~/.bashrc to automatically source on terminal startup:"
-        echo -e "  ${GREEN}echo 'source /opt/ros/jazzy/setup.bash' >> ~/.bashrc${NC}"
+        print_info "Or open a new terminal - ROS2 Jazzy will be automatically sourced."
         echo ""
         confirm_exit 0 "ROS2 Jazzy has been installed successfully!"
     else
