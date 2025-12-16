@@ -35,7 +35,7 @@ class CalibrationTab(ttk.Frame):
         self.preprocess_process = None
         self.initial_guess_process = None
         self.calibrate_process = None
-        self.perspective_converter_process = None
+        self.camera_info_publisher_process = None
         
         # Paths
         self.bag_output_dir = None
@@ -43,7 +43,7 @@ class CalibrationTab(ttk.Frame):
         
         # State
         self.is_recording = False
-        self.is_perspective_converter_running = False
+        self.is_camera_info_publisher_running = False
         self.current_step = "idle"  # idle, recording, preprocessing, calibrating
         
         self.create_widgets()
@@ -97,11 +97,11 @@ class CalibrationTab(ttk.Frame):
         self.status_label.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=5)
     
     def create_record_tab(self, parent):
-        """Tạo tab record bag"""
+        """Tạo tab record bag (chỉ cho equirectangular camera)"""
         # Instructions
         instructions = ttk.Label(
             parent,
-            text="Ghi lại rosbag với topics /image_perspective và /livox/points2",
+            text="Ghi lại rosbag với topics /image_raw (equirectangular) và /livox/points2",
             font=("Arial", 10)
         )
         instructions.pack(pady=10)
@@ -122,13 +122,13 @@ class CalibrationTab(ttk.Frame):
         )
         browse_btn.pack(side=tk.LEFT, padx=5)
         
-        # Perspective Converter Control
-        converter_frame = ttk.LabelFrame(parent, text="Perspective Converter", padding=10)
+        # Camera Info Publisher Control (cho equirectangular)
+        converter_frame = ttk.LabelFrame(parent, text="Camera Info Publisher (Equirectangular)", padding=10)
         converter_frame.pack(fill=tk.X, padx=20, pady=10)
         
         ttk.Label(
             converter_frame,
-            text="Cần chạy perspective converter để publish /camera_info topic trước khi record",
+            text="Cần chạy camera_info_publisher để publish /camera_info topic cho equirectangular camera trước khi record",
             font=("Arial", 9),
             foreground="blue"
         ).pack(anchor=tk.W, pady=5)
@@ -138,16 +138,16 @@ class CalibrationTab(ttk.Frame):
         
         self.launch_converter_btn = ttk.Button(
             converter_btn_frame,
-            text="Launch Perspective Converter",
-            command=self.launch_perspective_converter,
+            text="Launch Camera Info Publisher",
+            command=self.launch_camera_info_publisher,
             style="Accent.TButton"
         )
         self.launch_converter_btn.pack(side=tk.LEFT, padx=5)
         
         self.stop_converter_btn = ttk.Button(
             converter_btn_frame,
-            text="Stop Converter",
-            command=self.stop_perspective_converter,
+            text="Stop Publisher",
+            command=self.stop_camera_info_publisher,
             state=tk.DISABLED
         )
         self.stop_converter_btn.pack(side=tk.LEFT, padx=5)
@@ -164,7 +164,7 @@ class CalibrationTab(ttk.Frame):
         topics_frame = ttk.LabelFrame(parent, text="Topics", padding=10)
         topics_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
-        self.topics_var = tk.StringVar(value="/image_perspective /camera_info /livox/points2")
+        self.topics_var = tk.StringVar(value="/image_raw /camera_info /livox/points2")
         topics_entry = ttk.Entry(topics_frame, textvariable=self.topics_var, width=60)
         topics_entry.pack(pady=5)
         
@@ -212,7 +212,7 @@ class CalibrationTab(ttk.Frame):
         # Instructions
         instructions = ttk.Label(
             parent,
-            text="Preprocessing dữ liệu từ rosbag để chuẩn bị cho calibration",
+            text="Preprocessing dữ liệu từ rosbag để chuẩn bị cho calibration (equirectangular camera)",
             font=("Arial", 10)
         )
         instructions.pack(pady=10)
@@ -659,10 +659,10 @@ class CalibrationTab(ttk.Frame):
         except Exception as e:
             print(f"Lỗi khi log: {e}")
     
-    def launch_perspective_converter(self):
-        """Launch perspective converter node"""
-        if self.is_perspective_converter_running:
-            messagebox.showwarning("Cảnh báo", "Perspective converter đang chạy")
+    def launch_camera_info_publisher(self):
+        """Launch camera_info_publisher node cho equirectangular camera"""
+        if self.is_camera_info_publisher_running:
+            messagebox.showwarning("Cảnh báo", "Camera info publisher đang chạy")
             return
         
         setup_script = self.workspace_path / "install" / "setup.sh"
@@ -670,14 +670,11 @@ class CalibrationTab(ttk.Frame):
             messagebox.showerror("Lỗi", f"Không tìm thấy setup.sh tại: {setup_script}")
             return
         
-        # Build launch command
-        # ROS2 launch format: ros2 launch <package_name> <launch_file_name>
-        package_name = "theta_driver"
-        launch_file_name = "theta_perspective_calibration.launch.py"
+        # Build command để launch camera_info_publisher node
         ros2_setup = "/opt/ros/jazzy/setup.bash"
-        cmd = f"source {ros2_setup} && source {setup_script} && ros2 launch {package_name} {launch_file_name}"
+        cmd = f"source {ros2_setup} && source {setup_script} && ros2 run theta_driver camera_info_publisher_node --ros-args -p image_topic:=\"/image_raw\" -p camera_info_topic:=\"/camera_info\" -p camera_frame:=\"camera_link\" -p use_calibration_params:=false"
         
-        self.log_record("Đang launch perspective converter...")
+        self.log_record("Đang launch camera_info_publisher cho equirectangular camera...")
         
         try:
             # Sử dụng env để đảm bảo clean environment
@@ -685,7 +682,7 @@ class CalibrationTab(ttk.Frame):
             if 'ROS_DOMAIN_ID' not in env:
                 env['ROS_DOMAIN_ID'] = '0'
             
-            self.perspective_converter_process = subprocess.Popen(
+            self.camera_info_publisher_process = subprocess.Popen(
                 cmd,
                 shell=True,
                 executable="/bin/bash",
@@ -696,60 +693,60 @@ class CalibrationTab(ttk.Frame):
                 env=env
             )
             
-            self.is_perspective_converter_running = True
+            self.is_camera_info_publisher_running = True
             self.launch_converter_btn.config(state=tk.DISABLED)
             self.stop_converter_btn.config(state=tk.NORMAL)
             self.converter_status_label.config(text="Trạng thái: Đang chạy", foreground="green")
-            self.log_record("Perspective converter đã được launch")
+            self.log_record("Camera info publisher đã được launch (equirectangular)")
             
             # Start thread để monitor process
-            threading.Thread(target=self.monitor_converter_process, daemon=True).start()
+            threading.Thread(target=self.monitor_camera_info_publisher_process, daemon=True).start()
             
         except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể launch perspective converter: {e}")
+            messagebox.showerror("Lỗi", f"Không thể launch camera_info_publisher: {e}")
             self.log_record(f"Lỗi: {e}")
     
-    def stop_perspective_converter(self):
-        """Stop perspective converter node"""
-        if self.perspective_converter_process:
+    def stop_camera_info_publisher(self):
+        """Stop camera_info_publisher node"""
+        if self.camera_info_publisher_process:
             try:
-                self.perspective_converter_process.terminate()
-                self.perspective_converter_process.wait(timeout=5)
+                self.camera_info_publisher_process.terminate()
+                self.camera_info_publisher_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.perspective_converter_process.kill()
+                self.camera_info_publisher_process.kill()
             except Exception as e:
-                self.log_record(f"Lỗi khi dừng converter: {e}")
+                self.log_record(f"Lỗi khi dừng camera_info_publisher: {e}")
             
-            self.perspective_converter_process = None
-            self.is_perspective_converter_running = False
+            self.camera_info_publisher_process = None
+            self.is_camera_info_publisher_running = False
             self.launch_converter_btn.config(state=tk.NORMAL)
             self.stop_converter_btn.config(state=tk.DISABLED)
             self.converter_status_label.config(text="Trạng thái: Đã dừng", foreground="gray")
-            self.log_record("Perspective converter đã dừng")
+            self.log_record("Camera info publisher đã dừng")
     
-    def monitor_converter_process(self):
-        """Monitor perspective converter process"""
-        if not self.perspective_converter_process:
+    def monitor_camera_info_publisher_process(self):
+        """Monitor camera_info_publisher process"""
+        if not self.camera_info_publisher_process:
             return
         
-        for line in iter(self.perspective_converter_process.stdout.readline, ''):
+        for line in iter(self.camera_info_publisher_process.stdout.readline, ''):
             if not line:
                 break
             # Log important messages
-            if "error" in line.lower() or "warn" in line.lower():
-                self.log_record(f"Converter: {line.strip()}")
+            if "error" in line.lower() or "warn" in line.lower() or "info" in line.lower():
+                self.log_record(f"CameraInfoPublisher: {line.strip()}")
         
-        if self.perspective_converter_process.poll() is not None:
-            self.is_perspective_converter_running = False
-            self.after(0, partial(self._update_converter_stopped))
+        if self.camera_info_publisher_process.poll() is not None:
+            self.is_camera_info_publisher_running = False
+            self.after(0, partial(self._update_camera_info_publisher_stopped))
     
-    def _update_converter_stopped(self):
-        """Helper function để update UI sau khi converter dừng"""
+    def _update_camera_info_publisher_stopped(self):
+        """Helper function để update UI sau khi camera_info_publisher dừng"""
         try:
             self.launch_converter_btn.config(state=tk.NORMAL)
             self.stop_converter_btn.config(state=tk.DISABLED)
             self.converter_status_label.config(text="Trạng thái: Đã dừng", foreground="gray")
-            self.log_record("Perspective converter đã dừng")
+            self.log_record("Camera info publisher đã dừng")
         except Exception as e:
             print(f"Lỗi khi update UI: {e}")
     

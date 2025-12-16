@@ -41,9 +41,6 @@ public:
     ("map_path", value<std::string>(), "path to input point cloud map (PCD or PLY)")
     ("image_path", value<std::string>(), "path to input image (PNG or JPG)")
     ("dst_path", value<std::string>(), "directory to save preprocessed data")
-    ("camera_model", value<std::string>(), "atan, plumb_bob, fisheye, omnidir, or equirectangular")
-    ("camera_intrinsics", value<std::string>(), "camera intrinsic parameters [fx,fy,cx,cy(,xi)] (don't put spaces between values!!)")
-    ("camera_distortion_coeffs", value<std::string>(), "camera distortion parameters [k1,k2,p1,p2,k3] (don't put spaces between values!!)")
     ("voxel_resolution", value<double>()->default_value(0.002), "voxel grid resolution")
     ("min_distance", value<double>()->default_value(1.0), "minimum point distance. Points closer than this value will be discarded")
     ("visualize,v", "if true, show extracted images and points")
@@ -54,8 +51,7 @@ public:
     notify(vm);
 
     if (
-      vm.count("help") || !vm.count("map_path") || !vm.count("image_path") || !vm.count("dst_path") || !vm.count("camera_model") || !vm.count("camera_intrinsics") ||
-      !vm.count("camera_distortion_coeffs")) {
+      vm.count("help") || !vm.count("map_path") || !vm.count("image_path") || !vm.count("dst_path")) {
       std::cout << description << std::endl;
       return 0;
     }
@@ -74,19 +70,12 @@ public:
     cv::equalizeHist(image.clone(), image);
     cv::imwrite(dst_path + "/000000.png", image);
 
-    // Camera params
-    const std::string camera_model = vm["camera_model"].as<std::string>();
-    std::vector<double> intrinsics;
-    std::vector<double> distortion_coeffs;
-
-    std::vector<std::string> intrinsic_tokens;
-    std::vector<std::string> distortion_tokens;
-    boost::split(intrinsic_tokens, vm["camera_intrinsics"].as<std::string>(), boost::is_any_of(","));
-    boost::split(distortion_tokens, vm["camera_distortion_coeffs"].as<std::string>(), boost::is_any_of(","));
-    intrinsics.resize(intrinsic_tokens.size());
-    distortion_coeffs.resize(distortion_tokens.size());
-    std::transform(intrinsic_tokens.begin(), intrinsic_tokens.end(), intrinsics.begin(), [](const auto& token) { return std::stod(token); });
-    std::transform(distortion_tokens.begin(), distortion_tokens.end(), distortion_coeffs.begin(), [](const auto& token) { return std::stod(token); });
+    // Camera params - chỉ hỗ trợ equirectangular
+    const std::string camera_model = "equirectangular";
+    // Equirectangular chỉ cần width và height làm intrinsics
+    std::vector<double> intrinsics = {static_cast<double>(image.cols), static_cast<double>(image.rows)};
+    // Equirectangular không cần distortion coefficients
+    std::vector<double> distortion_coeffs = {};
 
     // Load map points
     auto lidar_points = load_lidar_points(map_path, vm["voxel_resolution"].as<double>(), vm["min_distance"].as<double>());
@@ -179,27 +168,15 @@ public:
     }
     glk::save_ply_binary(dst_path + "/000000.ply", ply);
 
-    // Generate LiDAR images
+    // Generate LiDAR images - chỉ dùng equirectangular
     const double lidar_fov = vlcal::estimate_lidar_fov(lidar_points);
     std::cout << "LiDAR FoV: " << lidar_fov * 180.0 / M_PI << "[deg]" << std::endl;
-    Eigen::Vector2i lidar_image_size;
-    std::string lidar_camera_model;
-    std::vector<double> lidar_camera_intrinsics;
+    Eigen::Vector2i lidar_image_size = {1920, 960};
+    std::string lidar_camera_model = "equirectangular";
+    std::vector<double> lidar_camera_intrinsics = {static_cast<double>(lidar_image_size[0]), static_cast<double>(lidar_image_size[1])};
 
     Eigen::Isometry3d T_lidar_camera = Eigen::Isometry3d::Identity();
-
-    if (lidar_fov < 150.0 * M_PI / 180.0) {
-      lidar_image_size = {1024, 1024};
-      T_lidar_camera.linear() = (Eigen::AngleAxisd(M_PI_2, Eigen::Vector3d::UnitY()) * Eigen::AngleAxisd(-M_PI_2, Eigen::Vector3d::UnitZ())).toRotationMatrix();
-      const double fx = lidar_image_size.x() / (2.0 * std::tan(lidar_fov / 2.0));
-      lidar_camera_model = "plumb_bob";
-      lidar_camera_intrinsics = {fx, fx, lidar_image_size[0] / 2.0, lidar_image_size[1] / 2.0};
-    } else {
-      lidar_image_size = {1920, 960};
-      T_lidar_camera.linear() = (Eigen::AngleAxisd(-M_PI_2, Eigen::Vector3d::UnitX())).toRotationMatrix();
-      lidar_camera_model = "equirectangular";
-      lidar_camera_intrinsics = {static_cast<double>(lidar_image_size[0]), static_cast<double>(lidar_image_size[1])};
-    }
+    T_lidar_camera.linear() = (Eigen::AngleAxisd(-M_PI_2, Eigen::Vector3d::UnitX())).toRotationMatrix();
 
     auto lidar_proj = camera::create_camera(lidar_camera_model, lidar_camera_intrinsics, {});
     auto [intensities, indices] = vlcal::generate_lidar_image(lidar_proj, lidar_image_size, T_lidar_camera.inverse(), lidar_points);

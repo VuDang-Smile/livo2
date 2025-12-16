@@ -902,6 +902,7 @@ class ThetaTab(ttk.Frame):
         
         # State
         self.theta_driver_process = None
+        self.camera_info_publisher_process = None
         self.camera_tabs = {}  # {model_name: CameraModelTab}
         
         # UI
@@ -921,6 +922,14 @@ class ThetaTab(ttk.Frame):
         )
         self.launch_theta_btn.pack(side=tk.LEFT, padx=5)
         
+        # Launch Camera Info Publisher
+        self.launch_camera_info_btn = ttk.Button(
+            control_frame,
+            text="Launch Camera Info Publisher",
+            command=self.launch_camera_info_publisher
+        )
+        self.launch_camera_info_btn.pack(side=tk.LEFT, padx=5)
+        
         # Status label
         self.status_label = ttk.Label(
             control_frame,
@@ -928,6 +937,30 @@ class ThetaTab(ttk.Frame):
             foreground="red"
         )
         self.status_label.pack(side=tk.LEFT, padx=20)
+        
+        # Parameters frame for theta_driver
+        params_frame = ttk.LabelFrame(control_frame, text="Theta Driver Parameters", padding="5")
+        params_frame.pack(side=tk.LEFT, padx=10)
+        
+        # use4k parameter
+        ttk.Label(params_frame, text="Use 4K:").grid(row=0, column=0, padx=2, pady=2, sticky=tk.W)
+        self.use4k_var = tk.BooleanVar(value=True)  # Default: True
+        use4k_check = ttk.Checkbutton(params_frame, variable=self.use4k_var)
+        use4k_check.grid(row=0, column=1, padx=2, pady=2, sticky=tk.W)
+        
+        # image_quality parameter
+        ttk.Label(params_frame, text="Image Quality:").grid(row=0, column=2, padx=2, pady=2, sticky=tk.W)
+        self.image_quality_var = tk.StringVar(value="high")  # Default: high
+        quality_combo = ttk.Combobox(params_frame, textvariable=self.image_quality_var, 
+                                     values=["raw", "high", "medium", "low", "tiny"], 
+                                     width=10, state="readonly")
+        quality_combo.grid(row=0, column=3, padx=2, pady=2, sticky=tk.W)
+        
+        # jpeg_quality parameter
+        ttk.Label(params_frame, text="JPEG Quality:").grid(row=0, column=4, padx=2, pady=2, sticky=tk.W)
+        self.jpeg_quality_var = tk.StringVar(value="85")  # Default: 85
+        jpeg_quality_entry = ttk.Entry(params_frame, textvariable=self.jpeg_quality_var, width=8)
+        jpeg_quality_entry.grid(row=0, column=5, padx=2, pady=2, sticky=tk.W)
     
     def create_notebook(self):
         """Tạo notebook với sub-tabs"""
@@ -937,135 +970,10 @@ class ThetaTab(ttk.Frame):
         self.tab_equirect = EquirectangularTab(self.notebook)
         self.notebook.add(self.tab_equirect, text="Equirectangular")
         
-        # Tab Pinhole
-        # Note: perspective_converter_node publishes to /image_perspective by default
-        self.tab_pinhole = CameraModelTab(
-            self.notebook,
-            "Pinhole",
-            "image_perspective",  # Changed from image_pinhole to match perspective_converter_node output
-            "camera_info",
-            "perspective_converter_node"
-        )
-        self.notebook.add(self.tab_pinhole, text="Pinhole")
-        self.camera_tabs["Pinhole"] = self.tab_pinhole
-        
-        # Tab EquidistantCamera với parameters
-        equidistant_params = {
-            "camera_frame": "camera_link",
-            "input_topic": "image_raw",
-            "output_topic": "image_equidistant",
-            "camera_info_topic": "camera_info_equidistant",
-            "output_width": 640,
-            "output_height": 480,
-            "fov_degrees": 180.0,
-            "k1": 0.0,
-            "k2": 0.0,
-            "k3": 0.0,
-            "k4": 0.0
-        }
-        self.tab_equidistant = CameraModelTab(
-            self.notebook,
-            "EquidistantCamera",
-            "image_equidistant",
-            "camera_info_equidistant",
-            "equidistant_converter_node",
-            parameters=equidistant_params
-        )
-        self.notebook.add(self.tab_equidistant, text="Equidistant")
-        self.camera_tabs["EquidistantCamera"] = self.tab_equidistant
-        
-        # Tab PolynomialCamera với parameters
-        polynomial_params = {
-            "camera_frame": "camera_link",
-            "input_topic": "image_raw",
-            "output_topic": "image_polynomial",
-            "camera_info_topic": "camera_info_polynomial",
-            "output_width": 640,
-            "output_height": 480,
-            "fov_degrees": 180.0,
-            "fx": 0.0,  # 0 means calculate from FOV
-            "fy": 0.0,
-            "cx": 0.0,  # 0 means use center
-            "cy": 0.0,
-            "skew": 0.0,
-            "rotation_offset_degrees": 0.0,  # Rotation to align inner circle with outer border
-            "k2": 0.0,
-            "k3": 0.0,
-            "k4": 0.0,
-            "k5": 0.0,
-            "k6": 0.0,
-            "k7": 0.0
-        }
-        self.tab_polynomial = CameraModelTab(
-            self.notebook,
-            "PolynomialCamera",
-            "image_polynomial",
-            "camera_info_polynomial",
-            "polynomial_converter_node",
-            parameters=polynomial_params
-        )
-        self.notebook.add(self.tab_polynomial, text="Polynomial")
-        self.camera_tabs["PolynomialCamera"] = self.tab_polynomial
-        
-        # Tab ATAN với parameters
-        atan_params = {
-            "camera_frame": "camera_link",
-            "input_topic": "image_raw",
-            "output_topic": "image_atan",
-            "camera_info_topic": "camera_info_atan",
-            "output_width": 640,
-            "output_height": 480,
-            "fx": 0.0,  # 0 means calculate default (normalized 0-1)
-            "fy": 0.0,
-            "cx": 0.0,  # 0 means use center (normalized 0-1)
-            "cy": 0.0,
-            "d0": 0.0   # ATAN distortion coefficient (s)
-        }
-        self.tab_atan = CameraModelTab(
-            self.notebook,
-            "ATAN",
-            "image_atan",
-            "camera_info_atan",
-            "atan_converter_node",
-            parameters=atan_params
-        )
-        self.notebook.add(self.tab_atan, text="ATAN")
-        self.camera_tabs["ATAN"] = self.tab_atan
-        
-        # Tab Ocam với parameters
-        ocam_params = {
-            "camera_frame": "camera_link",
-            "input_topic": "image_raw",
-            "output_topic": "image_ocam",
-            "camera_info_topic": "camera_info_ocam",
-            "output_width": 640,
-            "output_height": 480,
-            "calib_file": "",  # Optional: path to calibration file
-            "xc": 0.0,  # 0 means use center
-            "yc": 0.0,
-            "c": 1.0,   # Affine parameter
-            "d": 0.0,   # Affine parameter
-            "e": 0.0,   # Affine parameter
-            # Polynomial coefficients (default fisheye-like)
-            # pol[0] = base focal length, pol[1] = linear, pol[2] = quadratic
-            "pol_coeffs": "200.0,0.0,0.0001",  # Comma-separated string
-            "invpol_coeffs": "0.005,0.0,-0.0000001"  # Comma-separated string
-        }
-        self.tab_ocam = CameraModelTab(
-            self.notebook,
-            "Ocam",
-            "image_ocam",
-            "camera_info_ocam",
-            "ocam_converter_node",
-            parameters=ocam_params
-        )
-        self.notebook.add(self.tab_ocam, text="Ocam")
-        self.camera_tabs["Ocam"] = self.tab_ocam
-        
         self.notebook.pack(fill=tk.BOTH, expand=True)
     
     def launch_theta_driver(self):
-        """Launch theta_driver node"""
+        """Launch theta_driver node với parameters"""
         try:
             workspace_path = Path(__file__).parent.parent / "ws"
             setup_script = workspace_path / "install" / "setup.sh"
@@ -1078,20 +986,89 @@ class ThetaTab(ttk.Frame):
                 )
                 return
             
-            cmd = f"source {setup_script} && ros2 run theta_driver theta_driver_node"
+            # Get parameters from UI
+            use4k = self.use4k_var.get()
+            image_quality = self.image_quality_var.get()
+            jpeg_quality_str = self.jpeg_quality_var.get().strip()
+            
+            # Validate and convert jpeg_quality
+            try:
+                jpeg_quality = int(jpeg_quality_str) if jpeg_quality_str else 0
+                if jpeg_quality < 0 or jpeg_quality > 100:
+                    messagebox.showerror("Lỗi", "JPEG Quality phải trong khoảng 0-100")
+                    return
+            except ValueError:
+                messagebox.showerror("Lỗi", "JPEG Quality phải là số nguyên")
+                return
+            
+            # Build command with parameters
+            cmd_parts = [f"source {setup_script}"]
+            ros_cmd = "ros2 run theta_driver theta_driver_node"
+            
+            # Add parameters
+            param_args = []
+            param_args.append(f"-p use4k:={str(use4k).lower()}")
+            param_args.append(f"-p image_quality:=\"{image_quality}\"")
+            param_args.append(f"-p jpeg_quality:={jpeg_quality}")
+            
+            if param_args:
+                ros_cmd += " --ros-args " + " ".join(param_args)
+            
+            cmd_parts.append(ros_cmd)
+            cmd = " && ".join(cmd_parts)
+            
+            print(f"Launching theta_driver with command: {cmd}")
+            
+            # Use subprocess with proper environment
+            env = os.environ.copy()
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
             
             self.theta_driver_process = subprocess.Popen(
                 cmd,
                 shell=True,
                 executable="/bin/bash",
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1,
+                env=env
             )
             
-            self.status_label.config(
-                text="Trạng thái: Theta Driver đang chạy",
-                foreground="orange"
-            )
+            # Check if process started successfully
+            import time
+            time.sleep(0.5)
+            
+            if self.theta_driver_process.poll() is not None:
+                try:
+                    stdout, _ = self.theta_driver_process.communicate(timeout=1)
+                    error_msg = stdout if stdout else f"Process exited with code {self.theta_driver_process.returncode}"
+                except subprocess.TimeoutExpired:
+                    error_msg = "Process exited immediately (timeout reading output)"
+                
+                print(f"✗ theta_driver failed to start:")
+                print(f"  Output: {error_msg}")
+                
+                messagebox.showerror(
+                    "Lỗi Launch",
+                    f"Không thể launch theta_driver:\n\n{error_msg[:500]}"
+                )
+                self.launch_theta_btn.config(state=tk.NORMAL)
+                return
+            
+            print(f"✓ theta_driver process started (PID: {self.theta_driver_process.pid})")
+            
+            # Update status based on running processes
+            if self.camera_info_publisher_process and self.camera_info_publisher_process.poll() is None:
+                self.status_label.config(
+                    text="Trạng thái: Theta Driver + Camera Info Publisher đang chạy",
+                    foreground="green"
+                )
+            else:
+                self.status_label.config(
+                    text="Trạng thái: Theta Driver đang chạy",
+                    foreground="orange"
+                )
             self.launch_theta_btn.config(state=tk.DISABLED)
             self.tab_equirect.start_btn.config(state=tk.NORMAL)
             
@@ -1101,14 +1078,129 @@ class ThetaTab(ttk.Frame):
         except Exception as e:
             messagebox.showerror("Lỗi", f"Không thể launch theta_driver: {e}")
     
+    def launch_camera_info_publisher(self):
+        """Launch camera_info_publisher node cho calibration"""
+        try:
+            workspace_path = Path(__file__).parent.parent / "ws"
+            setup_script = workspace_path / "install" / "setup.sh"
+            
+            if not setup_script.exists():
+                messagebox.showerror(
+                    "Lỗi",
+                    f"Không tìm thấy setup.sh tại: {setup_script}\n"
+                    "Vui lòng build workspace trước."
+                )
+                return
+            
+            # Build command
+            cmd_parts = [f"source {setup_script}"]
+            ros_cmd = "ros2 run theta_driver camera_info_publisher_node"
+            
+            # Add parameters (default values suitable for calibration)
+            param_args = []
+            param_args.append("-p image_topic:=\"/image_raw\"")
+            param_args.append("-p camera_info_topic:=\"/camera_info\"")
+            param_args.append("-p camera_frame:=\"camera_link\"")
+            param_args.append("-p use_calibration_params:=false")  # Use default for calibration
+            
+            if param_args:
+                ros_cmd += " --ros-args " + " ".join(param_args)
+            
+            cmd_parts.append(ros_cmd)
+            cmd = " && ".join(cmd_parts)
+            
+            print(f"Launching camera_info_publisher with command: {cmd}")
+            
+            # Use subprocess with proper environment
+            env = os.environ.copy()
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
+            self.camera_info_publisher_process = subprocess.Popen(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1,
+                env=env
+            )
+            
+            # Check if process started successfully
+            import time
+            time.sleep(0.5)
+            
+            if self.camera_info_publisher_process.poll() is not None:
+                try:
+                    stdout, _ = self.camera_info_publisher_process.communicate(timeout=1)
+                    error_msg = stdout if stdout else f"Process exited with code {self.camera_info_publisher_process.returncode}"
+                except subprocess.TimeoutExpired:
+                    error_msg = "Process exited immediately (timeout reading output)"
+                
+                print(f"✗ camera_info_publisher failed to start:")
+                print(f"  Output: {error_msg}")
+                
+                messagebox.showerror(
+                    "Lỗi Launch",
+                    f"Không thể launch camera_info_publisher:\n\n{error_msg[:500]}"
+                )
+                self.launch_camera_info_btn.config(state=tk.NORMAL)
+                return
+            
+            print(f"✓ camera_info_publisher process started (PID: {self.camera_info_publisher_process.pid})")
+            
+            # Update status based on running processes
+            if self.theta_driver_process and self.theta_driver_process.poll() is None:
+                self.status_label.config(
+                    text="Trạng thái: Theta Driver + Camera Info Publisher đang chạy",
+                    foreground="green"
+                )
+            else:
+                self.status_label.config(
+                    text="Trạng thái: Camera Info Publisher đang chạy",
+                    foreground="green"
+                )
+            self.launch_camera_info_btn.config(state=tk.DISABLED)
+            
+            # Kiểm tra process sau 2 giây
+            self.after(2000, self.check_camera_info_publisher_process)
+            
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể launch camera_info_publisher: {e}")
+    
+    def check_camera_info_publisher_process(self):
+        """Kiểm tra xem camera_info_publisher process còn chạy không"""
+        if self.camera_info_publisher_process:
+            if self.camera_info_publisher_process.poll() is not None:
+                # Update status based on other running processes
+                if self.theta_driver_process and self.theta_driver_process.poll() is None:
+                    self.status_label.config(
+                        text="Trạng thái: Theta Driver đang chạy",
+                        foreground="orange"
+                    )
+                else:
+                    self.status_label.config(
+                        text="Trạng thái: Camera Info Publisher đã dừng",
+                        foreground="orange"
+                    )
+                self.launch_camera_info_btn.config(state=tk.NORMAL)
+    
     def check_theta_driver_process(self):
         """Kiểm tra xem theta_driver process còn chạy không"""
         if self.theta_driver_process:
             if self.theta_driver_process.poll() is not None:
-                self.status_label.config(
-                    text="Trạng thái: Theta Driver đã dừng",
-                    foreground="red"
-                )
+                # Update status based on other running processes
+                if self.camera_info_publisher_process and self.camera_info_publisher_process.poll() is None:
+                    self.status_label.config(
+                        text="Trạng thái: Camera Info Publisher đang chạy",
+                        foreground="green"
+                    )
+                else:
+                    self.status_label.config(
+                        text="Trạng thái: Theta Driver đã dừng",
+                        foreground="red"
+                    )
                 self.launch_theta_btn.config(state=tk.NORMAL)
                 self.stop_all()
     
@@ -1118,10 +1210,17 @@ class ThetaTab(ttk.Frame):
         if self.tab_equirect.is_running:
             self.tab_equirect.stop_all()
         
-        # Stop all camera model tabs
-        for tab in self.camera_tabs.values():
-            if tab.is_running or tab.converter_process is not None:
-                tab.stop_all()
+        # Stop camera_info_publisher
+        if self.camera_info_publisher_process:
+            try:
+                self.camera_info_publisher_process.terminate()
+                self.camera_info_publisher_process.wait(timeout=5)
+            except:
+                try:
+                    self.camera_info_publisher_process.kill()
+                except:
+                    pass
+            self.camera_info_publisher_process = None
         
         # Stop theta driver
         if self.theta_driver_process:
@@ -1140,3 +1239,4 @@ class ThetaTab(ttk.Frame):
             foreground="red"
         )
         self.launch_theta_btn.config(state=tk.NORMAL)
+        self.launch_camera_info_btn.config(state=tk.NORMAL)

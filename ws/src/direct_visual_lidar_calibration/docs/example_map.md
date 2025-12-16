@@ -9,13 +9,10 @@ $ tar xzvf faro.tar.gz
 
 ```bash
 $ ls faro
-# camera_params.txt  image00.jpg  map.ply
-
-cat faro/camera_params.txt
-# camera_model: plumb_bob
-# intrinsic: 2242.45,2242.69,1579.98,1172.42
-# distortion: -0.0272569,0.00207913,-0.00411347,-0.00208982,-0.00291759
+# image00.jpg  map.ply
 ```
+
+Note: `preprocess_map` chỉ hỗ trợ equirectangular camera. Camera intrinsics và distortion sẽ được tự động tính từ image size.
 
 ### 2. Preprocessing
 
@@ -23,10 +20,7 @@ cat faro/camera_params.txt
 $ ros2 run direct_visual_lidar_calibration preprocess_map \
   --map_path faro/map.ply \
   --image_path faro/image00.jpg \
-  --dst_path faro_preprocessed \
-  --camera_model plumb_bob \
-  --camera_intrinsics 2242.45,2242.69,1579.98,1172.42 \
-  --camera_distortion_coeffs -0.0272569,0.00207913,-0.00411347,-0.00208982,-0.00291759
+  --dst_path faro_preprocessed
 ```
 
 ### 3. Initial guess

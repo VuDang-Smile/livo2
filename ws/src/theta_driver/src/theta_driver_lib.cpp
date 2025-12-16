@@ -149,14 +149,35 @@ void ThetaDriver::publishImage(GstMapInfo map) {
     image.header.frame_id = camera_frame_;
     image.width = processed_image.cols;
     image.height = processed_image.rows;
-    image.encoding = encoding;
     image.is_bigendian = false;
     
-    image.step = processed_image.cols * 3;  // 3 bytes per pixel (RGB24)
-
-    size_t data_size = processed_image.total() * processed_image.elemSize();
-    image.data.resize(data_size);
-    memcpy(image.data.data(), processed_image.data, data_size);
+    // Apply JPEG compression if enabled
+    if (jpeg_quality_ > 0 && jpeg_quality_ <= 100) {
+        // Convert RGB to BGR for OpenCV JPEG encoding
+        cv::Mat bgr_image;
+        cv::cvtColor(processed_image, bgr_image, cv::COLOR_RGB2BGR);
+        
+        // Compress to JPEG
+        std::vector<int> compression_params;
+        compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
+        compression_params.push_back(jpeg_quality_);
+        
+        std::vector<uchar> jpeg_buffer;
+        cv::imencode(".jpg", bgr_image, jpeg_buffer, compression_params);
+        
+        // Set encoding and data
+        image.encoding = "jpeg";
+        image.step = jpeg_buffer.size();
+        image.data.resize(jpeg_buffer.size());
+        memcpy(image.data.data(), jpeg_buffer.data(), jpeg_buffer.size());
+    } else {
+        // No compression, use RGB8
+        image.encoding = encoding;
+        image.step = processed_image.cols * 3;  // 3 bytes per pixel (RGB24)
+        size_t data_size = processed_image.total() * processed_image.elemSize();
+        image.data.resize(data_size);
+        memcpy(image.data.data(), processed_image.data, data_size);
+    }
     
     image_pub_->publish(image);
 }
@@ -189,9 +210,16 @@ void ThetaDriver::onInit() {
     get_parameter("image_quality", image_quality_);
     declare_parameter<double>("fps_limit", 0.0);
     get_parameter("fps_limit", fps_limit_);
+    declare_parameter<int>("jpeg_quality", 0);
+    get_parameter("jpeg_quality", jpeg_quality_);
     
     RCLCPP_INFO(get_logger(), "Image quality setting: %s", image_quality_.c_str());
     RCLCPP_INFO(get_logger(), "FPS limit setting: %.1f", fps_limit_);
+    if (jpeg_quality_ > 0) {
+        RCLCPP_INFO(get_logger(), "JPEG compression enabled with quality: %d", jpeg_quality_);
+    } else {
+        RCLCPP_INFO(get_logger(), "JPEG compression disabled");
+    }
     
     // Initialize FPS limiting variables
     last_publish_time_ = this->get_clock()->now();

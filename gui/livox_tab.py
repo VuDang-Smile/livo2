@@ -185,12 +185,12 @@ class LivoxTab(ttk.Frame):
         )
         self.stop_subscriber_btn.pack(side=tk.LEFT, padx=5)
         
-        # Nút Start Converter
+        # Nút Start Converter (độc lập, không phụ thuộc vào driver)
         self.start_converter_btn = ttk.Button(
             control_frame,
             text="Start Converter",
             command=self.start_converter,
-            state=tk.DISABLED
+            state=tk.NORMAL  # Enable ngay từ đầu
         )
         self.start_converter_btn.pack(side=tk.LEFT, padx=5)
         
@@ -357,7 +357,7 @@ class LivoxTab(ttk.Frame):
             self.start_driver_btn.config(state=tk.DISABLED)
             self.stop_driver_btn.config(state=tk.NORMAL)
             self.start_subscriber_btn.config(state=tk.NORMAL)
-            self.start_converter_btn.config(state=tk.NORMAL)
+            # Converter button đã enable từ đầu, không cần enable lại
     
     def _monitor_process_output(self, process, process_name, stopped_handler):
         """Helper function để monitor output từ process"""
@@ -406,8 +406,9 @@ class LivoxTab(ttk.Frame):
         self.start_driver_btn.config(state=tk.NORMAL)
         self.stop_driver_btn.config(state=tk.DISABLED)
         self.start_subscriber_btn.config(state=tk.DISABLED)
-        if self.converter_process:
-            self.stop_converter()
+        # Converter có thể chạy độc lập, không tự động stop khi driver dừng
+        # if self.converter_process:
+        #     self.stop_converter()
         if self.is_ros_running:
             self.stop_ros_subscriber()
     
@@ -442,8 +443,9 @@ class LivoxTab(ttk.Frame):
         self.stop_driver_btn.config(state=tk.DISABLED)
         self.start_subscriber_btn.config(state=tk.DISABLED)
         
-        if self.converter_process:
-            self.stop_converter()
+        # Converter có thể chạy độc lập, không tự động stop khi driver dừng
+        # if self.converter_process:
+        #     self.stop_converter()
         if self.is_ros_running:
             self.stop_ros_subscriber()
     
@@ -657,9 +659,26 @@ class LivoxTab(ttk.Frame):
         self.log("ROS subscriber đã dừng")
     
     def start_converter(self):
-        """Start Livox Message Converter node"""
+        """Start Livox Message Converter node (độc lập, không phụ thuộc vào driver)"""
         workspace_path = Path(__file__).parent.parent / "ws"
         launch_file = Path("src/livox_msg_converter/launch/livox_msg_converter.launch.py")
+        
+        # Kiểm tra xem topic /livox/lidar có tồn tại không (có thể từ driver khác hoặc nguồn khác)
+        self.log("Kiểm tra topic /livox/lidar...")
+        result = subprocess.run(
+            ['ros2', 'topic', 'list'],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        
+        topic_exists = '/livox/lidar' in result.stdout or 'livox/lidar' in result.stdout
+        if not topic_exists:
+            self.log("⚠️  Cảnh báo: Topic /livox/lidar chưa tồn tại")
+            self.log("   Converter sẽ chờ topic này xuất hiện...")
+            self.log("   (Có thể start Livox Driver hoặc có nguồn khác publish /livox/lidar)")
+        else:
+            self.log("✓ Topic /livox/lidar đã tồn tại, converter sẽ subscribe ngay")
         
         if self._start_ros2_process(
             workspace_path,
@@ -667,7 +686,7 @@ class LivoxTab(ttk.Frame):
             "Livox Message Converter",
             "converter_process",
             self.monitor_converter_output,
-            "Converter đang chạy"
+            "Converter đang chạy (độc lập)"
         ):
             self.start_converter_btn.config(state=tk.DISABLED)
             self.stop_converter_btn.config(state=tk.NORMAL)
@@ -688,10 +707,17 @@ class LivoxTab(ttk.Frame):
     
     def _handle_converter_stopped(self):
         """Xử lý khi converter dừng"""
-        self.status_label.config(
-            text="Trạng thái: Converter đã dừng",
-            foreground="red"
-        )
+        # Cập nhật status dựa trên các process khác đang chạy
+        if self.livox_driver_process and self.livox_driver_process.poll() is None:
+            self.status_label.config(
+                text="Trạng thái: Livox Driver đang chạy (Converter đã dừng)",
+                foreground="orange"
+            )
+        else:
+            self.status_label.config(
+                text="Trạng thái: Converter đã dừng",
+                foreground="red"
+            )
         self.start_converter_btn.config(state=tk.NORMAL)
         self.stop_converter_btn.config(state=tk.DISABLED)
         self.points2_info_label.config(text="Chưa nhận dữ liệu")
@@ -703,10 +729,17 @@ class LivoxTab(ttk.Frame):
         self._stop_process(self.converter_process, "Converter")
         self.converter_process = None
         
-        self.status_label.config(
-            text="Trạng thái: Converter đã dừng",
-            foreground="red"
-        )
+        # Cập nhật status dựa trên các process khác đang chạy
+        if self.livox_driver_process and self.livox_driver_process.poll() is None:
+            self.status_label.config(
+                text="Trạng thái: Livox Driver đang chạy (Converter đã dừng)",
+                foreground="orange"
+            )
+        else:
+            self.status_label.config(
+                text="Trạng thái: Converter đã dừng",
+                foreground="red"
+            )
         self.start_converter_btn.config(state=tk.NORMAL)
         self.stop_converter_btn.config(state=tk.DISABLED)
         self.points2_info_label.config(text="Chưa nhận dữ liệu")

@@ -59,46 +59,6 @@ ament_target_dependencies(theta_driver_lib
   Boost
 )
 
-# Add perspective converter library and dependencies
-add_library(perspective_converter_lib SHARED src/perspective_converter_lib.cpp)
-rclcpp_components_register_nodes(perspective_converter_lib "theta_driver::PerspectiveConverter")
-ament_target_dependencies(perspective_converter_lib
-  ${dependencies}
-  OpenCV
-)
-
-# Add equidistant converter library and dependencies
-add_library(equidistant_converter_lib SHARED src/equidistant_converter_lib.cpp)
-rclcpp_components_register_nodes(equidistant_converter_lib "theta_driver::EquidistantConverter")
-ament_target_dependencies(equidistant_converter_lib
-  ${dependencies}
-  OpenCV
-)
-
-# Add polynomial converter library and dependencies
-add_library(polynomial_converter_lib SHARED src/polynomial_converter_lib.cpp)
-rclcpp_components_register_nodes(polynomial_converter_lib "theta_driver::PolynomialConverter")
-ament_target_dependencies(polynomial_converter_lib
-  ${dependencies}
-  OpenCV
-)
-
-# Add ATAN converter library and dependencies
-add_library(atan_converter_lib SHARED src/atan_converter_lib.cpp)
-rclcpp_components_register_nodes(atan_converter_lib "theta_driver::ATANConverter")
-ament_target_dependencies(atan_converter_lib
-  ${dependencies}
-  OpenCV
-)
-
-# Add Ocam converter library and dependencies
-add_library(ocam_converter_lib SHARED src/ocam_converter_lib.cpp)
-rclcpp_components_register_nodes(ocam_converter_lib "theta_driver::OcamConverter")
-ament_target_dependencies(ocam_converter_lib
-  ${dependencies}
-  OpenCV
-)
-
 # Add executable and dependencies
 add_executable(theta_driver_node 
   src/theta_driver_node.cpp
@@ -106,30 +66,14 @@ add_executable(theta_driver_node
 target_link_libraries(theta_driver_node theta_driver_lib)
 ament_target_dependencies(theta_driver_node ${dependencies})
 
-# Add perspective converter executable
-add_executable(perspective_converter_node src/perspective_converter_node.cpp)
-target_link_libraries(perspective_converter_node perspective_converter_lib)
-ament_target_dependencies(perspective_converter_node ${dependencies})
+# Add camera_info_publisher library
+add_library(camera_info_publisher_lib SHARED src/camera_info_publisher_lib.cpp)
+ament_target_dependencies(camera_info_publisher_lib ${dependencies})
 
-# Add equidistant converter executable
-add_executable(equidistant_converter_node src/equidistant_converter_node.cpp)
-target_link_libraries(equidistant_converter_node equidistant_converter_lib)
-ament_target_dependencies(equidistant_converter_node ${dependencies})
-
-# Add polynomial converter executable
-add_executable(polynomial_converter_node src/polynomial_converter_node.cpp)
-target_link_libraries(polynomial_converter_node polynomial_converter_lib)
-ament_target_dependencies(polynomial_converter_node ${dependencies})
-
-# Add ATAN converter executable
-add_executable(atan_converter_node src/atan_converter_node.cpp)
-target_link_libraries(atan_converter_node atan_converter_lib)
-ament_target_dependencies(atan_converter_node ${dependencies})
-
-# Add Ocam converter executable
-add_executable(ocam_converter_node src/ocam_converter_node.cpp)
-target_link_libraries(ocam_converter_node ocam_converter_lib)
-ament_target_dependencies(ocam_converter_node ${dependencies})
+# Add camera_info_publisher executable
+add_executable(camera_info_publisher_node src/camera_info_publisher_node.cpp)
+target_link_libraries(camera_info_publisher_node camera_info_publisher_lib)
+ament_target_dependencies(camera_info_publisher_node ${dependencies})
 
 if(NOT WIN32)
   ament_environment_hooks(
@@ -139,11 +83,7 @@ endif()
 # Install lib
 install(TARGETS
   theta_driver_lib
-  perspective_converter_lib
-  equidistant_converter_lib
-  polynomial_converter_lib
-  atan_converter_lib
-  ocam_converter_lib
+  camera_info_publisher_lib
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -152,11 +92,7 @@ install(TARGETS
 # Install exec
 install(TARGETS
   theta_driver_node
-  perspective_converter_node
-  equidistant_converter_node
-  polynomial_converter_node
-  atan_converter_node
-  ocam_converter_node
+  camera_info_publisher_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
