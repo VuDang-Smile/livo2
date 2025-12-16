@@ -21,6 +21,7 @@ LIVOX_SDK_SCRIPT="${SCRIPT_DIR}/Livox-SDK2/build.sh"
 LIVOX_SCRIPT="${SCRIPT_DIR}/drive_ws/build.sh"
 THETA_SCRIPT="${PROJECT_ROOT}/ws/src/theta_driver/3rd/build.sh"
 CALIBRATION_SCRIPT="${SCRIPT_DIR}/calibration/build.sh"
+SOPHUS_SCRIPT="${SCRIPT_DIR}/livo/Sophus/build.sh"
 
 # Track overall status
 OVERALL_SUCCESS=true
@@ -206,6 +207,7 @@ main() {
     echo -e "  ${BLUE}4.${NC} Livox ROS2 Driver"
     echo -e "  ${BLUE}5.${NC} Theta Driver"
     echo -e "  ${BLUE}6.${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
+    echo -e "  ${BLUE}7.${NC} Sophus Library"
     echo ""
     
     # Request sudo password at the beginning
@@ -273,6 +275,16 @@ main() {
         exit 1
     fi
     
+    # Step 7: Build Sophus Library
+    if ! run_step_with_auto_continue "Building Sophus Library" "${SOPHUS_SCRIPT}" "7"; then
+        print_error "Failed at Step 7: Sophus Library build"
+        print_info "Please check the error messages above and fix the issues before continuing."
+        echo ""
+        echo -e "${YELLOW}Press Enter to exit...${NC}"
+        read -r
+        exit 1
+    fi
+    
     # Final summary
     echo ""
     echo -e "${BLUE}========================================${NC}"
@@ -289,6 +301,7 @@ main() {
         echo -e "  ${GREEN}✓${NC} Livox ROS2 Driver"
         echo -e "  ${GREEN}✓${NC} Theta Driver"
         echo -e "  ${GREEN}✓${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
+        echo -e "  ${GREEN}✓${NC} Sophus Library"
         echo ""
         print_info "You can now use ROS2 and the installed drivers."
         echo ""

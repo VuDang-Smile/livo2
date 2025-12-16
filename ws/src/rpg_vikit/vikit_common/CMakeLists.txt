@@ -27,6 +27,7 @@ SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O3 -fsee -fomit-frame-pointer -
 
 # Add plain cmake packages 
 FIND_PACKAGE(ament_cmake REQUIRED)
+FIND_PACKAGE(Eigen3 REQUIRED)
 FIND_PACKAGE(OpenCV REQUIRED core calib3d features2d highgui imgproc)
 FIND_PACKAGE(Sophus REQUIRED)
 FIND_PACKAGE(fmt REQUIRED)
@@ -53,6 +54,7 @@ TARGET_LINK_LIBRARIES(${PROJECT_NAME}
   opencv_features2d
   opencv_highgui
   opencv_imgproc
+  Eigen3::Eigen
   Sophus::Sophus
   fmt::fmt)
 TARGET_INCLUDE_DIRECTORIES(${PROJECT_NAME} PUBLIC
@@ -101,6 +103,7 @@ install(DIRECTORY include/
 ament_export_include_directories(include/${PROJECT_NAME})
 ament_export_libraries(${PROJECT_NAME})
 ament_export_dependencies(
+  Eigen3
   OpenCV
   Sophus
   fmt

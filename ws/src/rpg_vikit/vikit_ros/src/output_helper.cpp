@@ -14,7 +14,7 @@ namespace vk {
 namespace output_helper {
 
 void
-publishTfTransform(const Sophus::SE3<double>& T, const rclcpp::Time& stamp,
+publishTfTransform(const Sophus::SE3& T, const rclcpp::Time& stamp,
                       const std::string& frame_id, const std::string& child_frame_id,
                       tf2_ros::TransformBroadcaster& br)
 {
@@ -28,7 +28,7 @@ publishTfTransform(const Sophus::SE3<double>& T, const rclcpp::Time& stamp,
   transform_msg.transform.translation.y = T.translation().y();
   transform_msg.transform.translation.z = T.translation().z();
   
-  Eigen::Matrix3d rotationMatrix = T.rotationMatrix();
+  Eigen::Matrix3d rotationMatrix = T.rotation_matrix();
   Eigen::Quaterniond q(rotationMatrix);
   transform_msg.transform.rotation.x = q.x();
   transform_msg.transform.rotation.y = q.y();

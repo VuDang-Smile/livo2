@@ -21,6 +21,7 @@ INSTALL_FAILED=false
 # Add more dependencies here as needed
 DEPENDENCIES=(
     "ros-jazzy-ament-cmake-auto"
+    "ros-jazzy-pcl-ros"
     "libgstreamer1.0-dev"
     "libgstreamer-plugins-base1.0-dev"
     "libomp-dev"

@@ -13,7 +13,7 @@
 #include <string>
 #include <rclcpp/rclcpp.hpp>
 #include <Eigen/Core>
-#include <sophus/se3.hpp>
+#include <sophus/se3.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
@@ -26,7 +26,7 @@ using namespace std;
 using namespace Eigen;
 
 void
-publishTfTransform      (const Sophus::SE3<double>& T, const rclcpp::Time& stamp,
+publishTfTransform      (const Sophus::SE3& T, const rclcpp::Time& stamp,
                          const string& frame_id, const string& child_frame_id,
                          tf2_ros::TransformBroadcaster& br);
 

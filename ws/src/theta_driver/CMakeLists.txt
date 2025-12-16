@@ -26,9 +26,6 @@ find_package(OpenCV REQUIRED)
 find_package(Boost 1.53 REQUIRED system thread timer)
 find_package(libuvc REQUIRED)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(ZBAR REQUIRED zbar)
-
-find_package(PkgConfig)
 pkg_check_modules(GSTREAMER_1_0 gstreamer-1.0)
 pkg_check_modules(GSTREAMER_1_0_APP gstreamer-app-1.0)
 pkg_check_modules(LibUVC libuvc)
@@ -38,7 +35,6 @@ include_directories(
   3rd/libuvc-theta-sample/gst
   ${OpenCV_INCLUDE_DIRS}
   ${GSTREAMER_1_0_INCLUDE_DIRS}
-  ${ZBAR_INCLUDE_DIRS}
 )
 
 set(dependencies
@@ -61,23 +57,6 @@ ament_target_dependencies(theta_driver_lib
   GSTREAMER_1_0_APP
   LibUVC
   Boost
-)
-
-# Add QR detector library and dependencies
-add_library(qr_detector_lib SHARED src/qr_detector_lib.cpp)
-rclcpp_components_register_nodes(qr_detector_lib "theta_driver::QRDetector")
-ament_target_dependencies(qr_detector_lib
-  ${dependencies}
-  OpenCV
-)
-target_link_libraries(qr_detector_lib ${ZBAR_LIBRARIES})
-
-# Add optimized QR detector library and dependencies
-add_library(qr_detector_optimized_lib SHARED src/qr_detector_optimized.cpp)
-rclcpp_components_register_nodes(qr_detector_optimized_lib "theta_driver::QRDetectorOptimized")
-ament_target_dependencies(qr_detector_optimized_lib
-  ${dependencies}
-  OpenCV
 )
 
 # Add perspective converter library and dependencies
@@ -127,16 +106,6 @@ add_executable(theta_driver_node
 target_link_libraries(theta_driver_node theta_driver_lib)
 ament_target_dependencies(theta_driver_node ${dependencies})
 
-# Add QR detector executable
-add_executable(qr_detector_node src/qr_detector_node.cpp)
-target_link_libraries(qr_detector_node qr_detector_lib)
-ament_target_dependencies(qr_detector_node ${dependencies})
-
-# Add optimized QR detector executable
-add_executable(qr_detector_optimized_node src/qr_detector_optimized_node.cpp)
-target_link_libraries(qr_detector_optimized_node qr_detector_optimized_lib)
-ament_target_dependencies(qr_detector_optimized_node ${dependencies})
-
 # Add perspective converter executable
 add_executable(perspective_converter_node src/perspective_converter_node.cpp)
 target_link_libraries(perspective_converter_node perspective_converter_lib)
@@ -170,8 +139,6 @@ endif()
 # Install lib
 install(TARGETS
   theta_driver_lib
-  qr_detector_lib
-  qr_detector_optimized_lib
   perspective_converter_lib
   equidistant_converter_lib
   polynomial_converter_lib
@@ -185,8 +152,6 @@ install(TARGETS
 # Install exec
 install(TARGETS
   theta_driver_node
-  qr_detector_node
-  qr_detector_optimized_node
   perspective_converter_node
   equidistant_converter_node
   polynomial_converter_node

@@ -1,0 +1,34 @@
+################################################################################
+# Sophus source dir
+set( Sophus_SOURCE_DIR "@CMAKE_CURRENT_SOURCE_DIR@")
+
+################################################################################
+# Sophus build dir
+set( Sophus_DIR "@CMAKE_CURRENT_BINARY_DIR@")
+
+################################################################################
+set( Sophus_INCLUDE_DIR  "@Sophus_INCLUDE_DIR@" )
+set( Sophus_INCLUDE_DIRS  "@Sophus_INCLUDE_DIR@" )
+
+set( Sophus_LIBRARIES    "@Sophus_LIBRARIES@" )
+set( Sophus_LIBRARY      "@Sophus_LIBRARIES@" )
+
+set( Sophus_LIBRARY_DIR  "@Sophus_LIBRARY_DIR@" )
+set( Sophus_LIBRARY_DIRS "@Sophus_LIBRARY_DIR@" )
+
+################################################################################
+# Create imported target Sophus::Sophus if it doesn't exist
+# This allows packages to link with Sophus::Sophus using modern CMake
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.0" AND NOT TARGET Sophus::Sophus)
+  # Check if SophusTargets.cmake exists (from export)
+  if(EXISTS "${Sophus_DIR}/SophusTargets.cmake")
+    include("${Sophus_DIR}/SophusTargets.cmake")
+  elseif(Sophus_LIBRARIES)
+    # Create imported target manually if library exists
+    add_library(Sophus::Sophus SHARED IMPORTED)
+    set_target_properties(Sophus::Sophus PROPERTIES
+      IMPORTED_LOCATION "${Sophus_LIBRARIES}"
+      INTERFACE_INCLUDE_DIRECTORIES "${Sophus_INCLUDE_DIRS}"
+    )
+  endif()
+endif()
