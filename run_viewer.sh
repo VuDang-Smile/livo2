@@ -13,11 +13,11 @@ else
 fi
 
 # Source drive_ws (cho livox_ros_driver2)
-if [ -f "$SCRIPT_DIR/drive_ws/install/setup.sh" ]; then
-    source "$SCRIPT_DIR/drive_ws/install/setup.sh"
-    echo "Đã source drive_ws/install/setup.sh (livox_ros_driver2)"
+if [ -f "$SCRIPT_DIR/dependencies/drive_ws/install/setup.sh" ]; then
+    source "$SCRIPT_DIR/dependencies/drive_ws/install/setup.sh"
+    echo "Đã source dependencies/drive_ws/install/setup.sh (livox_ros_driver2)"
 else
-    echo "Cảnh báo: Không tìm thấy drive_ws/install/setup.sh"
+    echo "Cảnh báo: Không tìm thấy dependencies/drive_ws/install/setup.sh"
     echo "Vui lòng build drive_ws trước"
 fi
 

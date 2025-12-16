@@ -23,6 +23,14 @@ DEPENDENCIES=(
     "ros-jazzy-ament-cmake-auto"
     "libgstreamer1.0-dev"
     "libgstreamer-plugins-base1.0-dev"
+    "libomp-dev"
+    "libboost-all-dev"
+    "libglm-dev"
+    "libglfw3-dev"
+    "libpng-dev"
+    "libjpeg-dev"
+    "libpcl-dev"
+    "libgoogle-glog-dev"
 )
 
 # Print functions

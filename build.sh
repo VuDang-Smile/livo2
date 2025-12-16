@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script build cho ROS2 workspace
-# Hỗ trợ build driver và các packages trong ws/src
+# Hỗ trợ build các packages trong ws/src
 
 set -e
 
@@ -14,11 +14,9 @@ NC='\033[0m' # No Color
 
 # Đường dẫn
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DRIVE_WS_DIR="$SCRIPT_DIR/drive_ws"
 WS_DIR="$SCRIPT_DIR/ws"
-DRIVER_BUILD_SCRIPT="$DRIVE_WS_DIR/src/livox_ros_driver2/build.sh"
-DRIVER_SETUP_SCRIPT="$DRIVE_WS_DIR/install/setup.sh"
 ROS2_SETUP_SCRIPT="/opt/ros/jazzy/setup.bash"
+DRIVE_WS_SETUP_SCRIPT="$SCRIPT_DIR/dependencies/drive_ws/install/setup.sh"
 
 # Danh sách packages trong ws/src
 declare -a PACKAGES=(
@@ -174,83 +172,43 @@ handle_menu_input() {
     done
 }
 
-# Hàm build driver
-build_driver() {
-    echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}Bắt đầu build livox_ros_driver2...${NC}"
-    echo -e "${BLUE}========================================${NC}"
-    
-    if [ ! -f "$DRIVER_BUILD_SCRIPT" ]; then
-        echo -e "${RED}Lỗi: Không tìm thấy file build.sh tại: $DRIVER_BUILD_SCRIPT${NC}"
-        exit 1
-    fi
-    
-    # Tắt set -e tạm thời để xử lý lỗi tốt hơn và giữ nguyên log
-    set +e
-    
-    cd "$DRIVE_WS_DIR/src/livox_ros_driver2"
-    # Chạy build và giữ nguyên toàn bộ log (không redirect)
-    bash build.sh jazzy
-    local build_exit_code=$?
-    cd "$SCRIPT_DIR"
-    
-    # Bật lại set -e
-    set -e
-    
-    # Kiểm tra kết quả build
-    if [ $build_exit_code -ne 0 ]; then
-        echo ""
-        echo -e "${RED}========================================${NC}"
-        echo -e "${RED}Build driver THẤT BẠI với exit code: $build_exit_code${NC}"
-        echo -e "${RED}========================================${NC}"
-        echo ""
-        echo -e "${YELLOW}Bạn có muốn tiếp tục build các packages khác không?${NC}"
-        echo -e "${YELLOW}(Lưu ý: Các packages có thể cần driver đã được build thành công)${NC}"
-        read -p "Tiếp tục? (y/n): " continue_choice
+# Hàm source ROS2 base setup (cần thiết cho colcon build khi chạy "as program")
+source_ros2_base() {
+    # Kiểm tra xem ROS2 đã được source chưa (kiểm tra biến môi trường ROS_DISTRO)
+    if [ -z "$ROS_DISTRO" ]; then
+        echo -e "${BLUE}========================================${NC}"
+        echo -e "${BLUE}Source ROS2 Jazzy base setup...${NC}"
+        echo -e "${BLUE}========================================${NC}"
         
-        if [[ ! "$continue_choice" =~ ^[Yy]$ ]]; then
-            echo -e "${YELLOW}Đã hủy build.${NC}"
+        if [ ! -f "$ROS2_SETUP_SCRIPT" ]; then
+            echo -e "${RED}Lỗi: Không tìm thấy ROS2 Jazzy tại: $ROS2_SETUP_SCRIPT${NC}"
+            echo -e "${RED}Vui lòng cài đặt ROS2 Jazzy trước!${NC}"
             exit 1
         else
-            echo -e "${YELLOW}Tiếp tục build các packages...${NC}"
+            source "$ROS2_SETUP_SCRIPT"
+            echo -e "${GREEN}Đã source ROS2 Jazzy base setup thành công!${NC}"
             echo ""
         fi
     else
-        echo -e "${GREEN}Build driver hoàn tất!${NC}"
+        echo -e "${GREEN}ROS2 environment đã được source (ROS_DISTRO=$ROS_DISTRO)${NC}"
         echo ""
     fi
 }
 
-# Hàm source ROS2 base setup
-source_ros2_base() {
+# Hàm source livox driver 2 setup
+source_livox_driver() {
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}Source ROS2 Jazzy base setup...${NC}"
-    echo -e "${BLUE}========================================${NC}"
-    
-    if [ ! -f "$ROS2_SETUP_SCRIPT" ]; then
-        echo -e "${RED}Lỗi: Không tìm thấy ROS2 Jazzy tại: $ROS2_SETUP_SCRIPT${NC}"
-        echo -e "${RED}Vui lòng cài đặt ROS2 Jazzy trước!${NC}"
-        exit 1
-    else
-        source "$ROS2_SETUP_SCRIPT"
-        echo -e "${GREEN}Đã source ROS2 Jazzy base setup thành công!${NC}"
-        echo ""
-    fi
-}
-
-# Hàm source setup.sh
-source_setup() {
-    echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}Source drive_ws/install/setup.sh...${NC}"
+    echo -e "${BLUE}Source livox_ros_driver2 setup...${NC}"
     echo -e "${BLUE}========================================${NC}"
     
-    if [ ! -f "$DRIVER_SETUP_SCRIPT" ]; then
-        echo -e "${YELLOW}Cảnh báo: Không tìm thấy file setup.sh tại: $DRIVER_SETUP_SCRIPT${NC}"
-        echo -e "${YELLOW}Có thể driver chưa được build.${NC}"
+    if [ ! -f "$DRIVE_WS_SETUP_SCRIPT" ]; then
+        echo -e "${YELLOW}Cảnh báo: Không tìm thấy file setup.sh tại: $DRIVE_WS_SETUP_SCRIPT${NC}"
+        echo -e "${YELLOW}Có thể livox_ros_driver2 chưa được build.${NC}"
+        echo -e "${YELLOW}Script sẽ tiếp tục nhưng một số packages có thể cần driver này.${NC}"
         echo ""
     else
-        source "$DRIVER_SETUP_SCRIPT"
-        echo -e "${GREEN}Đã source setup.sh thành công!${NC}"
+        source "$DRIVE_WS_SETUP_SCRIPT"
+        echo -e "${GREEN}Đã source livox_ros_driver2 setup thành công!${NC}"
         echo ""
     fi
 }
@@ -305,29 +263,18 @@ main() {
     echo -e "${BLUE}ROS2 Workspace Build Script${NC}"
     echo ""
     
-    # Bước 0: Source ROS2 base setup (bắt buộc)
+    # Source ROS2 base setup (cần thiết cho colcon build, đặc biệt khi chạy "as program")
     source_ros2_base
     
-    # Bước 1: Hỏi có build driver không
-    echo -e "${YELLOW}Bước 1: Build livox_ros_driver2?${NC}"
-    read -p "Có build driver không? (y/n): " build_driver_choice
+    # Source livox driver 2 setup
+    source_livox_driver
     
-    if [[ "$build_driver_choice" =~ ^[Yy]$ ]]; then
-        build_driver
-    else
-        echo -e "${YELLOW}Bỏ qua build driver.${NC}"
-        echo ""
-    fi
-    
-    # Bước 2: Source setup.sh
-    source_setup
-    
-    # Bước 3: Chọn packages
-    echo -e "${YELLOW}Bước 3: Chọn packages để build${NC}"
+    # Chọn packages
+    echo -e "${YELLOW}Chọn packages để build${NC}"
     handle_menu_input
     
-    # Bước 4: Build packages
-    echo -e "${YELLOW}Bước 4: Build packages${NC}"
+    # Build packages
+    echo -e "${YELLOW}Build packages${NC}"
     build_packages
     
     # Tạm dừng trước khi thoát

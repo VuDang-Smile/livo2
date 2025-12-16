@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Master installation script for all dependencies
-# Installs ROS2, common dependencies, Livox driver, and Theta driver in sequence
+# Installs ROS2, common dependencies, Livox driver, Theta driver, and Calibration libraries in sequence
 
 # Colors for output
 RED='\033[0;31m'
@@ -20,6 +20,7 @@ COMMON_SCRIPT="${SCRIPT_DIR}/install_common_dependencies.sh"
 LIVOX_SDK_SCRIPT="${SCRIPT_DIR}/Livox-SDK2/build.sh"
 LIVOX_SCRIPT="${SCRIPT_DIR}/drive_ws/build.sh"
 THETA_SCRIPT="${PROJECT_ROOT}/ws/src/theta_driver/3rd/build.sh"
+CALIBRATION_SCRIPT="${SCRIPT_DIR}/calibration/build.sh"
 
 # Track overall status
 OVERALL_SUCCESS=true
@@ -204,6 +205,7 @@ main() {
     echo -e "  ${BLUE}3.${NC} Livox SDK2"
     echo -e "  ${BLUE}4.${NC} Livox ROS2 Driver"
     echo -e "  ${BLUE}5.${NC} Theta Driver"
+    echo -e "  ${BLUE}6.${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
     echo ""
     
     # Request sudo password at the beginning
@@ -261,6 +263,16 @@ main() {
         exit 1
     fi
     
+    # Step 6: Build Calibration Libraries
+    if ! run_step_with_auto_continue "Building Calibration Libraries" "${CALIBRATION_SCRIPT}" "6"; then
+        print_error "Failed at Step 6: Calibration Libraries build"
+        print_info "Please check the error messages above and fix the issues before continuing."
+        echo ""
+        echo -e "${YELLOW}Press Enter to exit...${NC}"
+        read -r
+        exit 1
+    fi
+    
     # Final summary
     echo ""
     echo -e "${BLUE}========================================${NC}"
@@ -276,6 +288,7 @@ main() {
         echo -e "  ${GREEN}✓${NC} Livox SDK2"
         echo -e "  ${GREEN}✓${NC} Livox ROS2 Driver"
         echo -e "  ${GREEN}✓${NC} Theta Driver"
+        echo -e "  ${GREEN}✓${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
         echo ""
         print_info "You can now use ROS2 and the installed drivers."
         echo ""
