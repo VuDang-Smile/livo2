@@ -1,0 +1,104 @@
+/**:
+  ros__parameters:
+    common:
+      img_topic: "/image_raw"  # Topic for equirectangular image
+      lid_topic: "/livox/lidar"         # CustomMsg from Livox driver
+      imu_topic: "/livox/imu"           # IMU from Livox driver
+      img_en: 1
+      lidar_en: 1
+      ros_driver_bug_fix: true
+
+    extrin_calib:
+      extrinsic_T: [0.04165, 0.02326, -0.0284]  # IMU to LiDAR (keep default)
+      extrinsic_R: [1.0, 0.0, 0.0,              # IMU to LiDAR (keep default)
+                    0.0, 1.0, 0.0,
+                    0.0, 0.0, 1.0]
+      # Calibration from direct_visual_lidar_calibration
+      # Rcl: rotation matrix from lidar to camera (row-major)
+      Rcl: [-0.04835443, -0.98813994, -0.14574395,
+            -0.00736797, 0.14626354, -0.98921822,
+            0.99880306, -0.04675925, -0.01435308]
+      # Pcl: translation vector from lidar to camera
+      Pcl: [0.02371284, 0.12586664, 0.08098288]
+
+    time_offset: 
+      # Adjusted for better IMU-LiDAR synchronization
+      # If IMU is ahead of LiDAR, use negative value
+      # If IMU is behind LiDAR, use positive value
+      imu_time_offset: 0.0
+      img_time_offset: 0.0
+      exposure_time_init: 0.0
+
+    preprocess:
+      point_filter_num: 1  # Keep all points for better accuracy
+      filter_size_surf: 0.12  # Balanced filter size
+      lidar_type: 8 # Livox MID360 LiDAR
+      scan_line: 6  # MID360 has 6 scan lines
+      blind: 0.8
+
+    vio:
+      max_iterations: 4  # Balanced iterations for stability
+      outlier_threshold: 1000
+      img_point_cov: 100
+      patch_size: 7  # Balanced patch size
+      patch_pyrimid_level: 4  # More pyramid levels for robustness
+      normal_en: true
+      raycast_en: false
+      inverse_composition_en: false
+      exposure_estimate_en: true
+      inv_expo_cov: 0.1
+
+    imu:
+      imu_en: true
+      imu_int_frame: 30
+      # Increased covariance to reduce noise sensitivity
+      # Higher values make the filter more robust to IMU noise
+      acc_cov: 0.8  # Increased from 0.5 to reduce noise impact
+      gyr_cov: 0.5  # Increased from 0.3 to reduce noise impact
+      # Increased bias covariance for better bias estimation stability
+      b_acc_cov: 0.0002  # Increased from 0.0001 for better stability
+      b_gyr_cov: 0.0002  # Increased from 0.0001 for better stability
+
+    lio:
+      max_iterations: 4  # Balanced iterations for stability
+      dept_err: 0.02
+      beam_err: 0.05
+      min_eigen_value: 0.0025
+      voxel_size: 0.45  # Balanced voxel size
+      max_layer: 2
+      max_points_num: 55  # Balanced point density
+      layer_init_num: [5, 5, 5, 5, 5]
+
+    local_map:  
+      map_sliding_en: false
+      half_map_size: 90  # Balanced map size
+      sliding_thresh: 8.0
+
+    uav:
+      imu_rate_odom: false
+      gravity_align_en: false
+
+    publish:
+      dense_map_en: true  # Enable dense map
+      pub_effect_point_en: false 
+      pub_plane_en: false
+      pub_scan_num: 2  # Balanced publish rate
+      blind_rgb_points: 0.0
+
+    evo:
+      seq_name: "MID360_Equirectangular"
+      pose_output_en: false
+
+    pcd_save:
+      pcd_save_en: false
+      colmap_output_en: false
+      filter_size_pcd: 0.12  # Balanced filter size
+      interval: -1
+
+    camera:
+      model: Equirectangular
+      # Calibrated camera model from calibration data
+      # Resolution: 2880x1440 (equirectangular)
+      width: 2880
+      height: 1440
+      scale: 1.0  # Full resolution

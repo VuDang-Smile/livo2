@@ -1795,7 +1795,7 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
   img_cp = img.clone();
   // img_test = img.clone();
 
-  if (img.channels() == 3) cv::cvtColor(img, img, CV_BGR2GRAY);
+  if (img.channels() == 3) cv::cvtColor(img, img, cv::COLOR_RGB2GRAY);
 
   new_frame_.reset(new Frame(cam, img));
   updateFrameState(*state);

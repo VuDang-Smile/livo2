@@ -13,6 +13,9 @@
 #error "File extension of cv_bridge is unknown!!"
 #endif
 
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/opencv.hpp>
+
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
@@ -113,6 +116,12 @@ protected:
   virtual cv::Size get_image_size(const std::string& bag_filename, const std::string& image_topic) override {
     if (image_topic.find("compressed") == std::string::npos) {
       const auto image_msg = get_first_message<sensor_msgs::msg::Image>(bag_filename, image_topic);
+      
+      // For JPEG compressed images, width and height are still available in the message
+      if (image_msg->encoding == "jpeg" || image_msg->encoding == "JPEG") {
+        return cv::Size(image_msg->width, image_msg->height);
+      }
+      
       return cv::Size(image_msg->width, image_msg->height);
     }
 
@@ -135,6 +144,20 @@ protected:
   virtual cv::Mat get_image(const std::string& bag_filename, const std::string& image_topic) override {
     if (image_topic.find("compressed") == std::string::npos) {
       const auto image_msg = get_first_message<sensor_msgs::msg::Image>(bag_filename, image_topic);
+      
+      // Handle JPEG compressed images (encoding = "jpeg")
+      if (image_msg->encoding == "jpeg" || image_msg->encoding == "JPEG") {
+        // Decode JPEG compressed data
+        std::vector<uchar> data(image_msg->data.begin(), image_msg->data.end());
+        cv::Mat img = cv::imdecode(data, cv::IMREAD_GRAYSCALE);
+        if (img.empty()) {
+          std::cerr << "error: failed to decode JPEG image" << std::endl;
+          abort();
+        }
+        return img;
+      }
+      
+      // Handle uncompressed images
       return cv_bridge::toCvCopy(*image_msg, "mono8")->image;
     }
 

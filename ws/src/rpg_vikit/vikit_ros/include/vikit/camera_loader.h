@@ -16,6 +16,7 @@
 #include <vikit/atan_camera.h>
 #include <vikit/omni_camera.h>
 #include <vikit/equidistant_camera.h>
+#include <vikit/equirectangular_camera.h>
 #include <vikit/polynomial_camera.h>
 #include <vikit/params_helper.h>
 
@@ -93,6 +94,13 @@ inline bool loadFromRosNs(const rclcpp::Node::SharedPtr & nh, const std::string&
         getParam<double>(nh, ns_+"cx"),
         getParam<double>(nh, ns_+"cy"),
         getParam<double>(nh, ns_+"d0"));
+  }
+  else if(cam_model == "Equirectangular")
+  {
+    cam = new vk::EquirectangularCamera(
+        getParam<int>(nh, ns_+"width"),
+        getParam<int>(nh, ns_+"height"),
+        getParam<double>(nh, ns_+"scale", 1.0));
   }
   else
   {

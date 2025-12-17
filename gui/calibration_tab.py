@@ -249,16 +249,55 @@ class CalibrationTab(ttk.Frame):
         )
         browse_output_btn.pack(side=tk.LEFT, padx=5)
         
-        # Camera parameters (optional, có thể auto-detect)
-        camera_frame = ttk.LabelFrame(parent, text="Camera Parameters (Optional)", padding=10)
-        camera_frame.pack(fill=tk.X, padx=20, pady=10)
+        # Camera model selection
+        camera_model_frame = ttk.LabelFrame(parent, text="Camera Model", padding=10)
+        camera_model_frame.pack(fill=tk.X, padx=20, pady=10)
         
         ttk.Label(
-            camera_frame,
-            text="Nếu để trống, sẽ tự động detect từ camera_info topic",
-            font=("Arial", 9),
-            foreground="gray"
-        ).pack()
+            camera_model_frame,
+            text="Select camera projection model:",
+            font=("Arial", 9)
+        ).pack(anchor=tk.W, pady=(0, 5))
+        
+        model_selection_frame = ttk.Frame(camera_model_frame)
+        model_selection_frame.pack(fill=tk.X)
+        
+        self.camera_model_var = tk.StringVar(value="equirectangular")
+        
+        ttk.Radiobutton(
+            model_selection_frame,
+            text="Equirectangular (default for 360° cameras)",
+            variable=self.camera_model_var,
+            value="equirectangular"
+        ).pack(anchor=tk.W, pady=2)
+        
+        ttk.Radiobutton(
+            model_selection_frame,
+            text="Auto-detect from camera_info topic",
+            variable=self.camera_model_var,
+            value="auto"
+        ).pack(anchor=tk.W, pady=2)
+        
+        ttk.Radiobutton(
+            model_selection_frame,
+            text="Plumb Bob (pinhole with radial/tangential distortion)",
+            variable=self.camera_model_var,
+            value="plumb_bob"
+        ).pack(anchor=tk.W, pady=2)
+        
+        ttk.Radiobutton(
+            model_selection_frame,
+            text="Fisheye (equidistant)",
+            variable=self.camera_model_var,
+            value="fisheye"
+        ).pack(anchor=tk.W, pady=2)
+        
+        ttk.Radiobutton(
+            model_selection_frame,
+            text="Omnidirectional",
+            variable=self.camera_model_var,
+            value="omnidir"
+        ).pack(anchor=tk.W, pady=2)
         
         # Options
         options_frame = ttk.LabelFrame(parent, text="Options", padding=10)
@@ -794,6 +833,11 @@ class CalibrationTab(ttk.Frame):
         
         cmd_parts = ["ros2", "run", "direct_visual_lidar_calibration", "preprocess"]
         
+        # Add camera model parameter
+        camera_model = self.camera_model_var.get()
+        if camera_model:
+            cmd_parts.extend(["--camera_model", camera_model])
+        
         if self.auto_topic_var.get():
             cmd_parts.append("-a")
         if self.dynamic_lidar_var.get():
@@ -811,6 +855,7 @@ class CalibrationTab(ttk.Frame):
         self.log_preprocess(f"Bắt đầu preprocessing...")
         self.log_preprocess(f"Input: {input_dir}")
         self.log_preprocess(f"Output: {output_dir}")
+        self.log_preprocess(f"Camera model: {camera_model}")
         self.log_preprocess(f"Command: {' '.join(cmd_parts)}")
         
         try:

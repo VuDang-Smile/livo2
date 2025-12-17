@@ -32,6 +32,11 @@ DEPENDENCIES=(
     "libjpeg-dev"
     "libpcl-dev"
     "libgoogle-glog-dev"
+    "python3-pip"
+)
+
+# Python packages to install via pip
+PYTHON_PACKAGES=(
 )
 
 # Print functions
@@ -160,6 +165,75 @@ install_all_dependencies() {
     fi
 }
 
+# Function to install Python packages via pip
+install_python_packages() {
+    print_info "Installing Python packages via pip..."
+    echo ""
+    
+    # Check if pip is available
+    if ! command -v pip3 &> /dev/null && ! command -v python3 -m pip &> /dev/null; then
+        print_error "pip3 is not available. Please install python3-pip first."
+        return 1
+    fi
+    
+    # Determine pip command
+    if command -v pip3 &> /dev/null; then
+        PIP_CMD="pip3"
+    else
+        PIP_CMD="python3 -m pip"
+    fi
+    
+    local failed_packages=()
+    local installed_count=0
+    local skipped_count=0
+    
+    for package in "${PYTHON_PACKAGES[@]}"; do
+        echo -e "${BLUE}----------------------------------------${NC}"
+        print_info "Processing Python package: ${package}"
+        
+        # Check if package is already installed
+        if $PIP_CMD show "${package}" &> /dev/null; then
+            print_success "${package} is already installed. Skipping..."
+            skipped_count=$((skipped_count + 1))
+        else
+            print_info "Installing ${package}..."
+            if $PIP_CMD install --user "${package}"; then
+                print_success "${package} installed successfully."
+                installed_count=$((installed_count + 1))
+            else
+                print_error "Failed to install ${package}."
+                failed_packages+=("${package}")
+                INSTALL_FAILED=true
+            fi
+        fi
+        echo ""
+    done
+    
+    # Summary
+    if [ ${#PYTHON_PACKAGES[@]} -gt 0 ]; then
+        echo -e "${BLUE}========================================${NC}"
+        echo -e "${BLUE}Python Packages Installation Summary${NC}"
+        echo -e "${BLUE}========================================${NC}"
+        echo ""
+        print_info "Total Python packages: ${#PYTHON_PACKAGES[@]}"
+        print_success "Installed: ${installed_count}"
+        print_info "Already installed (skipped): ${skipped_count}"
+        
+        if [ ${#failed_packages[@]} -gt 0 ]; then
+            print_error "Failed: ${#failed_packages[@]}"
+            echo ""
+            print_error "Failed packages:"
+            for pkg in "${failed_packages[@]}"; do
+                echo -e "  ${RED}- ${pkg}${NC}"
+            done
+            echo ""
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
 # Function to verify all dependencies are installed
 verify_installation() {
     print_info "Verifying installation..."
@@ -179,6 +253,30 @@ verify_installation() {
     done
     
     echo ""
+    
+    # Verify Python packages
+    if [ ${#PYTHON_PACKAGES[@]} -gt 0 ]; then
+        print_info "Verifying Python packages..."
+        echo ""
+        
+        # Determine pip command
+        if command -v pip3 &> /dev/null; then
+            PIP_CMD="pip3"
+        else
+            PIP_CMD="python3 -m pip"
+        fi
+        
+        for package in "${PYTHON_PACKAGES[@]}"; do
+            if $PIP_CMD show "${package}" &> /dev/null; then
+                print_success "${package} ✓"
+            else
+                print_error "${package} ✗"
+                missing_packages+=("${package}")
+                all_installed=false
+            fi
+        done
+        echo ""
+    fi
     
     if [ "$all_installed" = true ]; then
         return 0
@@ -205,6 +303,14 @@ main() {
     for package in "${DEPENDENCIES[@]}"; do
         echo -e "  ${BLUE}- ${package}${NC}"
     done
+    
+    if [ ${#PYTHON_PACKAGES[@]} -gt 0 ]; then
+        echo ""
+        print_info "Python packages to install:"
+        for package in "${PYTHON_PACKAGES[@]}"; do
+            echo -e "  ${BLUE}- ${package}${NC}"
+        done
+    fi
     echo ""
     
     # Install all dependencies
@@ -214,6 +320,21 @@ main() {
         print_error "Some dependencies failed to install!"
         echo ""
         confirm_exit 1 "Dependency installation completed with errors!"
+    fi
+    
+    # Install Python packages
+    if [ ${#PYTHON_PACKAGES[@]} -gt 0 ]; then
+        echo -e "${BLUE}========================================${NC}"
+        echo -e "${BLUE}Installing Python Packages${NC}"
+        echo -e "${BLUE}========================================${NC}"
+        echo ""
+        
+        if ! install_python_packages; then
+            INSTALL_FAILED=true
+            echo ""
+            print_warning "Some Python packages failed to install, but continuing..."
+            echo ""
+        fi
     fi
     
     # Verify installation
@@ -231,10 +352,18 @@ main() {
         echo ""
         print_success "All dependencies have been installed successfully!"
         echo ""
-        print_info "Installed packages:"
+        print_info "Installed apt packages:"
         for package in "${DEPENDENCIES[@]}"; do
             echo -e "  ${GREEN}✓ ${package}${NC}"
         done
+        
+        if [ ${#PYTHON_PACKAGES[@]} -gt 0 ]; then
+            echo ""
+            print_info "Installed Python packages:"
+            for package in "${PYTHON_PACKAGES[@]}"; do
+                echo -e "  ${GREEN}✓ ${package}${NC}"
+            done
+        fi
         echo ""
         confirm_exit 0 "All dependencies have been installed successfully!"
     else

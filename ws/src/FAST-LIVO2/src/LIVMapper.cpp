@@ -885,7 +885,46 @@ void LIVMapper::imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in)
 cv::Mat LIVMapper::getImageFromMsg(const sensor_msgs::msg::Image::ConstSharedPtr &img_msg)
 {
   cv::Mat img;
-  img = cv_bridge::toCvShare(img_msg, "bgr8")->image;
+  
+  // Handle JPEG compressed images (encoding = "jpeg")
+  if (img_msg->encoding == "jpeg" || img_msg->encoding == "JPEG") {
+    // Decode JPEG compressed data
+    // cv::imdecode always returns BGR format (OpenCV convention)
+    std::vector<uchar> data(img_msg->data.begin(), img_msg->data.end());
+    img = cv::imdecode(data, cv::IMREAD_COLOR);
+    if (img.empty()) {
+      RCLCPP_ERROR(this->node->get_logger(), "Failed to decode JPEG image");
+      return cv::Mat();
+    }
+    
+    // Theta driver encodes: RGB -> BGR -> JPEG
+    // cv::imdecode decodes JPEG -> BGR
+    // So we need to convert BGR -> RGB to get back original RGB
+    // This ensures /image_raw has correct RGB8 color space
+    if (img.channels() == 3) {
+      cv::Mat rgb_img;
+      cv::cvtColor(img, rgb_img, cv::COLOR_BGR2RGB);
+      img = rgb_img;
+    }
+  } else {
+    // Handle uncompressed images using cv_bridge
+    // Try RGB8 first (most common for equirectangular cameras)
+    try {
+      img = cv_bridge::toCvShare(img_msg, sensor_msgs::image_encodings::RGB8)->image;
+    } catch (cv_bridge::Exception& e) {
+      // Fallback to BGR8 if RGB8 fails
+      try {
+        cv::Mat bgr_img = cv_bridge::toCvShare(img_msg, sensor_msgs::image_encodings::BGR8)->image;
+        // Convert BGR to RGB
+        cv::cvtColor(bgr_img, img, cv::COLOR_BGR2RGB);
+      } catch (cv_bridge::Exception& e2) {
+        RCLCPP_ERROR(this->node->get_logger(), "cv_bridge exception: %s", e2.what());
+        RCLCPP_ERROR(this->node->get_logger(), "Failed to convert image. Encoding: %s", img_msg->encoding.c_str());
+        return cv::Mat();
+      }
+    }
+  }
+  
   return img;
 }
 
@@ -1188,7 +1227,8 @@ void LIVMapper::publish_img_rgb(const image_transport::Publisher &pubImage, VIOM
   cv_bridge::CvImage out_msg;
   out_msg.header.stamp = this->node->get_clock()->now();
   // out_msg.header.frame_id = "camera_init";
-  out_msg.encoding = sensor_msgs::image_encodings::BGR8;
+  // Image is already in RGB format after decoding, so use RGB8 encoding
+  out_msg.encoding = sensor_msgs::image_encodings::RGB8;
   out_msg.image = img_rgb;
   pubImage.publish(out_msg.toImageMsg());
 }
@@ -1222,9 +1262,10 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
         if (vio_manager->new_frame_->cam_->isInFrame(pc.cast<int>(), 3)) // 100
         {
           V3F pixel = vio_manager->getInterpolatedPixel(img_rgb, pc);
-          pointRGB.r = pixel[2];
+          // Image is RGB format: pixel[0]=R, pixel[1]=G, pixel[2]=B
+          pointRGB.r = pixel[0];
           pointRGB.g = pixel[1];
-          pointRGB.b = pixel[0];
+          pointRGB.b = pixel[2];
           // pointRGB.r = pixel[2] * inv_expo; pointRGB.g = pixel[1] * inv_expo; pointRGB.b = pixel[0] * inv_expo;
           // if (pointRGB.r > 255) pointRGB.r = 255;
           // else if (pointRGB.r < 0) pointRGB.r = 0;

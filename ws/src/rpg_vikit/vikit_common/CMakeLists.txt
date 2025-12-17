@@ -42,6 +42,7 @@ LIST(APPEND SOURCEFILES src/atan_camera.cpp
                         src/user_input_thread.cpp
                         src/pinhole_camera.cpp
                         src/equidistant_camera.cpp
+                        src/equirectangular_camera.cpp
                         src/polynomial_camera.cpp
                         src/homography.cpp
                         src/img_align.cpp)
