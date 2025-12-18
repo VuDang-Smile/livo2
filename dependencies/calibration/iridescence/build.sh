@@ -81,10 +81,5 @@ sudo make install
 echo ""
 echo "=========================================="
 echo "✅ Iridescence build and install completed successfully!"
-<<<<<<< HEAD
-echo "=========================================="
-=======
-echo "=========================================="
 
-
->>>>>>> f5d777a (update code gui)
+echo "=========================================="

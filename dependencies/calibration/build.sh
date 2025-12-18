@@ -92,13 +92,6 @@ echo "Summary:"
 echo "  ✓ Ceres Solver"
 echo "  ✓ GTSAM"
 echo "  ✓ Iridescence"
-<<<<<<< HEAD
+
 echo ""
-=======
-echo ""
-
-
->>>>>>> f5d777a (update code gui)
-
-
 
