@@ -27,6 +27,7 @@ which is included as part of this source code package.
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <std_srvs/srv/trigger.hpp>
 #include <vikit/camera_loader.h>
 
 class LIVMapper
@@ -43,7 +44,7 @@ public:
   void stateEstimationAndMapping();
   void handleVIO();
   void handleLIO();
-  void savePCD();
+  void savePCD(bool force_save = false);
   void processImu();
   
   bool sync_packages(LidarMeasureGroup &meas);
@@ -69,6 +70,8 @@ public:
   template <typename T> void pointBodyToWorld(const Eigen::Matrix<T, 3, 1> &pi, Eigen::Matrix<T, 3, 1> &po);
   template <typename T> Eigen::Matrix<T, 3, 1> pointBodyToWorld(const Eigen::Matrix<T, 3, 1> &pi);
   cv::Mat getImageFromMsg(const sensor_msgs::msg::Image::ConstSharedPtr &img_msg);
+  void handleSaveResultsService(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+                                 std::shared_ptr<std_srvs::srv::Trigger::Response> response);
 
   std::mutex mtx_buffer, mtx_buffer_imu_prop;
   std::condition_variable sig_buffer;
@@ -130,6 +133,19 @@ public:
   deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu_buffer;
   deque<cv::Mat> img_buffer;
   deque<double> img_time_buffer;
+  
+  // Memory management: buffer size limits (balanced for sync stability)
+  int max_lidar_buffer_size = 5;
+  int max_imu_buffer_size = 100;  // Increased for sync stability (IMU needed for mapping)
+  int max_img_buffer_size = 2;
+  int forced_sliding_interval = 10;  // Force map sliding every N frames (very frequent cleanup)
+  int frame_count_since_slide = 0;    // Counter for forced sliding
+  
+  // VIO feat_map cleanup parameters
+  int vio_feat_map_cleanup_interval = 30;  // Cleanup VIO feat_map every N frames
+  double vio_feat_map_cleanup_radius = 15.0;  // Cleanup radius for VIO feat_map (meters)
+  int vio_frame_count = 0;  // Counter for VIO feat_map cleanup
+  
   vector<pointWithVar> _pv_list;
   vector<double> extrinT;
   vector<double> extrinR;
@@ -184,6 +200,7 @@ public:
   image_transport::Publisher pubImage;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr mavros_pose_publisher;
   rclcpp::TimerBase::SharedPtr imu_prop_timer;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr save_results_service;
   rclcpp::Node::SharedPtr node;
 
   int frame_num = 0;

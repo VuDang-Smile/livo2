@@ -962,6 +962,12 @@ void VIOManager::updateVisualMapPoints(cv::Mat img)
       ftr_new->id_ = new_frame_->id_;
       ftr_new->inv_expo_time_ = state->inv_expo_time;
       pt->addFrameRef(ftr_new);
+      // patch_temp ownership transferred to Feature, will be deleted in Feature destructor
+    }
+    else
+    {
+      // Memory leak fix: delete patch_temp if not used
+      delete[] patch_temp;
     }
   }
   printf("[ VIO ] Update %d points in visual submap\n", update_num);
@@ -1874,4 +1880,54 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
   // origin.y = 20;
   // cv::putText(img_cp, text, origin, cv::FONT_HERSHEY_COMPLEX, 0.6, cv::Scalar(255, 255, 255), 1, 8, 0);
   // cv::imwrite("/home/chunran/Desktop/raycasting/" + std::to_string(new_frame_->id_) + ".png", img_cp);
+}
+
+void VIOManager::cleanupFeatMap(const V3D &current_position, double cleanup_radius)
+{
+  if (feat_map.empty()) return;
+  
+  int deleted_count = 0;
+  float voxel_size = 0.5;
+  
+  // Calculate current voxel position
+  int loc_xyz[3];
+  for (int j = 0; j < 3; j++)
+  {
+    loc_xyz[j] = floor(current_position[j] / voxel_size);
+    if (loc_xyz[j] < 0) { loc_xyz[j] -= 1.0; }
+  }
+  
+  // Calculate cleanup bounds in voxel coordinates
+  int radius_voxels = (int)(cleanup_radius / voxel_size);
+  int x_min = loc_xyz[0] - radius_voxels;
+  int x_max = loc_xyz[0] + radius_voxels;
+  int y_min = loc_xyz[1] - radius_voxels;
+  int y_max = loc_xyz[1] + radius_voxels;
+  int z_min = loc_xyz[2] - radius_voxels;
+  int z_max = loc_xyz[2] + radius_voxels;
+  
+  // Cleanup feat_map entries outside the cleanup radius
+  for (auto it = feat_map.begin(); it != feat_map.end(); )
+  {
+    const VOXEL_LOCATION& loc = it->first;
+    bool should_remove = loc.x > x_max || loc.x < x_min || 
+                         loc.y > y_max || loc.y < y_min || 
+                         loc.z > z_max || loc.z < z_min;
+    
+    if (should_remove)
+    {
+      delete it->second;
+      it = feat_map.erase(it);
+      deleted_count++;
+    }
+    else
+    {
+      ++it;
+    }
+  }
+  
+  if (deleted_count > 0)
+  {
+    printf("[ VIO ] Cleaned up %d feat_map entries (remaining: %zu)\n", deleted_count, feat_map.size());
+  }
 }

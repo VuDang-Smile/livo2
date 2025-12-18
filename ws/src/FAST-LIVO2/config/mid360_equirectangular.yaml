@@ -74,6 +74,15 @@
       half_map_size: 90  # Balanced map size
       sliding_thresh: 8.0
 
+    memory:
+      # Buffer size limits to prevent memory leaks (balanced for sync stability)
+      max_lidar_buffer_size: 5    # Maximum LiDAR frames in buffer
+      max_imu_buffer_size: 100    # Maximum IMU messages in buffer (increased for sync stability)
+      max_img_buffer_size: 2      # Maximum image frames in buffer
+      forced_sliding_interval: 10 # Force map sliding every N frames (very frequent cleanup)
+      vio_feat_map_cleanup_interval: 30  # Cleanup VIO feat_map every N frames
+      vio_feat_map_cleanup_radius: 15.0  # Cleanup radius for VIO feat_map (meters)
+
     uav:
       imu_rate_odom: false
       gravity_align_en: false
