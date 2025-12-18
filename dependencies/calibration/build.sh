@@ -92,6 +92,4 @@ echo "Summary:"
 echo "  ✓ Ceres Solver"
 echo "  ✓ GTSAM"
 echo "  ✓ Iridescence"
-
 echo ""
-

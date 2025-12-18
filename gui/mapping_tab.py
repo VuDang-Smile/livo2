@@ -233,6 +233,15 @@ class MappingTab(ttk.Frame):
         )
         self.copy_path_btn.pack(side=tk.LEFT, padx=5)
         
+        # Nút xuất kết quả
+        self.export_results_btn = ttk.Button(
+            path_frame,
+            text="💾 Xuất kết quả",
+            command=self.export_results,
+            state=tk.DISABLED
+        )
+        self.export_results_btn.pack(side=tk.LEFT, padx=5)
+        
         # Output files info
         self.output_files_label = ttk.Label(
             output_frame,
@@ -725,6 +734,63 @@ class MappingTab(ttk.Frame):
             self.log(f"❌ {error_msg}")
             messagebox.showerror("Lỗi", error_msg)
     
+    def export_results(self):
+        """Export results by calling ROS2 service"""
+        if not self.is_mapping_running:
+            messagebox.showwarning("Cảnh báo", "Mapping chưa chạy. Vui lòng start mapping trước khi xuất kết quả.")
+            return
+        
+        try:
+            self.log("Đang xuất kết quả...")
+            self.export_results_btn.config(state=tk.DISABLED)
+            
+            # Call ROS2 service
+            setup_script = self.workspace_path / "install" / "setup.bash"
+            if not setup_script.exists():
+                messagebox.showerror("Lỗi", "Không tìm thấy setup.bash. Vui lòng build workspace trước.")
+                self.export_results_btn.config(state=tk.NORMAL)
+                return
+            
+            cmd = [
+                "bash", "-c",
+                f"source {setup_script} && ros2 service call /save_results std_srvs/srv/Trigger"
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=str(self.workspace_path)
+            )
+            
+            if result.returncode == 0:
+                self.log("✅ Xuất kết quả thành công!")
+                if result.stdout:
+                    self.log(f"Service response: {result.stdout}")
+                messagebox.showinfo("Thành công", 
+                    "Đã xuất kết quả thành công!\n\n" +
+                    "Point cloud: Log/PCD/\n" +
+                    "Trajectory: Log/result/\n\n" +
+                    "Vui lòng kiểm tra thư mục kết quả.")
+                # Update output info
+                self.update_output_info()
+            else:
+                error_msg = f"Lỗi khi gọi service: {result.stderr if result.stderr else result.stdout}"
+                self.log(f"❌ {error_msg}")
+                messagebox.showerror("Lỗi", f"Không thể xuất kết quả:\n{error_msg}")
+                
+        except subprocess.TimeoutExpired:
+            error_msg = "Timeout khi gọi service (quá 30 giây)"
+            self.log(f"❌ {error_msg}")
+            messagebox.showerror("Lỗi", error_msg)
+        except Exception as e:
+            error_msg = f"Lỗi khi xuất kết quả: {e}"
+            self.log(f"❌ {error_msg}")
+            messagebox.showerror("Lỗi", error_msg)
+        finally:
+            self.export_results_btn.config(state=tk.NORMAL)
+    
     def apply_performance_mode_to_config(self):
         """Áp dụng performance mode vào config file"""
         try:
@@ -971,6 +1037,7 @@ class MappingTab(ttk.Frame):
             self.is_mapping_running = True
             self.start_mapping_btn.config(state=tk.DISABLED)
             self.stop_mapping_btn.config(state=tk.NORMAL)
+            self.export_results_btn.config(state=tk.NORMAL)
             self.status_label.config(
                 text="Trạng thái: 🚀 Mapping đang chạy",
                 foreground="green"
@@ -1001,6 +1068,7 @@ class MappingTab(ttk.Frame):
             self.is_mapping_running = False
             self.start_mapping_btn.config(state=tk.NORMAL)
             self.stop_mapping_btn.config(state=tk.DISABLED)
+            self.export_results_btn.config(state=tk.DISABLED)
     
     def _read_mapping_output(self):
         """Đọc output từ mapping process"""
@@ -1118,6 +1186,7 @@ class MappingTab(ttk.Frame):
             self.is_mapping_running = False
             self.start_mapping_btn.config(state=tk.NORMAL)
             self.stop_mapping_btn.config(state=tk.DISABLED)
+            self.export_results_btn.config(state=tk.DISABLED)
             self.status_label.config(
                 text="Trạng thái: Mapping đã dừng",
                 foreground="orange"

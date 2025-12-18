@@ -81,5 +81,4 @@ sudo make install
 echo ""
 echo "=========================================="
 echo "✅ Iridescence build and install completed successfully!"
-
 echo "=========================================="

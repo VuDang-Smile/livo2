@@ -12,6 +12,8 @@ which is included as part of this source code package.
 
 #include "LIVMapper.h"
 #include <vikit/camera_loader.h>
+#include <fstream>
+#include <sstream>
 
 using namespace Sophus;
 LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name, const rclcpp::NodeOptions & options)
@@ -124,6 +126,14 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   try_declare.template operator()<bool>("publish.pub_effect_point_en", false);
   try_declare.template operator()<bool>("publish.dense_map_en", false);
 
+  // Memory management parameters
+  try_declare.template operator()<int>("memory.max_lidar_buffer_size", 5);
+  try_declare.template operator()<int>("memory.max_imu_buffer_size", 100);  // Increased for sync stability
+  try_declare.template operator()<int>("memory.max_img_buffer_size", 2);
+  try_declare.template operator()<int>("memory.forced_sliding_interval", 10);
+  try_declare.template operator()<int>("memory.vio_feat_map_cleanup_interval", 30);
+  try_declare.template operator()<double>("memory.vio_feat_map_cleanup_radius", 15.0);
+
   // get parameter
   this->node->get_parameter("common.lid_topic", lid_topic);
   this->node->get_parameter("common.imu_topic", imu_topic);
@@ -181,6 +191,14 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   this->node->get_parameter("publish.pub_scan_num", pub_scan_num);
   this->node->get_parameter("publish.pub_effect_point_en", pub_effect_point_en);
   this->node->get_parameter("publish.dense_map_en", dense_map_en);
+
+  // Memory management parameters
+  this->node->get_parameter("memory.max_lidar_buffer_size", max_lidar_buffer_size);
+  this->node->get_parameter("memory.max_imu_buffer_size", max_imu_buffer_size);
+  this->node->get_parameter("memory.max_img_buffer_size", max_img_buffer_size);
+  this->node->get_parameter("memory.forced_sliding_interval", forced_sliding_interval);
+  this->node->get_parameter("memory.vio_feat_map_cleanup_interval", vio_feat_map_cleanup_interval);
+  this->node->get_parameter("memory.vio_feat_map_cleanup_radius", vio_feat_map_cleanup_radius);
 
   p_pre->blind_sqr = p_pre->blind * p_pre->blind;
 }
@@ -291,6 +309,16 @@ void LIVMapper::initializeSubscribersAndPublishers(rclcpp::Node::SharedPtr &node
   pubImuPropOdom = this->node->create_publisher<nav_msgs::msg::Odometry>("/LIVO2/imu_propagate", 10000);
   imu_prop_timer = this->node->create_wall_timer(0.004s, std::bind(&LIVMapper::imu_prop_callback, this));
   voxelmap_manager->voxel_map_pub_= this->node->create_publisher<visualization_msgs::msg::MarkerArray>("/planes", 10000);
+  
+  // Service to trigger saving results
+  save_results_service = this->node->create_service<std_srvs::srv::Trigger>(
+    "save_results",
+    std::bind(&LIVMapper::handleSaveResultsService, this, std::placeholders::_1, std::placeholders::_2));
+  
+  // Service to trigger saving results
+  save_results_service = this->node->create_service<std_srvs::srv::Trigger>(
+    "save_results",
+    std::bind(&LIVMapper::handleSaveResultsService, this, std::placeholders::_1, std::placeholders::_2));
 }
 
 void LIVMapper::handleFirstFrame() 
@@ -380,6 +408,15 @@ void LIVMapper::handleVIO()
   }
 
   vio_manager->processFrame(LidarMeasures.measures.back().img, _pv_list, voxelmap_manager->voxel_map_, LidarMeasures.last_lio_update_time - _first_lidar_time);
+
+  // Memory management: cleanup VIO feat_map periodically to prevent memory leak
+  vio_frame_count++;
+  if (vio_frame_count >= vio_feat_map_cleanup_interval)
+  {
+    V3D current_pos = _state.pos_end;
+    vio_manager->cleanupFeatMap(current_pos, vio_feat_map_cleanup_radius);
+    vio_frame_count = 0;
+  }
 
   if (imu_prop_enable) 
   {
@@ -504,9 +541,74 @@ void LIVMapper::handleLIO()
   
   double t4 = omp_get_wtime();
 
-  if(voxelmap_manager->config_setting_.map_sliding_en)
+  // Memory management: forced map sliding every N frames to prevent memory leak
+  frame_count_since_slide++;
+  bool should_slide = false;
+  
+  if (voxelmap_manager->config_setting_.map_sliding_en)
   {
+    // Normal sliding based on distance threshold
     voxelmap_manager->mapSliding();
+    should_slide = true;
+  }
+  
+  // Force sliding every N frames regardless of distance or config setting
+  if (frame_count_since_slide >= forced_sliding_interval)
+  {
+    RCLCPP_INFO(this->node->get_logger(), "Forced map sliding triggered (frame count: %d >= interval: %d)", 
+                frame_count_since_slide, forced_sliding_interval);
+    voxelmap_manager->mapSliding();
+    frame_count_since_slide = 0;
+    should_slide = true;
+  }
+  
+  // Memory monitoring: log buffer sizes periodically (every 10 frames or when sliding)
+  if (frame_num % 10 == 0 || should_slide)
+  {
+    mtx_buffer.lock();
+    size_t lidar_buf_size = lid_raw_data_buffer.size();
+    size_t imu_buf_size = imu_buffer.size();
+    size_t img_buf_size = img_buffer.size();
+    size_t voxel_map_size = voxel_map.size();
+    size_t vio_feat_map_size = vio_manager->feat_map.size();
+    mtx_buffer.unlock();
+    
+    // Get process memory info
+    std::ifstream status_file("/proc/self/status");
+    std::string line;
+    long vm_rss_kb = 0, vm_size_kb = 0;
+    while (std::getline(status_file, line)) {
+      if (line.find("VmRSS:") == 0) {
+        std::istringstream iss(line);
+        std::string key, unit;
+        iss >> key >> vm_rss_kb >> unit;
+      } else if (line.find("VmSize:") == 0) {
+        std::istringstream iss(line);
+        std::string key, unit;
+        iss >> key >> vm_size_kb >> unit;
+      }
+    }
+    
+    // Estimate memory usage
+    size_t lidar_mem_mb = lidar_buf_size * 2;      // ~2MB per point cloud
+    size_t imu_mem_mb = imu_buf_size * 0.001;       // ~1KB per IMU message  
+    size_t img_mem_mb = img_buf_size * 12;         // ~12MB per image (2880x1440x3)
+    size_t voxel_mem_mb = voxel_map_size * 0.1;    // ~100KB per voxel
+    size_t vio_mem_mb = vio_feat_map_size * 0.5;   // ~500KB per feat_map entry
+    
+    RCLCPP_INFO(this->node->get_logger(), 
+                "[Memory Monitor] Frame %d | RSS: %ld MB | VSize: %ld MB",
+                frame_num, vm_rss_kb/1024, vm_size_kb/1024);
+    RCLCPP_INFO(this->node->get_logger(),
+                "  Buffers: LiDAR %zu/%d (~%zuMB) | IMU %zu/%d (~%zuMB) | Image %zu/%d (~%zuMB)",
+                lidar_buf_size, max_lidar_buffer_size, lidar_mem_mb,
+                imu_buf_size, max_imu_buffer_size, imu_mem_mb,
+                img_buf_size, max_img_buffer_size, img_mem_mb);
+    RCLCPP_INFO(this->node->get_logger(),
+                "  Maps: Voxel %zu (~%zuMB) | VIO feat_map %zu (~%zuMB) | Total estimated: ~%zuMB",
+                voxel_map_size, voxel_mem_mb,
+                vio_feat_map_size, vio_mem_mb,
+                lidar_mem_mb + imu_mem_mb + img_mem_mb + voxel_mem_mb + vio_mem_mb);
   }
   
   PointCloudXYZI::Ptr laserCloudFullRes(dense_map_en ? feats_undistort : feats_down_body);
@@ -560,7 +662,13 @@ void LIVMapper::handleLIO()
 
 void LIVMapper::savePCD() 
 {
-  if (pcd_save_en && (pcl_wait_save->points.size() > 0 || pcl_wait_save_intensity->points.size() > 0) && pcd_save_interval < 0) 
+  // Force save regardless of pcd_save_en flag when called from service
+  bool force_save = !pcd_save_en;
+  if (force_save) {
+    pcd_save_en = true;  // Temporarily enable for saving
+  }
+  
+  if ((pcl_wait_save->points.size() > 0 || pcl_wait_save_intensity->points.size() > 0) && (pcd_save_interval < 0 || force_save)) 
   {
     std::string raw_points_dir = std::string(ROOT_DIR) + "Log/PCD/all_raw_points.pcd";
     std::string downsampled_points_dir = std::string(ROOT_DIR) + "Log/PCD/all_downsampled_points.pcd";
@@ -605,6 +713,51 @@ void LIVMapper::savePCD()
       std::cout << GREEN << "Raw point cloud data saved to: " << raw_points_dir 
                 << " with point count: " << pcl_wait_save_intensity->points.size() << RESET << std::endl;
     }
+  }
+  
+  if (force_save) {
+    pcd_save_en = false;  // Restore original state
+  }
+}
+
+void LIVMapper::handleSaveResultsService(
+  const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+  std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+{
+  (void)request;  // Unused parameter
+  
+  RCLCPP_INFO(this->node->get_logger(), "Save results service called");
+  
+  try {
+    // Save point cloud (force save)
+    savePCD(true);
+    
+    // Save trajectory
+    if (LidarMeasures.last_lio_update_time > 0) {
+      std::ofstream evoFile;
+      std::string traj_file = std::string(ROOT_DIR) + "Log/result/" + seq_name + "_manual_save.txt";
+      evoFile.open(traj_file, std::ios::app);
+      if (evoFile.is_open()) {
+        Eigen::Quaterniond q(_state.rot_end);
+        evoFile << std::fixed;
+        evoFile << LidarMeasures.last_lio_update_time << " " 
+                << _state.pos_end[0] << " " << _state.pos_end[1] << " " << _state.pos_end[2] << " "
+                << q.x() << " " << q.y() << " " << q.z() << " " << q.w() << std::endl;
+        evoFile.close();
+        RCLCPP_INFO(this->node->get_logger(), "Trajectory saved to: %s", traj_file.c_str());
+      }
+    }
+    
+    response->success = true;
+    std::string pcd_path = std::string(ROOT_DIR) + "Log/PCD/";
+    std::string traj_path = std::string(ROOT_DIR) + "Log/result/";
+    response->message = "Results saved successfully.\nPoint cloud: " + pcd_path + "\nTrajectory: " + traj_path;
+    RCLCPP_INFO(this->node->get_logger(), "Save results completed successfully");
+  }
+  catch (const std::exception& e) {
+    response->success = false;
+    response->message = std::string("Error saving results: ") + e.what();
+    RCLCPP_ERROR(this->node->get_logger(), "Error saving results: %s", e.what());
   }
 }
 
@@ -822,6 +975,14 @@ void LIVMapper::livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::ConstShar
     return;
   }
 
+  // Memory management: limit buffer size
+  if (lid_raw_data_buffer.size() >= max_lidar_buffer_size) {
+    RCLCPP_WARN(this->node->get_logger(), "LiDAR buffer full (%zu >= %d), removing oldest frame", 
+                lid_raw_data_buffer.size(), max_lidar_buffer_size);
+    lid_raw_data_buffer.pop_front();
+    lid_header_time_buffer.pop_front();
+  }
+
   lid_raw_data_buffer.push_back(ptr);
   lid_header_time_buffer.push_back(cur_head_time);
   last_timestamp_lidar = cur_head_time;
@@ -867,6 +1028,20 @@ void LIVMapper::imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in)
   }
 
   last_timestamp_imu = timestamp;
+
+  // Memory management: limit buffer size (but keep enough for sync)
+  // Only trim if buffer is significantly over limit to avoid losing sync-critical messages
+  if (imu_buffer.size() > max_imu_buffer_size * 1.5) {
+    RCLCPP_WARN(this->node->get_logger(), "IMU buffer very full (%zu > %d), removing oldest messages", 
+                imu_buffer.size(), max_imu_buffer_size);
+    // Remove oldest messages but keep at least max_imu_buffer_size messages
+    while (imu_buffer.size() > max_imu_buffer_size) {
+      imu_buffer.pop_front();
+    }
+  } else if (imu_buffer.size() >= max_imu_buffer_size) {
+    RCLCPP_WARN(this->node->get_logger(), "IMU buffer full (%zu >= %d), consider increasing limit if sync fails", 
+                imu_buffer.size(), max_imu_buffer_size);
+  }
 
   imu_buffer.push_back(msg);
   cout<<"got imu: "<<timestamp<<" imu size "<<imu_buffer.size()<<endl;
@@ -971,6 +1146,15 @@ void LIVMapper::img_cbk(const sensor_msgs::msg::Image::ConstSharedPtr &msg_in)
   }
 
   cv::Mat img_cur = getImageFromMsg(msg);
+  
+  // Memory management: limit buffer size
+  if (img_buffer.size() >= max_img_buffer_size) {
+    RCLCPP_WARN(this->node->get_logger(), "Image buffer full (%zu >= %d), removing oldest frame", 
+                img_buffer.size(), max_img_buffer_size);
+    img_buffer.pop_front();
+    img_time_buffer.pop_front();
+  }
+  
   img_buffer.push_back(img_cur);
   img_time_buffer.push_back(img_time_correct);
 
@@ -986,9 +1170,19 @@ void LIVMapper::img_cbk(const sensor_msgs::msg::Image::ConstSharedPtr &msg_in)
 
 bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
 {
+  static int empty_imu_count = 0;
+  static int sync_wait_count = 0;
+  
   if (lid_raw_data_buffer.empty() && lidar_en) return false;
   if (img_buffer.empty() && img_en) return false;
-  if (imu_buffer.empty() && imu_en) return false;
+  if (imu_buffer.empty() && imu_en) {
+    empty_imu_count++;
+    if (empty_imu_count % 100 == 0) {
+      RCLCPP_WARN(this->node->get_logger(), "IMU buffer empty, waiting for IMU messages (count: %d)", empty_imu_count);
+    }
+    return false;
+  }
+  empty_imu_count = 0;  // Reset counter when IMU available
 
   switch (slam_mode_)
   {
@@ -1011,9 +1205,17 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
     { // waiting imu message needs to be
       // larger than _lidar_frame_end_time,
       // make sure complete propagate.
-      // ROS_ERROR("out sync");
+      sync_wait_count++;
+      if (sync_wait_count % 100 == 0) {
+        RCLCPP_WARN(this->node->get_logger(), 
+                    "Waiting for IMU sync: last_imu=%.6f < lidar_end=%.6f (delta=%.6f), buffer_size=%zu",
+                    last_timestamp_imu, meas.lidar_frame_end_time, 
+                    meas.lidar_frame_end_time - last_timestamp_imu,
+                    imu_buffer.size());
+      }
       return false;
     }
+    sync_wait_count = 0;  // Reset counter on successful sync
 
     struct MeasureGroup m; // standard method to keep imu message.
 
