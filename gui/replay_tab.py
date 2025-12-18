@@ -59,7 +59,7 @@ class ReplayTab(ttk.Frame):
         bag_frame = ttk.LabelFrame(control_frame, text="Chọn Bag Folder", padding="10")
         bag_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        self.bag_path_var = tk.StringVar(value="/media/an/GIGABYTE/full_tunnel")
+        self.bag_path_var = tk.StringVar()
         bag_entry = ttk.Entry(bag_frame, textvariable=self.bag_path_var, width=60)
         bag_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
