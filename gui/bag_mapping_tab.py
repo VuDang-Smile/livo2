@@ -12,6 +12,7 @@ import os
 import platform
 import signal
 import sys
+import time
 
 try:
     import tkinter as tk
@@ -20,6 +21,14 @@ except ImportError as e:
     print(f"Lỗi import: {e}")
     import sys
     sys.exit(1)
+
+# Try to import ROS2 for service calls
+try:
+    import rclpy
+    from std_srvs.srv import Trigger
+    ROS2_AVAILABLE = True
+except ImportError:
+    ROS2_AVAILABLE = False
 
 
 class BagMappingTab(ttk.Frame):
@@ -175,7 +184,7 @@ class BagMappingTab(ttk.Frame):
     
     def browse_bag_file(self):
         """Chọn bag file"""
-        initial_dir = "/media/an/GIGABYTE/full_tunnel/recording_20251210_165248"
+        initial_dir = "/media/an/ANHSON/"
         bag_path = filedialog.askdirectory(
             title="Chọn Bag Folder",
             initialdir=initial_dir
@@ -565,6 +574,84 @@ class BagMappingTab(ttk.Frame):
         self.log("✅ Đã dừng tất cả processes")
         self.log("=" * 60)
     
+    def call_save_service(self):
+        """Gọi ROS service để lưu PCD file bằng ros2 service call"""
+        try:
+            # Get workspace paths
+            ws_setup = self.workspace_path / "install" / "setup.sh"
+            drive_ws_setup = self.drive_ws_path / "install" / "setup.sh"
+            use_drive_ws = drive_ws_setup.exists()
+            
+            ros2_setup = "/opt/ros/jazzy/setup.bash"
+            
+            # First check if service exists
+            if use_drive_ws:
+                check_cmd = (
+                    f"source {ros2_setup} && "
+                    f"source {drive_ws_setup} && "
+                    f"source {ws_setup} && "
+                    f"ros2 service list | grep -q '/laserMapping/save_results'"
+                )
+            else:
+                check_cmd = (
+                    f"source {ros2_setup} && "
+                    f"source {ws_setup} && "
+                    f"ros2 service list | grep -q '/laserMapping/save_results'"
+                )
+            
+            # Check if service exists (quick check, 2 seconds)
+            check_result = subprocess.run(
+                check_cmd,
+                shell=True,
+                executable="/bin/bash",
+                capture_output=True,
+                timeout=2
+            )
+            
+            if check_result.returncode != 0:
+                # Service doesn't exist, skip service call
+                return False
+            
+            # Service exists, call it
+            if use_drive_ws:
+                service_cmd = (
+                    f"source {ros2_setup} && "
+                    f"source {drive_ws_setup} && "
+                    f"source {ws_setup} && "
+                    f"timeout 5 ros2 service call /laserMapping/save_results std_srvs/srv/Trigger"
+                )
+            else:
+                service_cmd = (
+                    f"source {ros2_setup} && "
+                    f"source {ws_setup} && "
+                    f"timeout 5 ros2 service call /laserMapping/save_results std_srvs/srv/Trigger"
+                )
+            
+            # Call service with shorter timeout (5 seconds)
+            result = subprocess.run(
+                service_cmd,
+                shell=True,
+                executable="/bin/bash",
+                capture_output=True,
+                text=True,
+                timeout=6
+            )
+            
+            if result.returncode == 0:
+                return True
+            else:
+                # Log error for debugging
+                if result.stderr:
+                    self.log(f"⚠️ Service call error: {result.stderr[:200]}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            # Timeout is OK, process will save on graceful shutdown
+            return False
+        except Exception as e:
+            self.log(f"⚠️ Lỗi khi gọi save service: {e}")
+            return False
+    
     def cleanup_processes(self):
         """Dọn dẹp tất cả processes"""
         # Stop bag process
@@ -599,7 +686,17 @@ class BagMappingTab(ttk.Frame):
         # Stop mapping process
         if self.mapping_process:
             try:
+                # Try to save PCD before stopping (optional, process will also save on graceful shutdown)
+                self.log("💾 Đang thử lưu PCD file trước khi dừng...")
+                save_success = self.call_save_service()
+                if save_success:
+                    self.log("✅ Đã lưu PCD file qua service")
+                    time.sleep(1)  # Wait for file to be written
+                else:
+                    self.log("💡 Service không khả dụng, process sẽ tự lưu khi dừng gracefully...")
+                
                 self.log("Đang dừng mapping node...")
+                # Send SIGTERM first to allow graceful shutdown
                 if hasattr(os, 'setsid'):
                     try:
                         os.killpg(os.getpgid(self.mapping_process.pid), signal.SIGTERM)
@@ -608,9 +705,45 @@ class BagMappingTab(ttk.Frame):
                 else:
                     self.mapping_process.terminate()
                 
+                # Wait longer for graceful shutdown (process will call savePCD() at line 782)
                 try:
-                    self.mapping_process.wait(timeout=5)
+                    self.mapping_process.wait(timeout=10)  # Increased timeout to 10 seconds
+                    self.log("✅ Mapping node đã dừng gracefully")
+                    
+                    # Wait a bit for file I/O to complete
+                    time.sleep(1)
+                    
+                    # Check if PCD files were saved
+                    # ROOT_DIR is defined as CMAKE_CURRENT_SOURCE_DIR which is ws/src/FAST-LIVO2/
+                    # self.workspace_path is already ws/, so we use it directly
+                    pcd_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "PCD"
+                    raw_pcd = pcd_dir / "all_raw_points.pcd"
+                    downsampled_pcd = pcd_dir / "all_downsampled_points.pcd"
+                    
+                    if raw_pcd.exists() or downsampled_pcd.exists():
+                        self.log(f"✅ PCD files đã được lưu tại: {pcd_dir}")
+                        if raw_pcd.exists():
+                            size_mb = raw_pcd.stat().st_size / (1024 * 1024)
+                            self.log(f"   - all_raw_points.pcd: {size_mb:.1f} MB")
+                        if downsampled_pcd.exists():
+                            size_mb = downsampled_pcd.stat().st_size / (1024 * 1024)
+                            self.log(f"   - all_downsampled_points.pcd: {size_mb:.1f} MB")
+                    else:
+                        self.log(f"⚠️ Không tìm thấy PCD files tại: {pcd_dir}")
+                        self.log(f"   (Đường dẫn đã kiểm tra: {pcd_dir.absolute()})")
+                        # Try to list what's in the directory for debugging
+                        if pcd_dir.exists():
+                            files = list(pcd_dir.glob("*.pcd"))
+                            if files:
+                                self.log(f"   Tìm thấy {len(files)} file .pcd khác trong thư mục")
+                            else:
+                                self.log(f"   Thư mục trống hoặc không có file .pcd")
+                        else:
+                            self.log(f"   Thư mục không tồn tại")
+                        
                 except subprocess.TimeoutExpired:
+                    # If still running after 10 seconds, force kill
+                    self.log("⚠️ Process chưa dừng sau 10s, đang force kill...")
                     if hasattr(os, 'setsid'):
                         try:
                             os.killpg(os.getpgid(self.mapping_process.pid), signal.SIGKILL)
