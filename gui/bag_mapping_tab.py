@@ -175,7 +175,7 @@ class BagMappingTab(ttk.Frame):
     
     def browse_bag_file(self):
         """Chọn bag file"""
-        initial_dir = str(self.workspace_path.parent)
+        initial_dir = "/media/an/GIGABYTE/full_tunnel/recording_20251210_165248"
         bag_path = filedialog.askdirectory(
             title="Chọn Bag Folder",
             initialdir=initial_dir
