@@ -186,9 +186,17 @@ if(mimalloc_FOUND)
   target_link_libraries(fastlivo_mapping mimalloc)
 endif()
 
-# Install the executable
+# Add PCD viewer executable
+add_executable(pcd_viewer_node src/pcd_viewer_node.cpp)
+ament_target_dependencies(pcd_viewer_node ${dependencies})
+target_link_libraries(pcd_viewer_node
+  ${PCL_LIBRARIES}
+)
+
+# Install the executables
 install(TARGETS
   fastlivo_mapping
+  pcd_viewer_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

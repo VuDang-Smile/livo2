@@ -47,6 +47,7 @@ from mapping_tab import MappingTab
 from recording_tab import RecordingTab
 from replay_tab import ReplayTab
 from bag_mapping_tab import BagMappingTab
+from pcd_viewer_tab import PCDViewerTab
 
 
 class MainGUI:
@@ -89,6 +90,10 @@ class MainGUI:
         self.bag_mapping_tab = BagMappingTab(self.notebook)
         self.notebook.add(self.bag_mapping_tab, text="Bag Mapping")
         
+        # Tạo tab PCD Viewer
+        self.pcd_viewer_tab = PCDViewerTab(self.notebook)
+        self.notebook.add(self.pcd_viewer_tab, text="PCD Viewer")
+        
         # Bind events
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
     
@@ -130,6 +135,11 @@ class MainGUI:
         if hasattr(self.bag_mapping_tab, 'stop_mapping'):
             if self.bag_mapping_tab.is_mapping_running or self.bag_mapping_tab.is_bag_playing:
                 self.bag_mapping_tab.stop_mapping()
+        
+        # Dừng PCD viewer nếu đang chạy
+        if hasattr(self.pcd_viewer_tab, 'stop_viewer'):
+            if self.pcd_viewer_tab.is_viewer_running:
+                self.pcd_viewer_tab.stop_viewer()
         
         # Shutdown ROS nếu đã được khởi tạo
         if rclpy and rclpy.ok():
