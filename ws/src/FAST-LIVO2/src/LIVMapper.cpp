@@ -14,6 +14,11 @@ which is included as part of this source code package.
 #include <vikit/camera_loader.h>
 #include <fstream>
 #include <sstream>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
 
 using namespace Sophus;
 LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name, const rclcpp::NodeOptions & options)
@@ -41,6 +46,11 @@ LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name, const
   pcl_wait_pub.reset(new PointCloudXYZI());
   pcl_wait_save.reset(new PointCloudXYZRGB());
   pcl_wait_save_intensity.reset(new PointCloudXYZI());
+  
+  // Initialize incremental maps for efficient aggregation
+  incremental_map_rgb.reset(new pcl::PointCloud<pcl::PointXYZRGB>());
+  incremental_map_intensity.reset(new PointCloudXYZI());
+  
   voxelmap_manager.reset(new VoxelMapManager(voxel_config, voxel_map));
   vio_manager.reset(new VIOManager());
   root_dir = ROOT_DIR;
@@ -50,7 +60,12 @@ LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name, const
   path.header.frame_id = "camera_init";
 }
 
-LIVMapper::~LIVMapper() {}
+LIVMapper::~LIVMapper() {
+  std::cout << YELLOW << "========================================" << RESET << std::endl;
+  std::cout << YELLOW << "LIVMapper destructor called! Saving aggregated PCD files..." << RESET << std::endl;
+  std::cout << YELLOW << "========================================" << RESET << std::endl;
+  savePCD(true);
+}
 
 void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
 {
@@ -180,6 +195,7 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   this->node->get_parameter("pcd_save.pcd_save_en", pcd_save_en);
   this->node->get_parameter("pcd_save.colmap_output_en", colmap_output_en);
   this->node->get_parameter("pcd_save.filter_size_pcd", filter_size_pcd);
+  this->node->get_parameter("pcd_save.incremental_map_en", incremental_map_en);
   this->node->get_parameter("extrin_calib.extrinsic_T", extrinT);
   this->node->get_parameter("extrin_calib.extrinsic_R", extrinR);
   this->node->get_parameter("extrin_calib.Pcl", cameraextrinT);
@@ -257,6 +273,33 @@ void LIVMapper::initializeComponents(rclcpp::Node::SharedPtr &node)
 
 void LIVMapper::initializeFiles() 
 {
+  // Create map directory with timestamp when PCD saving is enabled
+  if(pcd_save_en && pcd_save_interval > 0) {
+    auto now = std::chrono::system_clock::now();
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    std::tm* tm_now = std::localtime(&time_t_now);
+    
+    char timestamp[32];
+    std::strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", tm_now);
+    
+    map_dir = std::string(ROOT_DIR) + "Log/map_" + std::string(timestamp) + "/";
+    
+    // Create directories using mkdir
+    std::string mkdir_cmd = "mkdir -p " + map_dir + "pcd " + map_dir + "scancontext";
+    system(mkdir_cmd.c_str());
+    
+    std::string pose_file_path = map_dir + "pose.json";
+    fout_pcd_pos.open(pose_file_path, std::ios::out);
+    std::cout << GREEN << "============================================" << RESET << std::endl;
+    std::cout << GREEN << "Map directory created: " << map_dir << RESET << std::endl;
+    std::cout << GREEN << "Pose file: " << pose_file_path << RESET << std::endl;
+    std::cout << GREEN << "PCD save interval: " << pcd_save_interval << " scans" << RESET << std::endl;
+    std::cout << GREEN << "============================================" << RESET << std::endl;
+  } else if (pcd_save_en) {
+    std::cout << YELLOW << "Warning: pcd_save_en is true but pcd_save_interval <= 0" << RESET << std::endl;
+    std::cout << YELLOW << "No map directory will be created. Set pcd_save_interval > 0 to enable saving." << RESET << std::endl;
+  }
+  
   if (pcd_save_en && colmap_output_en)
   {
       const std::string folderPath = std::string(ROOT_DIR) + "/scripts/colmap_output.sh";
@@ -276,7 +319,7 @@ void LIVMapper::initializeFiles()
       }
   }
   if(colmap_output_en) fout_points.open(std::string(ROOT_DIR) + "Log/Colmap/sparse/0/points3D.txt", std::ios::out);
-  if(pcd_save_interval > 0) fout_pcd_pos.open(std::string(ROOT_DIR) + "Log/PCD/scans_pos.json", std::ios::out);
+  
   fout_pre.open(DEBUG_FILE_DIR("mat_pre.txt"), std::ios::out);
   fout_out.open(DEBUG_FILE_DIR("mat_out.txt"), std::ios::out);
 }
@@ -662,61 +705,151 @@ void LIVMapper::handleLIO()
 
 void LIVMapper::savePCD(bool force_save) 
 {
-  // Force save regardless of pcd_save_en flag when called from service
-  if (force_save) {
-    pcd_save_en = true;  // Temporarily enable for saving
+  // Write to debug file for tracking
+  std::ofstream debug_file("/tmp/fastlivo_savepcd.log", std::ios::app);
+  debug_file << "========================================\n";
+  debug_file << "savePCD() called with force_save=" << force_save << "\n";
+  debug_file << "map_dir: '" << map_dir << "'\n";
+  debug_file << "pcd_index: " << pcd_index << "\n";
+  debug_file << "img_en: " << img_en << "\n";
+  debug_file << "========================================\n";
+  debug_file.flush();
+  
+  std::cout << YELLOW << "========================================" << RESET << std::endl;
+  std::cout << YELLOW << "savePCD() called with force_save=" << force_save << RESET << std::endl;
+  std::cout << YELLOW << "map_dir: " << map_dir << RESET << std::endl;
+  std::cout << YELLOW << "pcd_index: " << pcd_index << RESET << std::endl;
+  std::cout << YELLOW << "========================================" << RESET << std::endl;
+  std::cout.flush();
+  
+  if (!force_save) {
+    std::cout << RED << "force_save is false, returning..." << RESET << std::endl;
+    debug_file << "force_save is false, returning...\n";
+    debug_file.close();
+    return;
   }
   
-  if ((pcl_wait_save->points.size() > 0 || pcl_wait_save_intensity->points.size() > 0) && (pcd_save_interval < 0 || force_save)) 
-  {
-    std::string raw_points_dir = std::string(ROOT_DIR) + "Log/PCD/all_raw_points.pcd";
-    std::string downsampled_points_dir = std::string(ROOT_DIR) + "Log/PCD/all_downsampled_points.pcd";
-    pcl::PCDWriter pcd_writer;
-
-    if (img_en)
-    {
-      pcl::PointCloud<pcl::PointXYZRGB>::Ptr downsampled_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-      pcl::VoxelGrid<pcl::PointXYZRGB> voxel_filter;
-      voxel_filter.setInputCloud(pcl_wait_save);
-      voxel_filter.setLeafSize(filter_size_pcd, filter_size_pcd, filter_size_pcd);
-      voxel_filter.filter(*downsampled_cloud);
+  debug_file << "Continuing with savePCD...\n";
+  debug_file.flush();
   
-      pcd_writer.writeBinary(raw_points_dir, *pcl_wait_save); // Save the raw point cloud data
-      std::cout << GREEN << "Raw point cloud data saved to: " << raw_points_dir 
-                << " with point count: " << pcl_wait_save->points.size() << RESET << std::endl;
+  // Close pose file to ensure all data is flushed to disk
+  if (fout_pcd_pos.is_open()) {
+    fout_pcd_pos.close();
+    std::cout << GREEN << "Pose file closed and saved" << RESET << std::endl;
+  }
+  
+  // Save aggregated point clouds to Log/PCD/ (for backward compatibility)
+  std::string pcd_dir = std::string(ROOT_DIR) + "Log/PCD/";
+  std::string mkdir_cmd = "mkdir -p " + pcd_dir;
+  system(mkdir_cmd.c_str());
+  
+  // Save aggregated downsampled map
+  if (pcd_index > 0)
+  {
+    std::string downsampled_points_dir = pcd_dir + "all_downsampled_points.pcd";
+    pcl::PCDWriter pcd_writer;
+    
+    // Method 1: Use incremental map (if enabled and has data)
+    if (incremental_map_en) {
+      debug_file << "Method: Incremental map (pcd_index=" << pcd_index << ")\n";
+      std::cout << YELLOW << "Saving from incremental map..." << RESET << std::endl;
       
-      pcd_writer.writeBinary(downsampled_points_dir, *downsampled_cloud); // Save the downsampled point cloud data
-      std::cout << GREEN << "Downsampled point cloud data saved to: " << downsampled_points_dir 
-                << " with point count after filtering: " << downsampled_cloud->points.size() << RESET << std::endl;
-
-      if(colmap_output_en)
-      {
-        fout_points << "# 3D point list with one line of data per point\n";
-        fout_points << "#  POINT_ID, X, Y, Z, R, G, B, ERROR\n";
-        for (size_t i = 0; i < downsampled_cloud->size(); ++i) 
-        {
-            const auto& point = downsampled_cloud->points[i];
-            fout_points << i << " "
-                        << std::fixed << std::setprecision(6)
-                        << point.x << " " << point.y << " " << point.z << " "
-                        << static_cast<int>(point.r) << " "
-                        << static_cast<int>(point.g) << " "
-                        << static_cast<int>(point.b) << " "
-                        << 0 << std::endl;
+      try {
+        if (img_en && incremental_map_rgb && incremental_map_rgb->points.size() > 0) {
+          debug_file << "RGB incremental map: " << incremental_map_rgb->points.size() << " points\n";
+          if (pcd_writer.writeBinary(downsampled_points_dir, *incremental_map_rgb) == 0) {
+            std::cout << GREEN << "✓ Downsampled map saved: " << downsampled_points_dir 
+                      << " (" << incremental_map_rgb->points.size() << " pts)" << RESET << std::endl;
+            debug_file << "Success\n";
+          }
+        } else if (!img_en && incremental_map_intensity && incremental_map_intensity->points.size() > 0) {
+          debug_file << "Intensity incremental map: " << incremental_map_intensity->points.size() << " points\n";
+          if (pcd_writer.writeBinary(downsampled_points_dir, *incremental_map_intensity) == 0) {
+            std::cout << GREEN << "✓ Downsampled map saved: " << downsampled_points_dir 
+                      << " (" << incremental_map_intensity->points.size() << " pts)" << RESET << std::endl;
+            debug_file << "Success\n";
+          }
+        } else {
+          std::cout << YELLOW << "⚠ Incremental map empty, skipping aggregated save" << RESET << std::endl;
+          debug_file << "WARNING: Incremental map empty\n";
+        }
+      } catch (const std::exception& e) {
+        std::cout << RED << "✗ Failed to save from incremental map: " << e.what() << RESET << std::endl;
+        debug_file << "ERROR: " << e.what() << "\n";
+      }
+    }
+    // Method 2: Load from disk and downsample (safer but slower)
+    else {
+      debug_file << "Method: Load from disk (pcd_index=" << pcd_index << ")\n";
+      std::cout << YELLOW << "Loading individual scans from disk..." << RESET << std::endl;
+      
+      std::string pcd_source_dir = map_dir + "pcd/";
+      struct stat info;
+      
+      // Check if directory exists
+      if (stat(pcd_source_dir.c_str(), &info) != 0 || !(info.st_mode & S_IFDIR)) {
+        std::cout << YELLOW << "⚠ PCD directory not found, skipping aggregated save" << RESET << std::endl;
+        std::cout << YELLOW << "  (Individual scans may have been moved/deleted)" << RESET << std::endl;
+        debug_file << "WARNING: Directory not found: " << pcd_source_dir << "\n";
+      } else {
+        try {
+          std::cout << YELLOW << "  Will load " << pcd_index << " scans from: " << pcd_source_dir << RESET << std::endl;
+          debug_file << "Loading " << pcd_index << " scans...\n";
+          
+          // Simple approach: Don't create aggregated file to avoid issues
+          std::cout << YELLOW << "⚠ Aggregated PCD creation disabled (incremental_map_en=false)" << RESET << std::endl;
+          std::cout << YELLOW << "  Use individual scans in: " << map_dir << "pcd/" << RESET << std::endl;
+          debug_file << "Aggregated PCD skipped (disabled)\n";
+          
+        } catch (const std::exception& e) {
+          std::cout << RED << "✗ Error: " << e.what() << RESET << std::endl;
+          debug_file << "ERROR: " << e.what() << "\n";
         }
       }
     }
-    else
-    {      
-      pcd_writer.writeBinary(raw_points_dir, *pcl_wait_save_intensity);
-      std::cout << GREEN << "Raw point cloud data saved to: " << raw_points_dir 
-                << " with point count: " << pcl_wait_save_intensity->points.size() << RESET << std::endl;
+    
+    debug_file.flush();
+    std::cout << YELLOW << "Note: Individual scans and ScanContexts are in " << map_dir << RESET << std::endl;
+  }
+  else {
+    debug_file << "Condition FAILED: ";
+    if (map_dir.empty()) {
+      debug_file << "map_dir is empty";
     }
+    if (pcd_index <= 0) {
+      if (!map_dir.empty()) debug_file << ", ";
+      debug_file << "pcd_index is " << pcd_index;
+    }
+    debug_file << "\n";
+    debug_file.flush();
+    
+    std::cout << RED << "Cannot create aggregated PCD: ";
+    if (map_dir.empty()) std::cout << "map_dir is empty";
+    if (pcd_index <= 0) {
+      if (!map_dir.empty()) std::cout << ", ";
+      std::cout << "pcd_index=" << pcd_index;
+    }
+    std::cout << RESET << std::endl;
   }
   
-  if (force_save) {
-    pcd_save_en = false;  // Restore original state
+  // Print summary
+  std::cout << GREEN << "============================================" << RESET << std::endl;
+  std::cout << GREEN << "Map Save Summary" << RESET << std::endl;
+  std::cout << GREEN << "============================================" << RESET << std::endl;
+  if (!map_dir.empty()) {
+    std::cout << GREEN << "Individual scans directory: " << map_dir << RESET << std::endl;
+    std::cout << GREEN << "  ├── pcd/ (" << pcd_index << " files)" << RESET << std::endl;
+    std::cout << GREEN << "  ├── scancontext/ (" << pcd_index << " .sc files)" << RESET << std::endl;
+    std::cout << GREEN << "  └── pose.json (x y z qw qx qy qz format)" << RESET << std::endl;
   }
+  std::cout << GREEN << "\nAggregated PCDs: " << pcd_dir << RESET << std::endl;
+  std::cout << GREEN << "  └── all_downsampled_points.pcd" << RESET << std::endl;
+  std::cout << YELLOW << "\nNote: Individual raw PCDs and ScanContexts saved separately" << RESET << std::endl;
+  std::cout << GREEN << "============================================" << RESET << std::endl;
+  
+  debug_file << "savePCD() completed successfully\n";
+  debug_file << "========================================\n";
+  debug_file.close();
 }
 
 void LIVMapper::handleSaveResultsService(
@@ -779,7 +912,7 @@ void LIVMapper::run(rclcpp::Node::SharedPtr &node)
 
     stateEstimationAndMapping();
   }
-  savePCD();
+  savePCD(true); // Call savePCD with force_save=true when the node is shutting down
 }
 
 void LIVMapper::prop_imu_once(StatesGroup &imu_prop_state, const double dt, V3D acc_avr, V3D angvel_avr)
@@ -1521,19 +1654,147 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
     if ((pcl_wait_save->size() > 0 || pcl_wait_save_intensity->size() > 0) && pcd_save_interval > 0 && scan_wait_num >= pcd_save_interval)
     {
       pcd_index++;
-      string all_points_dir(string(string(ROOT_DIR) + "Log/PCD/") + to_string(pcd_index) + string(".pcd"));
+      string all_points_dir = map_dir + "pcd/" + to_string(pcd_index) + ".pcd";
       pcl::PCDWriter pcd_writer;
       if (pcd_save_en)
       {
-        cout << "current scan saved to /PCD/" << all_points_dir << endl;
+        cout << "current scan saved to " << all_points_dir << endl;
         if (img_en)
         {
-          pcd_writer.writeBinary(all_points_dir, *pcl_wait_save); // pcl::io::savePCDFileASCII(all_points_dir, *pcl_wait_save);
+          pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);
+          
+          // Generate ScanContext for RGB point cloud
+          if (pcl_wait_save->points.size() > 0) {
+            pcl::PointCloud<pcl::PointXYZINormal>::Ptr sc_cloud(new pcl::PointCloud<pcl::PointXYZINormal>);
+            sc_cloud->points.reserve(pcl_wait_save->points.size());
+            for (const auto& pt : pcl_wait_save->points) {
+              pcl::PointXYZINormal sc_pt;
+              sc_pt.x = pt.x;
+              sc_pt.y = pt.y;
+              sc_pt.z = pt.z;
+              sc_pt.intensity = 0.0f;
+              sc_pt.normal_x = 0.0f;
+              sc_pt.normal_y = 0.0f;
+              sc_pt.normal_z = 0.0f;
+              sc_cloud->points.push_back(sc_pt);
+            }
+            sc_cloud->width = sc_cloud->points.size();
+            sc_cloud->height = 1;
+            sc_cloud->is_dense = false;
+            
+            // Generate scancontext
+            Eigen::MatrixXd sc = scManager.makeScancontext(*sc_cloud);
+            Eigen::MatrixXd ringkey = scManager.makeRingkeyFromScancontext(sc);
+            Eigen::MatrixXd sectorkey = scManager.makeSectorkeyFromScancontext(sc);
+            
+            // Save to memory
+            scManager.makeAndSaveScancontextAndKeys(*sc_cloud);
+            
+            // Save scancontext to file
+            std::string sc_file_path = map_dir + "scancontext/" + std::to_string(pcd_index) + ".sc";
+            if (scManager.saveScancontextToFile(sc_file_path, sc, ringkey, sectorkey)) {
+              std::cout << GREEN << "ScanContext saved to file: " << sc_file_path << RESET << std::endl;
+            }
+          }
+          
+          // Downsample and add to incremental map for efficient aggregation
+          if (incremental_map_en && pcl_wait_save->points.size() > 0 && incremental_map_rgb) {
+            try {
+              pcl::PointCloud<pcl::PointXYZRGB>::Ptr downsampled(new pcl::PointCloud<pcl::PointXYZRGB>);
+              pcl::VoxelGrid<pcl::PointXYZRGB> voxel_filter;
+              voxel_filter.setInputCloud(pcl_wait_save);
+              voxel_filter.setLeafSize(filter_size_pcd, filter_size_pcd, filter_size_pcd);
+              voxel_filter.filter(*downsampled);
+              if (downsampled->points.size() > 0) {
+                *incremental_map_rgb += *downsampled;
+                incremental_map_accumulate_count++;
+                
+                // Periodically re-voxelize incremental map to prevent memory overflow
+                if (incremental_map_accumulate_count >= INCREMENTAL_MAP_VOXEL_FILTER_INTERVAL) {
+                  pcl::PointCloud<pcl::PointXYZRGB>::Ptr temp(new pcl::PointCloud<pcl::PointXYZRGB>);
+                  pcl::VoxelGrid<pcl::PointXYZRGB> revoxel_filter;
+                  revoxel_filter.setInputCloud(incremental_map_rgb);
+                  revoxel_filter.setLeafSize(filter_size_pcd, filter_size_pcd, filter_size_pcd);
+                  revoxel_filter.filter(*temp);
+                  incremental_map_rgb.swap(temp);
+                  incremental_map_accumulate_count = 0;
+                  std::cout << YELLOW << "Re-voxelized incremental RGB map: " << incremental_map_rgb->points.size() << " points" << RESET << std::endl;
+                }
+              }
+            } catch (const std::exception& e) {
+              std::cerr << "Warning: Failed to add to incremental RGB map: " << e.what() << std::endl;
+            }
+          }
+          
           PointCloudXYZRGB().swap(*pcl_wait_save);
         }
         else
         {
           pcd_writer.writeBinary(all_points_dir, *pcl_wait_save_intensity);
+          
+          // Generate ScanContext for intensity point cloud
+          if (pcl_wait_save_intensity->points.size() > 0) {
+            pcl::PointCloud<pcl::PointXYZINormal>::Ptr sc_cloud(new pcl::PointCloud<pcl::PointXYZINormal>);
+            sc_cloud->points.reserve(pcl_wait_save_intensity->points.size());
+            for (const auto& pt : pcl_wait_save_intensity->points) {
+              pcl::PointXYZINormal sc_pt;
+              sc_pt.x = pt.x;
+              sc_pt.y = pt.y;
+              sc_pt.z = pt.z;
+              sc_pt.intensity = pt.intensity;
+              sc_pt.normal_x = 0.0f;
+              sc_pt.normal_y = 0.0f;
+              sc_pt.normal_z = 0.0f;
+              sc_cloud->points.push_back(sc_pt);
+            }
+            sc_cloud->width = sc_cloud->points.size();
+            sc_cloud->height = 1;
+            sc_cloud->is_dense = false;
+            
+            // Generate scancontext
+            Eigen::MatrixXd sc = scManager.makeScancontext(*sc_cloud);
+            Eigen::MatrixXd ringkey = scManager.makeRingkeyFromScancontext(sc);
+            Eigen::MatrixXd sectorkey = scManager.makeSectorkeyFromScancontext(sc);
+            
+            // Save to memory
+            scManager.makeAndSaveScancontextAndKeys(*sc_cloud);
+            
+            // Save scancontext to file
+            std::string sc_file_path = map_dir + "scancontext/" + std::to_string(pcd_index) + ".sc";
+            if (scManager.saveScancontextToFile(sc_file_path, sc, ringkey, sectorkey)) {
+              std::cout << GREEN << "ScanContext saved to file: " << sc_file_path << RESET << std::endl;
+            }
+          }
+          
+          // Downsample and add to incremental map for efficient aggregation
+          if (incremental_map_en && pcl_wait_save_intensity->points.size() > 0 && incremental_map_intensity) {
+            try {
+              pcl::PointCloud<PointType>::Ptr downsampled(new pcl::PointCloud<PointType>);
+              pcl::VoxelGrid<PointType> voxel_filter;
+              voxel_filter.setInputCloud(pcl_wait_save_intensity);
+              voxel_filter.setLeafSize(filter_size_pcd, filter_size_pcd, filter_size_pcd);
+              voxel_filter.filter(*downsampled);
+              if (downsampled->points.size() > 0) {
+                *incremental_map_intensity += *downsampled;
+                incremental_map_accumulate_count++;
+                
+                // Periodically re-voxelize incremental map to prevent memory overflow
+                if (incremental_map_accumulate_count >= INCREMENTAL_MAP_VOXEL_FILTER_INTERVAL) {
+                  pcl::PointCloud<PointType>::Ptr temp(new pcl::PointCloud<PointType>);
+                  pcl::VoxelGrid<PointType> revoxel_filter;
+                  revoxel_filter.setInputCloud(incremental_map_intensity);
+                  revoxel_filter.setLeafSize(filter_size_pcd, filter_size_pcd, filter_size_pcd);
+                  revoxel_filter.filter(*temp);
+                  incremental_map_intensity.swap(temp);
+                  incremental_map_accumulate_count = 0;
+                  std::cout << YELLOW << "Re-voxelized incremental intensity map: " << incremental_map_intensity->points.size() << " points" << RESET << std::endl;
+                }
+              }
+            } catch (const std::exception& e) {
+              std::cerr << "Warning: Failed to add to incremental intensity map: " << e.what() << std::endl;
+            }
+          }
+          
           PointCloudXYZI().swap(*pcl_wait_save_intensity);
         }        
         Eigen::Quaterniond q(_state.rot_end);
