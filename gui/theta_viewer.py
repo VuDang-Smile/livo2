@@ -7,6 +7,12 @@ GUI với 2 tabs: Theta Driver và Livox Driver 2
 import os
 import sys
 
+# ROS2 Network Isolation - Must be set before any ROS2 imports
+# Prevents interference from other machines on the same network
+os.environ['ROS_LOCALHOST_ONLY'] = '1'
+os.environ['ROS_DOMAIN_ID'] = '10'
+print("🔒 ROS2 Network Isolation: LOCALHOST_ONLY=1, DOMAIN_ID=10")
+
 # Fix Qt plugin issue - set environment variables trước khi import bất kỳ module nào
 # Disable Qt plugin path từ OpenCV để tránh xung đột
 if 'QT_PLUGIN_PATH' in os.environ:

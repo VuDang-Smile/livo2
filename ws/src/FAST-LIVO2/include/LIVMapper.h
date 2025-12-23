@@ -29,6 +29,7 @@ which is included as part of this source code package.
 #include <nav_msgs/msg/path.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <vikit/camera_loader.h>
+#include "Scancontext/Scancontext.h"
 
 class LIVMapper
 {
@@ -96,8 +97,10 @@ public:
   double match_time = 0, solve_time = 0, solve_const_H_time = 0;
 
   bool lidar_map_inited = false, pcd_save_en = false, pub_effect_point_en = false, pose_output_en = false, ros_driver_fix_en = false;
+  bool incremental_map_en = true; // Enable incremental map accumulation
   int pcd_save_interval = -1, pcd_index = 0;
   int pub_scan_num = 1;
+  std::string map_dir; // Directory for current mapping session with timestamp
 
   StatesGroup imu_propagate, latest_ekf_state;
 
@@ -208,5 +211,14 @@ public:
   double aver_time_icp = 0;
   double aver_time_map_inre = 0;
   bool colmap_output_en = false;
+
+  // ScanContext manager for loop closure detection
+  SCManager scManager;
+  
+  // Incremental downsampled map for efficient aggregation
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr incremental_map_rgb;
+  pcl::PointCloud<PointType>::Ptr incremental_map_intensity;
+  int incremental_map_accumulate_count = 0;
+  const int INCREMENTAL_MAP_VOXEL_FILTER_INTERVAL = 50; // Re-voxelize every 50 scans
 };
 #endif

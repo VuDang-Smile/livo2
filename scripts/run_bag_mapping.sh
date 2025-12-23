@@ -50,6 +50,11 @@ if [ -f "$DRIVE_WS_SETUP" ]; then
     echo -e "${GREEN}✓ Found drive_ws, will source it for CustomMsg support${NC}"
 fi
 
+# ROS2 Network Isolation - Prevents interference from other machines
+export ROS_LOCALHOST_ONLY=1
+export ROS_DOMAIN_ID=10
+echo -e "${GREEN}🔒 ROS2 Network Isolation: LOCALHOST_ONLY=1, DOMAIN_ID=10${NC}"
+
 # ROS2 setup
 ROS2_SETUP="/opt/ros/jazzy/setup.bash"
 if [ ! -f "$ROS2_SETUP" ]; then

@@ -40,6 +40,7 @@ class BagMappingTab(ttk.Frame):
         # Paths
         self.workspace_path = Path(__file__).parent.parent / "ws"
         self.drive_ws_path = Path(__file__).parent.parent / "dependencies" / "drive_ws"
+        self.log_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log"
         
         # Processes
         self.mapping_process = None
@@ -48,6 +49,7 @@ class BagMappingTab(ttk.Frame):
         # State
         self.is_mapping_running = False
         self.is_bag_playing = False
+        self.latest_map_dir = None
         self.bag_path = None
         self.use_rviz = False
         # Single unified config - no selection needed
@@ -55,6 +57,39 @@ class BagMappingTab(ttk.Frame):
         
         # Tạo UI
         self.create_widgets()
+        
+        # Auto-detect latest map
+        self.update_latest_map_info()
+    
+    def find_latest_map_directory(self):
+        """Tìm map directory mới nhất trong Log/"""
+        if not self.log_dir.exists():
+            return None
+        
+        map_dirs = sorted(self.log_dir.glob("map_*"), key=lambda x: x.name, reverse=True)
+        return map_dirs[0] if map_dirs else None
+    
+    def update_latest_map_info(self):
+        """Cập nhật thông tin map mới nhất"""
+        latest_map = self.find_latest_map_directory()
+        
+        if latest_map:
+            self.latest_map_dir = latest_map
+            
+            # Count files
+            pcd_files = list((latest_map / "pcd").glob("*.pcd")) if (latest_map / "pcd").exists() else []
+            sc_files = list((latest_map / "scancontext").glob("*.sc")) if (latest_map / "scancontext").exists() else []
+            pose_file = latest_map / "pose.json"
+            
+            info_text = f"📂 Map mới nhất: {latest_map.name}\n"
+            info_text += f"   • {len(pcd_files)} PCD files\n"
+            info_text += f"   • {len(sc_files)} ScanContext files\n"
+            info_text += f"   • Pose file: {'✓' if pose_file.exists() else '✗'}"
+            
+            self.map_info_var.set(info_text)
+        else:
+            self.latest_map_dir = None
+            self.map_info_var.set("⚠️ Chưa có map nào được tạo")
     
     def create_widgets(self):
         """Tạo các widget cho tab Bag Mapping"""
@@ -96,6 +131,27 @@ class BagMappingTab(ttk.Frame):
             foreground="gray"
         )
         self.bag_info_label.pack(pady=5)
+        
+        # Map info frame
+        map_info_frame = ttk.LabelFrame(main_frame, text="Map hiện có (tự động phát hiện)", padding="10")
+        map_info_frame.pack(fill=tk.X, pady=5)
+        
+        self.map_info_var = tk.StringVar(value="⚠️ Chưa có map nào được tạo")
+        map_info_label = ttk.Label(
+            map_info_frame,
+            textvariable=self.map_info_var,
+            foreground="blue",
+            font=("Courier", 9)
+        )
+        map_info_label.pack(anchor=tk.W)
+        
+        # Refresh map button
+        refresh_map_btn = ttk.Button(
+            map_info_frame,
+            text="🔄 Refresh Map Info",
+            command=self.update_latest_map_info
+        )
+        refresh_map_btn.pack(pady=5)
         
         # Frame options
         options_frame = ttk.LabelFrame(main_frame, text="Tùy chọn", padding="10")
@@ -713,33 +769,58 @@ class BagMappingTab(ttk.Frame):
                     # Wait a bit for file I/O to complete
                     time.sleep(1)
                     
-                    # Check if PCD files were saved
-                    # ROOT_DIR is defined as CMAKE_CURRENT_SOURCE_DIR which is ws/src/FAST-LIVO2/
-                    # self.workspace_path is already ws/, so we use it directly
-                    pcd_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "PCD"
-                    raw_pcd = pcd_dir / "all_raw_points.pcd"
-                    downsampled_pcd = pcd_dir / "all_downsampled_points.pcd"
+                    # Find latest map directory and merge PCD files
+                    log_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log"
+                    map_dirs = sorted(log_dir.glob("map_*"), key=lambda x: x.name, reverse=True)
                     
-                    if raw_pcd.exists() or downsampled_pcd.exists():
-                        self.log(f"✅ PCD files đã được lưu tại: {pcd_dir}")
-                        if raw_pcd.exists():
-                            size_mb = raw_pcd.stat().st_size / (1024 * 1024)
-                            self.log(f"   - all_raw_points.pcd: {size_mb:.1f} MB")
-                        if downsampled_pcd.exists():
-                            size_mb = downsampled_pcd.stat().st_size / (1024 * 1024)
-                            self.log(f"   - all_downsampled_points.pcd: {size_mb:.1f} MB")
-                    else:
-                        self.log(f"⚠️ Không tìm thấy PCD files tại: {pcd_dir}")
-                        self.log(f"   (Đường dẫn đã kiểm tra: {pcd_dir.absolute()})")
-                        # Try to list what's in the directory for debugging
-                        if pcd_dir.exists():
-                            files = list(pcd_dir.glob("*.pcd"))
-                            if files:
-                                self.log(f"   Tìm thấy {len(files)} file .pcd khác trong thư mục")
-                            else:
-                                self.log(f"   Thư mục trống hoặc không có file .pcd")
+                    if map_dirs:
+                        latest_map = map_dirs[0]
+                        pcd_src_dir = latest_map / "pcd"
+                        
+                        # Count individual PCDs
+                        pcd_files = list(pcd_src_dir.glob("*.pcd")) if pcd_src_dir.exists() else []
+                        
+                        if pcd_files:
+                            self.log(f"📂 Tìm thấy {len(pcd_files)} individual PCD scans trong {latest_map.name}/pcd/")
+                            self.log(f"🔄 Đang merge thành aggregated map...")
+                            
+                            # Run merge script
+                            merge_script = self.workspace_path / "src" / "FAST-LIVO2" / "scripts" / "merge_pcd_maps.py"
+                            try:
+                                result = subprocess.run(
+                                    ["python3", str(merge_script), str(latest_map)],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=60
+                                )
+                                
+                                if result.returncode == 0:
+                                    # Check output file
+                                    output_pcd = log_dir / "PCD" / "all_downsampled_points.pcd"
+                                    if output_pcd.exists():
+                                        size_mb = output_pcd.stat().st_size / (1024 * 1024)
+                                        # Parse point count from script output
+                                        for line in result.stdout.split('\n'):
+                                            if 'Points:' in line:
+                                                self.log(f"✅ {line.strip()}")
+                                        self.log(f"✅ Aggregated PCD saved: {output_pcd.name} ({size_mb:.1f} MB)")
+                                        # Update map info to show latest map
+                                        self.update_latest_map_info()
+                                    else:
+                                        self.log(f"⚠️ Merge script hoàn thành nhưng không tìm thấy output file")
+                                else:
+                                    self.log(f"⚠️ Merge script failed (exit code {result.returncode})")
+                                    if result.stderr:
+                                        self.log(f"   Error: {result.stderr[:200]}")
+                            
+                            except subprocess.TimeoutExpired:
+                                self.log(f"⚠️ Merge script timeout (>60s)")
+                            except Exception as e:
+                                self.log(f"⚠️ Failed to run merge script: {e}")
                         else:
-                            self.log(f"   Thư mục không tồn tại")
+                            self.log(f"⚠️ Không tìm thấy individual PCD files trong {latest_map.name}/pcd/")
+                    else:
+                        self.log(f"⚠️ Không tìm thấy map directory trong {log_dir}")
                         
                 except subprocess.TimeoutExpired:
                     # If still running after 10 seconds, force kill
