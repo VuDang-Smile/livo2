@@ -229,7 +229,7 @@ build_packages() {
     
     if [ ${#packages_to_build[@]} -eq 0 ]; then
         echo -e "${RED}Không có package nào được chọn để build!${NC}"
-        exit 1
+        return 1
     fi
     
     echo -e "${GREEN}Packages sẽ được build:${NC}"
@@ -250,12 +250,24 @@ build_packages() {
     echo -e "${BLUE}Chạy lệnh: colcon build $packages_arg --symlink-install${NC}"
     echo ""
     
+    # Tắt set -e tạm thời để bắt lỗi build
+    set +e
     colcon build $packages_arg --symlink-install
+    local build_status=$?
+    set -e
     
     echo ""
-    echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}Build hoàn tất!${NC}"
-    echo -e "${GREEN}========================================${NC}"
+    if [ $build_status -eq 0 ]; then
+        echo -e "${GREEN}========================================${NC}"
+        echo -e "${GREEN}Build hoàn tất thành công!${NC}"
+        echo -e "${GREEN}========================================${NC}"
+    else
+        echo -e "${RED}========================================${NC}"
+        echo -e "${RED}Build thất bại!${NC}"
+        echo -e "${RED}========================================${NC}"
+    fi
+    
+    return $build_status
 }
 
 # Main function
@@ -275,13 +287,21 @@ main() {
     
     # Build packages
     echo -e "${YELLOW}Build packages${NC}"
+    # Tắt set -e tạm thời để không thoát ngay khi build fail
+    set +e
     build_packages
+    local build_result=$?
+    set -e
     
-    # Tạm dừng trước khi thoát
+    # Tạm dừng trước khi thoát (luôn hiển thị dù build thành công hay thất bại)
     echo ""
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${YELLOW}Nhấn phím bất kỳ để thoát...${NC}"
-    read -n 1 -s
+    if [ $build_result -eq 0 ]; then
+        echo -e "${GREEN}Nhấn Enter để thoát...${NC}"
+    else
+        echo -e "${YELLOW}Nhấn Enter để thoát...${NC}"
+    fi
+    read
 }
 
 # Chạy main function
