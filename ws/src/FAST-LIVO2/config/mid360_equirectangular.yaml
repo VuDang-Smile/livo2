@@ -37,11 +37,11 @@
       blind: 0.8
 
     vio:
-      max_iterations: 4  # Balanced iterations for stability
+      max_iterations: 3  # Reduced for better performance
       outlier_threshold: 1000
       img_point_cov: 100
       patch_size: 7  # Balanced patch size
-      patch_pyrimid_level: 4  # More pyramid levels for robustness
+      patch_pyrimid_level: 3  # Reduced from 4 to 3 for better performance
       normal_en: true
       raycast_en: false
       inverse_composition_en: false
@@ -60,13 +60,13 @@
       b_gyr_cov: 0.0002  # Increased from 0.0001 for better stability
 
     lio:
-      max_iterations: 4  # Balanced iterations for stability
+      max_iterations: 3  # Reduced for better performance
       dept_err: 0.02
       beam_err: 0.05
       min_eigen_value: 0.0025
-      voxel_size: 0.45  # Balanced voxel size
+      voxel_size: 0.55  # Increased from 0.45 to reduce point density
       max_layer: 2
-      max_points_num: 55  # Balanced point density
+      max_points_num: 45  # Reduced from 55 to reduce memory usage
       layer_init_num: [5, 5, 5, 5, 5]
 
     local_map:  
@@ -75,12 +75,12 @@
       sliding_thresh: 8.0
 
     memory:
-      # Buffer size limits to prevent memory leaks (balanced for sync stability)
+      # Buffer size limits to prevent memory leaks (optimized for performance)
       max_lidar_buffer_size: 5    # Maximum LiDAR frames in buffer
       max_imu_buffer_size: 100    # Maximum IMU messages in buffer (increased for sync stability)
       max_img_buffer_size: 2      # Maximum image frames in buffer
-      forced_sliding_interval: 10 # Force map sliding every N frames (very frequent cleanup)
-      vio_feat_map_cleanup_interval: 30  # Cleanup VIO feat_map every N frames
+      forced_sliding_interval: 5  # Force map sliding every N frames (reduced from 10 for more frequent cleanup)
+      vio_feat_map_cleanup_interval: 20  # Cleanup VIO feat_map every N frames (reduced from 30)
       vio_feat_map_cleanup_radius: 15.0  # Cleanup radius for VIO feat_map (meters)
 
     uav:
@@ -88,10 +88,10 @@
       gravity_align_en: false
 
     publish:
-      dense_map_en: true  # Enable dense map
+      dense_map_en: false  # Disabled to reduce memory usage and prevent system freeze
       pub_effect_point_en: false 
       pub_plane_en: false
-      pub_scan_num: 2  # Balanced publish rate
+      pub_scan_num: 3  # Increased from 2 to reduce publish rate
       blind_rgb_points: 0.0
 
     evo:
@@ -99,7 +99,7 @@
       pose_output_en: false
 
     pcd_save:
-      pcd_save_en: false
+      pcd_save_en: true
       colmap_output_en: false
       filter_size_pcd: 0.12  # Balanced filter size
       interval: -1
