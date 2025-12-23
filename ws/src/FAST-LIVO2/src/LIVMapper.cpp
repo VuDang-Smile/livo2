@@ -660,10 +660,9 @@ void LIVMapper::handleLIO()
             << _state.bias_a.transpose() << " " << V3D(_state.inv_expo_time, 0, 0).transpose() << " " << feats_undistort->points.size() << std::endl;
 }
 
-void LIVMapper::savePCD() 
+void LIVMapper::savePCD(bool force_save) 
 {
   // Force save regardless of pcd_save_en flag when called from service
-  bool force_save = !pcd_save_en;
   if (force_save) {
     pcd_save_en = true;  // Temporarily enable for saving
   }
