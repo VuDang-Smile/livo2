@@ -139,6 +139,10 @@ class LivoxTab(ttk.Frame):
         self.lidar_count = 0
         self.imu_count = 0
         self.points2_count = 0
+        self.current_location = None  
+        self.current_linear = None
+        self.qr_location = None     # location lay duoc khi quet duoc QRcode
+        self.qr_linear = None      # linear lay duoc khi quet duoc QRcode
         
         # Tạo UI
         self.create_widgets()
@@ -613,6 +617,8 @@ class LivoxTab(ttk.Frame):
         # Cập nhật UI trong main thread
         angular_vel = msg.angular_velocity
         linear_accel = msg.linear_acceleration
+        self.current_location = angular_vel
+        self.current_linear = linear_accel
         
         self.after(0, lambda: self.imu_info_label.config(
             text=f"Đã nhận {self.imu_count} IMU messages | "
@@ -766,3 +772,10 @@ class LivoxTab(ttk.Frame):
                 foreground="green"
             ))
 
+    def update_data(self, data):
+        """Hàm này sẽ được MainGUI gọi để truyền dữ liệu vào"""
+        print(f"LivoxTab đã nhận: {data}")
+        self.qr_location = self.current_location
+        self.qr_linear = self.current_linear
+        print(f"Toa do đã nhận: {self.current_location.x:.3f}, {self.current_location.y: .3f}, {self.current_location.z: .3f}")
+        print(f"Linear đã nhận: {self.current_linear.x:.3f}, {self.current_linear.y: .3f}, {self.current_linear.z: .3f}")

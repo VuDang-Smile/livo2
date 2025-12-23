@@ -63,7 +63,7 @@ class MainGUI:
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Tạo tab Theta
-        self.theta_tab = ThetaTab(self.notebook)
+        self.theta_tab = ThetaTab(self.notebook, on_data_received=self.transfer_to_livox)
         self.notebook.add(self.theta_tab, text="Theta Driver")
         
         # Tạo tab Livox
@@ -96,6 +96,11 @@ class MainGUI:
         
         # Bind events
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def transfer_to_livox(self, data):
+        print(f"[MainGUI] Nhận data từ Theta, chuyển cho Livox: {data}")
+        """Hàm trung gian nhận data từ Theta và chuyển cho Livox"""
+        self.livox_tab.update_data(data)
     
     def on_closing(self):
         """Xử lý khi đóng window"""
