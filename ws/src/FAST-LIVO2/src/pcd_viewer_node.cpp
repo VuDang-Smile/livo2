@@ -5,6 +5,7 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/filters/voxel_grid.h>
 #include <string>
 #include <fstream>
 #include <sys/stat.h>
@@ -20,6 +21,7 @@ public:
     this->declare_parameter<std::string>("frame_id", "map");
     this->declare_parameter<double>("publish_rate", 1.0);
     this->declare_parameter<bool>("loop", false);
+    this->declare_parameter<double>("voxel_size", 0.0);  // 0.0 = no downsampling, >0 = downsample for display
 
     // Get parameters
     std::string pcd_file = this->get_parameter("pcd_file").as_string();
@@ -27,6 +29,7 @@ public:
     std::string frame_id = this->get_parameter("frame_id").as_string();
     double publish_rate = this->get_parameter("publish_rate").as_double();
     bool loop = this->get_parameter("loop").as_bool();
+    voxel_size_ = this->get_parameter("voxel_size").as_double();
 
     // Helper function to check if file exists
     auto file_exists = [](const std::string& path) -> bool {
@@ -105,6 +108,13 @@ public:
     publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic_name, 10);
     frame_id_ = frame_id;
     loop_ = loop;
+    
+    // Log downsampling info
+    if (voxel_size_ > 0.0) {
+      RCLCPP_INFO(this->get_logger(), "Downsampling enabled with voxel size: %.3f m", voxel_size_);
+    } else {
+      RCLCPP_INFO(this->get_logger(), "No downsampling (publishing full point cloud)");
+    }
 
     // Create timer for publishing
     if (publish_rate > 0.0) {
@@ -122,17 +132,84 @@ private:
   void publishCloud()
   {
     sensor_msgs::msg::PointCloud2 msg;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_to_publish;
     
     if (cloud_rgb_ && !cloud_rgb_->points.empty()) {
-      // Ensure width and height are set correctly
-      if (cloud_rgb_->width == 0) {
-        cloud_rgb_->width = cloud_rgb_->points.size();
-        cloud_rgb_->height = 1;
+      // Apply downsampling if enabled
+      if (voxel_size_ > 0.0 && cloud_rgb_->points.size() > 100000) {
+        // Only downsample if point cloud is large (>100k points)
+        try {
+          cloud_to_publish.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
+          if (!cloud_to_publish) {
+            RCLCPP_ERROR(this->get_logger(), "Failed to allocate memory for downsampled cloud");
+            cloud_to_publish = cloud_rgb_;
+          } else {
+            pcl::VoxelGrid<pcl::PointXYZRGB> voxel_filter;
+            voxel_filter.setInputCloud(cloud_rgb_);
+            voxel_filter.setLeafSize(voxel_size_, voxel_size_, voxel_size_);
+            voxel_filter.filter(*cloud_to_publish);
+            
+            // Check if downsampling produced valid result
+            if (cloud_to_publish->points.empty()) {
+              RCLCPP_WARN(this->get_logger(), "Downsampling produced empty cloud, using original");
+              cloud_to_publish = cloud_rgb_;
+            } else {
+              static bool logged_once = false;
+              if (!logged_once) {
+                RCLCPP_INFO(this->get_logger(), "Downsampled from %zu to %zu points (voxel_size=%.3f)", 
+                           cloud_rgb_->points.size(), cloud_to_publish->points.size(), voxel_size_);
+                logged_once = true;
+              }
+            }
+          }
+        } catch (const std::exception& e) {
+          RCLCPP_ERROR(this->get_logger(), "Error during downsampling: %s, using original cloud", e.what());
+          cloud_to_publish = cloud_rgb_;
+        } catch (...) {
+          RCLCPP_ERROR(this->get_logger(), "Unknown error during downsampling, using original cloud");
+          cloud_to_publish = cloud_rgb_;
+        }
+      } else {
+        cloud_to_publish = cloud_rgb_;
       }
-      pcl::toROSMsg(*cloud_rgb_, msg);
+      
+      // Validate cloud before converting
+      if (!cloud_to_publish) {
+        RCLCPP_ERROR(this->get_logger(), "cloud_to_publish is null!");
+        return;
+      }
+      
+      if (cloud_to_publish->points.empty()) {
+        RCLCPP_WARN(this->get_logger(), "Point cloud is empty, skipping publish");
+        return;
+      }
+      
+      // Ensure width and height are set correctly
+      if (cloud_to_publish->width == 0) {
+        cloud_to_publish->width = cloud_to_publish->points.size();
+        cloud_to_publish->height = 1;
+      }
+      
+      // Validate width * height matches points size
+      if (cloud_to_publish->width * cloud_to_publish->height != cloud_to_publish->points.size()) {
+        RCLCPP_WARN(this->get_logger(), "Width*Height (%zu) != points.size() (%zu), fixing...", 
+                   cloud_to_publish->width * cloud_to_publish->height, cloud_to_publish->points.size());
+        cloud_to_publish->width = cloud_to_publish->points.size();
+        cloud_to_publish->height = 1;
+      }
+      
+      try {
+        pcl::toROSMsg(*cloud_to_publish, msg);
+      } catch (const std::exception& e) {
+        RCLCPP_ERROR(this->get_logger(), "Error converting point cloud to ROS message: %s", e.what());
+        return;
+      } catch (...) {
+        RCLCPP_ERROR(this->get_logger(), "Unknown error converting point cloud to ROS message");
+        return;
+      }
       // Verify RGB data is present
       bool has_rgb = false;
-      for (const auto& pt : cloud_rgb_->points) {
+      for (const auto& pt : cloud_to_publish->points) {
         if (pt.r != 255 || pt.g != 255 || pt.b != 255) {
           has_rgb = true;
           break;
@@ -146,22 +223,61 @@ private:
     } else if (cloud_intensity_ && !cloud_intensity_->points.empty()) {
       // Convert PointXYZI to PointXYZRGB for better visualization
       pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_rgb(new pcl::PointCloud<pcl::PointXYZRGB>);
-      cloud_rgb->points.resize(cloud_intensity_->points.size());
-      for (size_t i = 0; i < cloud_intensity_->points.size(); ++i) {
-        cloud_rgb->points[i].x = cloud_intensity_->points[i].x;
-        cloud_rgb->points[i].y = cloud_intensity_->points[i].y;
-        cloud_rgb->points[i].z = cloud_intensity_->points[i].z;
-        // Use intensity to color the points
-        float intensity = cloud_intensity_->points[i].intensity;
-        uint8_t color = static_cast<uint8_t>(std::min(255.0f, intensity * 10.0f));
-        cloud_rgb->points[i].r = color;
-        cloud_rgb->points[i].g = color;
-        cloud_rgb->points[i].b = 255;
+      try {
+        cloud_rgb->points.resize(cloud_intensity_->points.size());
+        for (size_t i = 0; i < cloud_intensity_->points.size(); ++i) {
+          cloud_rgb->points[i].x = cloud_intensity_->points[i].x;
+          cloud_rgb->points[i].y = cloud_intensity_->points[i].y;
+          cloud_rgb->points[i].z = cloud_intensity_->points[i].z;
+          // Use intensity to color the points
+          float intensity = cloud_intensity_->points[i].intensity;
+          uint8_t color = static_cast<uint8_t>(std::min(255.0f, intensity * 10.0f));
+          cloud_rgb->points[i].r = color;
+          cloud_rgb->points[i].g = color;
+          cloud_rgb->points[i].b = 255;
+        }
+        cloud_rgb->width = cloud_intensity_->width;
+        cloud_rgb->height = cloud_intensity_->height;
+        cloud_rgb->is_dense = cloud_intensity_->is_dense;
+      } catch (const std::exception& e) {
+        RCLCPP_ERROR(this->get_logger(), "Error converting intensity cloud: %s", e.what());
+        return;
       }
-      cloud_rgb->width = cloud_intensity_->width;
-      cloud_rgb->height = cloud_intensity_->height;
-      cloud_rgb->is_dense = cloud_intensity_->is_dense;
-      pcl::toROSMsg(*cloud_rgb, msg);
+      
+      // Apply downsampling if enabled
+      if (voxel_size_ > 0.0 && cloud_rgb->points.size() > 100000) {
+        try {
+          pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_downsampled(new pcl::PointCloud<pcl::PointXYZRGB>);
+          pcl::VoxelGrid<pcl::PointXYZRGB> voxel_filter;
+          voxel_filter.setInputCloud(cloud_rgb);
+          voxel_filter.setLeafSize(voxel_size_, voxel_size_, voxel_size_);
+          voxel_filter.filter(*cloud_downsampled);
+          
+          if (!cloud_downsampled->points.empty()) {
+            static bool logged_once_intensity = false;
+            if (!logged_once_intensity) {
+              RCLCPP_INFO(this->get_logger(), "Downsampled intensity cloud from %zu to %zu points (voxel_size=%.3f)", 
+                         cloud_rgb->points.size(), cloud_downsampled->points.size(), voxel_size_);
+              logged_once_intensity = true;
+            }
+            cloud_rgb = cloud_downsampled;
+          }
+        } catch (const std::exception& e) {
+          RCLCPP_WARN(this->get_logger(), "Error during downsampling intensity cloud: %s, using original", e.what());
+        }
+      }
+      
+      if (cloud_rgb->width == 0) {
+        cloud_rgb->width = cloud_rgb->points.size();
+        cloud_rgb->height = 1;
+      }
+      
+      try {
+        pcl::toROSMsg(*cloud_rgb, msg);
+      } catch (const std::exception& e) {
+        RCLCPP_ERROR(this->get_logger(), "Error converting intensity cloud to ROS message: %s", e.what());
+        return;
+      }
     } else {
       RCLCPP_WARN(this->get_logger(), "No point cloud data to publish");
       return;
@@ -169,6 +285,14 @@ private:
 
     msg.header.stamp = this->now();
     msg.header.frame_id = frame_id_;
+    
+    // Log publishing info
+    static int publish_log_count = 0;
+    if (publish_log_count++ % 10 == 0) {  // Log every 10 publishes
+      RCLCPP_INFO(this->get_logger(), "Publishing PointCloud2: %zu points, frame_id: %s, topic: %s", 
+                  msg.width * msg.height, frame_id_.c_str(), publisher_->get_topic_name());
+    }
+    
     publisher_->publish(msg);
     
     if (!loop_ && publish_count_++ > 0) {
@@ -183,6 +307,7 @@ private:
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_intensity_;
   std::string frame_id_;
   bool loop_;
+  double voxel_size_;
   int publish_count_ = 0;
 };
 

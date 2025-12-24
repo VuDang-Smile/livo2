@@ -795,15 +795,23 @@ class BagMappingTab(ttk.Frame):
                                 )
                                 
                                 if result.returncode == 0:
-                                    # Check output file
-                                    output_pcd = log_dir / "PCD" / "all_downsampled_points.pcd"
-                                    if output_pcd.exists():
-                                        size_mb = output_pcd.stat().st_size / (1024 * 1024)
+                                    # Check output files (both raw and downsampled)
+                                    raw_pcd = log_dir / "PCD" / "all_raw_points.pcd"
+                                    downsampled_pcd = log_dir / "PCD" / "all_downsampled_points.pcd"
+                                    
+                                    if raw_pcd.exists():
+                                        size_mb = raw_pcd.stat().st_size / (1024 * 1024)
+                                        self.log(f"✅ Raw PCD saved: {raw_pcd.name} ({size_mb:.1f} MB)")
+                                    
+                                    if downsampled_pcd.exists():
+                                        size_mb = downsampled_pcd.stat().st_size / (1024 * 1024)
                                         # Parse point count from script output
                                         for line in result.stdout.split('\n'):
-                                            if 'Points:' in line:
+                                            if 'Points:' in line and 'downsampled' not in line.lower():
                                                 self.log(f"✅ {line.strip()}")
-                                        self.log(f"✅ Aggregated PCD saved: {output_pcd.name} ({size_mb:.1f} MB)")
+                                        self.log(f"✅ Downsampled PCD saved: {downsampled_pcd.name} ({size_mb:.1f} MB)")
+                                    
+                                    if raw_pcd.exists() or downsampled_pcd.exists():
                                         # Update map info to show latest map
                                         self.update_latest_map_info()
                                     else:

@@ -29,7 +29,7 @@ Panels:
     SyncSource: PointCloud2
 Visualization Manager:
   Displays:
-    - Alpha: 1.0
+    - Alpha: 0.9
       Autocompute Intensity Bounds: false
       Autocompute Value Bounds:
         Max Value: 10
@@ -49,15 +49,15 @@ Visualization Manager:
       Min Intensity: 0
       Name: PointCloud2
       Position Transformer: XYZ
-      Selectable: true
-      Size (Pixels): 3
+      Selectable: false
+      Size (Pixels): 1
       Size (m): 0.01
       Style: Points
       Topic:
-        Depth: 5
+        Depth: 3
         Durability Policy: Volatile
         History Policy: Keep Last
-        Reliability Policy: Reliable
+        Reliability Policy: Best Effort
         Value: /pcd_map
       Use Fixed Frame: true
       Use rainbow: false
@@ -92,7 +92,7 @@ Visualization Manager:
     Background Color: 48; 48; 48
     Default Light: true
     Fixed Frame: map
-    Frame Rate: 30
+    Frame Rate: 15
   Name: root
   Tools:
     - Class: rviz_default_plugins/Interact

@@ -71,11 +71,6 @@ def merge_pcd_scans(map_dir, voxel_size=0.12, output_dir=None):
     
     print(f"\nTotal points before downsampling: {len(combined_pcd.points):,}")
     
-    # Voxel downsampling
-    print(f"Downsampling with voxel size {voxel_size}m...")
-    downsampled_pcd = combined_pcd.voxel_down_sample(voxel_size=voxel_size)
-    print(f"Points after downsampling: {len(downsampled_pcd.points):,}")
-    
     # Determine output directory
     if output_dir is None:
         output_dir = map_path.parent / "PCD"
@@ -84,9 +79,21 @@ def merge_pcd_scans(map_dir, voxel_size=0.12, output_dir=None):
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Save raw map (no downsampling) - PRIORITY
+    raw_output_file = output_dir / "all_raw_points.pcd"
+    print(f"\nSaving raw map (no downsampling) to: {raw_output_file}")
+    o3d.io.write_point_cloud(str(raw_output_file), combined_pcd, write_ascii=False)
+    raw_file_size_mb = raw_output_file.stat().st_size / (1024 * 1024)
+    print(f"✓ Raw map saved: {len(combined_pcd.points):,} points, {raw_file_size_mb:.2f} MB")
+    
+    # Voxel downsampling
+    print(f"\nDownsampling with voxel size {voxel_size}m...")
+    downsampled_pcd = combined_pcd.voxel_down_sample(voxel_size=voxel_size)
+    print(f"Points after downsampling: {len(downsampled_pcd.points):,}")
+    
     # Save downsampled map
     output_file = output_dir / "all_downsampled_points.pcd"
-    print(f"\nSaving to: {output_file}")
+    print(f"\nSaving downsampled map to: {output_file}")
     o3d.io.write_point_cloud(str(output_file), downsampled_pcd, write_ascii=False)
     
     # Get file size
@@ -96,9 +103,13 @@ def merge_pcd_scans(map_dir, voxel_size=0.12, output_dir=None):
     print(f"✓ SUCCESS!")
     print(f"{'='*60}")
     print(f"Input:  {loaded_count} scans from {map_path.name}/pcd/")
-    print(f"Output: {output_file}")
-    print(f"Points: {len(downsampled_pcd.points):,}")
-    print(f"Size:   {file_size_mb:.2f} MB")
+    print(f"Output files:")
+    print(f"  ├── {raw_output_file.name}")
+    print(f"  │   Points: {len(combined_pcd.points):,}")
+    print(f"  │   Size:   {raw_file_size_mb:.2f} MB")
+    print(f"  └── {output_file.name}")
+    print(f"      Points: {len(downsampled_pcd.points):,}")
+    print(f"      Size:   {file_size_mb:.2f} MB")
     print(f"{'='*60}")
     
     return True

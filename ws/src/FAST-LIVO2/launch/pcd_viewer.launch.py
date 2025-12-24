@@ -35,14 +35,20 @@ def generate_launch_description():
     
     publish_rate_arg = DeclareLaunchArgument(
         "publish_rate",
-        default_value="1.0",
-        description="Publishing rate in Hz (0.0 means publish once)",
+        default_value="2.0",
+        description="Publishing rate in Hz (0.0 means publish once, higher rate = smoother but more CPU)",
     )
     
     loop_arg = DeclareLaunchArgument(
         "loop",
         default_value="true",
         description="Whether to continuously publish the point cloud",
+    )
+    
+    voxel_size_arg = DeclareLaunchArgument(
+        "voxel_size",
+        default_value="0.0",
+        description="Voxel size for downsampling (0.0 = no downsampling, >0 = downsample for smoother display). Only applies if point cloud > 100k points",
     )
     
     use_rviz_arg = DeclareLaunchArgument(
@@ -57,6 +63,7 @@ def generate_launch_description():
         frame_id_arg,
         publish_rate_arg,
         loop_arg,
+        voxel_size_arg,
         use_rviz_arg,
         
         # PCD Viewer Node
@@ -70,6 +77,7 @@ def generate_launch_description():
                 "frame_id": LaunchConfiguration("frame_id"),
                 "publish_rate": LaunchConfiguration("publish_rate"),
                 "loop": LaunchConfiguration("loop"),
+                "voxel_size": LaunchConfiguration("voxel_size"),
             }],
             output="screen"
         ),

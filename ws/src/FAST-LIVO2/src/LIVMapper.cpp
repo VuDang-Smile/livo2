@@ -128,7 +128,8 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   try_declare.template operator()<int>("pcd_save.interval", -1);
   try_declare.template operator()<bool>("pcd_save.pcd_save_en", false);
   try_declare.template operator()<bool>("pcd_save.colmap_output_en", false);
-  try_declare.template operator()<double>("pcd_save.filter_size_pcd", 0.5);
+  try_declare.template operator()<double>("pcd_save.filter_size_pcd", 0.05);  // Reduced from 0.5 to 0.05 for higher density
+  try_declare.template operator()<bool>("pcd_save.save_raw_map", true);  // Save raw (non-downsampled) map
   try_declare.template operator()<vector<double>>("extrin_calib.extrinsic_T", vector<double>{});
   try_declare.template operator()<vector<double>>("extrin_calib.extrinsic_R", vector<double>{});
   try_declare.template operator()<vector<double>>("extrin_calib.Pcl", vector<double>{});
@@ -196,6 +197,7 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   this->node->get_parameter("pcd_save.colmap_output_en", colmap_output_en);
   this->node->get_parameter("pcd_save.filter_size_pcd", filter_size_pcd);
   this->node->get_parameter("pcd_save.incremental_map_en", incremental_map_en);
+  this->node->get_parameter("pcd_save.save_raw_map", save_raw_map);
   this->node->get_parameter("extrin_calib.extrinsic_T", extrinT);
   this->node->get_parameter("extrin_calib.extrinsic_R", extrinR);
   this->node->get_parameter("extrin_calib.Pcl", cameraextrinT);
@@ -743,11 +745,74 @@ void LIVMapper::savePCD(bool force_save)
   std::string mkdir_cmd = "mkdir -p " + pcd_dir;
   system(mkdir_cmd.c_str());
   
-  // Save aggregated downsampled map
+  // Save aggregated maps (both raw and downsampled)
   if (pcd_index > 0)
   {
     std::string downsampled_points_dir = pcd_dir + "all_downsampled_points.pcd";
+    std::string raw_points_dir = pcd_dir + "all_raw_points.pcd";
     pcl::PCDWriter pcd_writer;
+    
+    // Always try to load raw scans from disk to create raw map (if enabled)
+    std::string pcd_source_dir = map_dir + "pcd/";
+    struct stat dir_info;
+    bool has_raw_scans = (stat(pcd_source_dir.c_str(), &dir_info) == 0 && (dir_info.st_mode & S_IFDIR));
+    
+    std::cout << YELLOW << "Checking for raw scans: save_raw_map=" << (save_raw_map ? "true" : "false") 
+              << ", has_raw_scans=" << (has_raw_scans ? "true" : "false") 
+              << ", img_en=" << (img_en ? "true" : "false") 
+              << ", pcd_source_dir=" << pcd_source_dir << RESET << std::endl;
+    
+    if (save_raw_map && has_raw_scans && img_en) {
+      try {
+        std::cout << YELLOW << "Loading raw scans to create all_raw_points.pcd..." << RESET << std::endl;
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr raw_merged_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+        int loaded_count = 0;
+        
+        for (int i = 1; i <= pcd_index; i++) {
+          std::string scan_file = pcd_source_dir + std::to_string(i) + ".pcd";
+          struct stat file_info;
+          if (stat(scan_file.c_str(), &file_info) == 0) {
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr scan_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+            if (pcl::io::loadPCDFile<pcl::PointXYZRGB>(scan_file, *scan_cloud) == 0) {
+              *raw_merged_cloud += *scan_cloud;
+              loaded_count++;
+              if (i % 100 == 0 || i == pcd_index) {
+                std::cout << YELLOW << "  Loaded " << i << "/" << pcd_index << " scans, " 
+                          << raw_merged_cloud->points.size() << " points..." << RESET << std::endl;
+              }
+            }
+          }
+        }
+        
+        if (raw_merged_cloud->points.size() > 0) {
+          if (raw_merged_cloud->width == 0) {
+            raw_merged_cloud->width = raw_merged_cloud->points.size();
+            raw_merged_cloud->height = 1;
+          }
+          if (pcd_writer.writeBinary(raw_points_dir, *raw_merged_cloud) == 0) {
+            std::cout << GREEN << "✓ Raw map saved (no downsampling): " << raw_points_dir 
+                      << " (" << raw_merged_cloud->points.size() << " pts from " << loaded_count << " scans)" << RESET << std::endl;
+          } else {
+            std::cout << RED << "✗ Failed to save raw map: " << raw_points_dir << RESET << std::endl;
+          }
+        } else {
+          std::cout << YELLOW << "⚠ No points loaded from raw scans (loaded_count=" << loaded_count << ")" << RESET << std::endl;
+          if (loaded_count == 0) {
+            std::cout << YELLOW << "  No scan files found in: " << pcd_source_dir << RESET << std::endl;
+          }
+        }
+      } catch (const std::exception& e) {
+        std::cout << RED << "✗ Error loading raw scans: " << e.what() << RESET << std::endl;
+      }
+    } else if (save_raw_map) {
+      if (!has_raw_scans) {
+        std::cout << YELLOW << "⚠ Raw scans directory not found: " << pcd_source_dir << RESET << std::endl;
+        std::cout << YELLOW << "  Will try to create raw map from incremental map if available..." << RESET << std::endl;
+      }
+      if (!img_en) {
+        std::cout << YELLOW << "⚠ Image mode disabled, cannot create RGB raw map" << RESET << std::endl;
+      }
+    }
     
     // Method 1: Use incremental map (if enabled and has data)
     if (incremental_map_en) {
@@ -762,11 +827,37 @@ void LIVMapper::savePCD(bool force_save)
             incremental_map_rgb->width = incremental_map_rgb->points.size();
             incremental_map_rgb->height = 1;
           }
+          
+          // Save raw (non-downsampled) map if enabled
+          if (save_raw_map) {
+            std::string raw_points_dir = pcd_dir + "all_raw_points.pcd";
+            if (pcd_writer.writeBinary(raw_points_dir, *incremental_map_rgb) == 0) {
+              std::cout << GREEN << "✓ Raw map saved (no downsampling): " << raw_points_dir 
+                        << " (" << incremental_map_rgb->points.size() << " pts)" << RESET << std::endl;
+              debug_file << "Raw map saved: " << incremental_map_rgb->points.size() << " points\n";
+            } else {
+              std::cout << RED << "✗ Failed to save raw map: " << raw_points_dir << RESET << std::endl;
+              debug_file << "Failed to save raw map\n";
+            }
+          }
+          
+          // Save downsampled map (re-voxelize to ensure consistent downsampling)
+          pcl::PointCloud<pcl::PointXYZRGB>::Ptr downsampled(new pcl::PointCloud<pcl::PointXYZRGB>);
+          pcl::VoxelGrid<pcl::PointXYZRGB> voxel_filter;
+          voxel_filter.setInputCloud(incremental_map_rgb);
+          voxel_filter.setLeafSize(filter_size_pcd, filter_size_pcd, filter_size_pcd);
+          voxel_filter.filter(*downsampled);
+          
+          if (downsampled->width == 0) {
+            downsampled->width = downsampled->points.size();
+            downsampled->height = 1;
+          }
+          
           // Save with binary format to preserve RGB color information
-          if (pcd_writer.writeBinary(downsampled_points_dir, *incremental_map_rgb) == 0) {
+          if (pcd_writer.writeBinary(downsampled_points_dir, *downsampled) == 0) {
             std::cout << GREEN << "✓ Downsampled map saved with RGB colors: " << downsampled_points_dir 
-                      << " (" << incremental_map_rgb->points.size() << " pts)" << RESET << std::endl;
-            debug_file << "Success - RGB colors preserved\n";
+                      << " (" << downsampled->points.size() << " pts, filter=" << filter_size_pcd << "m)" << RESET << std::endl;
+            debug_file << "Success - RGB colors preserved, downsampled to " << downsampled->points.size() << " points\n";
           } else {
             std::cout << RED << "✗ Failed to save downsampled map: " << downsampled_points_dir << RESET << std::endl;
             debug_file << "Failed to save\n";
@@ -805,10 +896,107 @@ void LIVMapper::savePCD(bool force_save)
           std::cout << YELLOW << "  Will load " << pcd_index << " scans from: " << pcd_source_dir << RESET << std::endl;
           debug_file << "Loading " << pcd_index << " scans...\n";
           
-          // Simple approach: Don't create aggregated file to avoid issues
-          std::cout << YELLOW << "⚠ Aggregated PCD creation disabled (incremental_map_en=false)" << RESET << std::endl;
-          std::cout << YELLOW << "  Use individual scans in: " << map_dir << "pcd/" << RESET << std::endl;
-          debug_file << "Aggregated PCD skipped (disabled)\n";
+          // Load and merge all scans
+          if (img_en) {
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr merged_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+            int loaded_count = 0;
+            
+            for (int i = 1; i <= pcd_index; i++) {
+              std::string scan_file = pcd_source_dir + std::to_string(i) + ".pcd";
+              struct stat file_info;
+              if (stat(scan_file.c_str(), &file_info) == 0) {
+                pcl::PointCloud<pcl::PointXYZRGB>::Ptr scan_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+                if (pcl::io::loadPCDFile<pcl::PointXYZRGB>(scan_file, *scan_cloud) == 0) {
+                  *merged_cloud += *scan_cloud;
+                  loaded_count++;
+                  if (i % 50 == 0 || i == pcd_index) {
+                    std::cout << YELLOW << "  Loaded " << i << "/" << pcd_index << " scans, " 
+                              << merged_cloud->points.size() << " points..." << RESET << std::endl;
+                  }
+                }
+              }
+            }
+            
+            if (merged_cloud->points.size() > 0) {
+              // Save raw (non-downsampled) map if enabled and not already saved
+              if (save_raw_map) {
+                std::string raw_points_dir = pcd_dir + "all_raw_points.pcd";
+                struct stat raw_file_info;
+                bool raw_exists = (stat(raw_points_dir.c_str(), &raw_file_info) == 0);
+                
+                if (!raw_exists) {
+                  if (merged_cloud->width == 0) {
+                    merged_cloud->width = merged_cloud->points.size();
+                    merged_cloud->height = 1;
+                  }
+                  if (pcd_writer.writeBinary(raw_points_dir, *merged_cloud) == 0) {
+                    std::cout << GREEN << "✓ Raw map saved (no downsampling): " << raw_points_dir 
+                              << " (" << merged_cloud->points.size() << " pts)" << RESET << std::endl;
+                    debug_file << "Raw map saved: " << merged_cloud->points.size() << " points\n";
+                  } else {
+                    std::cout << RED << "✗ Failed to save raw map: " << raw_points_dir << RESET << std::endl;
+                    debug_file << "Failed to save raw map\n";
+                  }
+                } else {
+                  std::cout << YELLOW << "⚠ Raw map already exists, skipping..." << RESET << std::endl;
+                }
+              }
+              
+              // Save downsampled map
+              pcl::PointCloud<pcl::PointXYZRGB>::Ptr downsampled(new pcl::PointCloud<pcl::PointXYZRGB>);
+              pcl::VoxelGrid<pcl::PointXYZRGB> voxel_filter;
+              voxel_filter.setInputCloud(merged_cloud);
+              voxel_filter.setLeafSize(filter_size_pcd, filter_size_pcd, filter_size_pcd);
+              voxel_filter.filter(*downsampled);
+              
+              if (downsampled->width == 0) {
+                downsampled->width = downsampled->points.size();
+                downsampled->height = 1;
+              }
+              if (pcd_writer.writeBinary(downsampled_points_dir, *downsampled) == 0) {
+                std::cout << GREEN << "✓ Downsampled map saved: " << downsampled_points_dir 
+                          << " (" << downsampled->points.size() << " pts, filter=" << filter_size_pcd << "m)" << RESET << std::endl;
+                debug_file << "Downsampled map saved: " << downsampled->points.size() << " points\n";
+              }
+              
+              // If raw map was not created earlier, create it from merged cloud (as fallback)
+              if (save_raw_map) {
+                std::string raw_points_dir = pcd_dir + "all_raw_points.pcd";
+                struct stat raw_file_info;
+                bool raw_exists = (stat(raw_points_dir.c_str(), &raw_file_info) == 0);
+                
+                if (!raw_exists && merged_cloud->points.size() > 0) {
+                  if (merged_cloud->width == 0) {
+                    merged_cloud->width = merged_cloud->points.size();
+                    merged_cloud->height = 1;
+                  }
+                  if (pcd_writer.writeBinary(raw_points_dir, *merged_cloud) == 0) {
+                    std::cout << GREEN << "✓ Raw map saved (fallback from merged scans): " << raw_points_dir 
+                              << " (" << merged_cloud->points.size() << " pts)" << RESET << std::endl;
+                    debug_file << "Raw map saved (fallback): " << merged_cloud->points.size() << " points\n";
+                  }
+                }
+              }
+            } else {
+              std::cout << YELLOW << "⚠ No points loaded from scans" << RESET << std::endl;
+              
+              // Last resort fallback: if no scans found and raw map doesn't exist, 
+              // check if we can create it from downsampled after it's saved
+              if (save_raw_map) {
+                std::string raw_points_dir = pcd_dir + "all_raw_points.pcd";
+                struct stat raw_file_info;
+                bool raw_exists = (stat(raw_points_dir.c_str(), &raw_file_info) == 0);
+                
+                if (!raw_exists) {
+                  std::cout << YELLOW << "  Will try to create raw map after downsampled is saved..." << RESET << std::endl;
+                }
+              }
+            }
+          } else {
+            // Similar for intensity point clouds
+            std::cout << YELLOW << "⚠ Intensity mode: Use individual scans in: " << map_dir << "pcd/" << RESET << std::endl;
+            debug_file << "Intensity mode - aggregated PCD skipped\n";
+          }
           
         } catch (const std::exception& e) {
           std::cout << RED << "✗ Error: " << e.what() << RESET << std::endl;
@@ -851,8 +1039,38 @@ void LIVMapper::savePCD(bool force_save)
     std::cout << GREEN << "  ├── scancontext/ (" << pcd_index << " .sc files)" << RESET << std::endl;
     std::cout << GREEN << "  └── pose.json (x y z qw qx qy qz format)" << RESET << std::endl;
   }
+  // Final fallback: if raw map still doesn't exist, copy from downsampled
+  if (save_raw_map && pcd_index > 0) {
+    std::string raw_points_dir = pcd_dir + "all_raw_points.pcd";
+    std::string downsampled_points_dir = pcd_dir + "all_downsampled_points.pcd";
+    struct stat raw_file_info, downsampled_file_info;
+    bool raw_exists = (stat(raw_points_dir.c_str(), &raw_file_info) == 0);
+    bool downsampled_exists = (stat(downsampled_points_dir.c_str(), &downsampled_file_info) == 0);
+    
+    if (!raw_exists && downsampled_exists) {
+      // Copy downsampled as raw (better than nothing)
+      std::ifstream src(downsampled_points_dir, std::ios::binary);
+      std::ofstream dst(raw_points_dir, std::ios::binary);
+      if (src && dst) {
+        dst << src.rdbuf();
+        src.close();
+        dst.close();
+        std::cout << YELLOW << "⚠ Created all_raw_points.pcd by copying all_downsampled_points.pcd" << RESET << std::endl;
+        std::cout << YELLOW << "  (No raw scans found, using downsampled as fallback)" << RESET << std::endl;
+        debug_file << "Raw map created by copying downsampled\n";
+      }
+    }
+  }
+  
   std::cout << GREEN << "\nAggregated PCDs: " << pcd_dir << RESET << std::endl;
-  std::cout << GREEN << "  └── all_downsampled_points.pcd" << RESET << std::endl;
+  if (save_raw_map) {
+    std::string raw_points_dir = pcd_dir + "all_raw_points.pcd";
+    struct stat raw_file_info;
+    if (stat(raw_points_dir.c_str(), &raw_file_info) == 0) {
+      std::cout << GREEN << "  ├── all_raw_points.pcd (no downsampling, maximum detail)" << RESET << std::endl;
+    }
+  }
+  std::cout << GREEN << "  └── all_downsampled_points.pcd (filter=" << filter_size_pcd << "m)" << RESET << std::endl;
   std::cout << YELLOW << "\nNote: Individual raw PCDs and ScanContexts saved separately" << RESET << std::endl;
   std::cout << GREEN << "============================================" << RESET << std::endl;
   

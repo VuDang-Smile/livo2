@@ -131,7 +131,7 @@ class PCDViewerTab(ttk.Frame):
             font=("Arial", 10)
         ).pack(side=tk.LEFT, padx=5)
         
-        self.rate_var = tk.StringVar(value="1.0")
+        self.rate_var = tk.StringVar(value="2.0")  # Increased from 1.0 to 2.0 Hz for smoother display
         rate_spinbox = ttk.Spinbox(
             rate_frame,
             from_=0.0,
@@ -315,10 +315,10 @@ class PCDViewerTab(ttk.Frame):
         
         self.log("🔍 Đang tìm file PCD có màu sắc RGB...")
         
-        # Danh sách các file ưu tiên tìm
+        # Danh sách các file ưu tiên tìm (ưu tiên raw points trước)
         priority_files = [
+            self.default_pcd_dir / "all_raw_points.pcd",  # Ưu tiên file raw (nhiều điểm nhất)
             self.default_pcd_dir / "all_downsampled_points.pcd",
-            self.default_pcd_dir / "all_raw_points.pcd",
         ]
         
         # Tìm trong thư mục pcd/ nếu có (thư mục chứa các scan riêng lẻ)
@@ -342,8 +342,6 @@ class PCDViewerTab(ttk.Frame):
                     self.pcd_path_var.set(str(pcd_file))
                     self._update_pcd_info(str(pcd_file))
                     self.log(f"✅ Đã tự động chọn file có màu: {pcd_file.name}")
-                    # Tự động khởi động viewer
-                    self.after(500, self.auto_start_viewer)
                     return str(pcd_file)
         
         # Tìm trong thư mục pcd/ (các scan riêng lẻ)
@@ -355,8 +353,6 @@ class PCDViewerTab(ttk.Frame):
                     self.pcd_path_var.set(str(pcd_file))
                     self._update_pcd_info(str(pcd_file))
                     self.log(f"✅ Đã tự động chọn file có màu: {pcd_file.name}")
-                    # Tự động khởi động viewer
-                    self.after(500, self.auto_start_viewer)
                     return str(pcd_file)
         
         # Nếu không tìm thấy file có RGB, thử tìm bất kỳ file nào
@@ -371,17 +367,7 @@ class PCDViewerTab(ttk.Frame):
         
         self.log(f"❌ Không tìm thấy PCD file trong {self.default_pcd_dir}")
         self.info_label.config(text="Không tìm thấy PCD file")
-        return None
-    
-    def auto_start_viewer(self):
-        """Tự động khởi động viewer sau khi tìm thấy file PCD có màu"""
-        if self.is_viewer_running:
-            return
-        
-        pcd_path = self.pcd_path_var.get()
-        if pcd_path and Path(pcd_path).exists():
-            self.log("🚀 Tự động khởi động PCD viewer...")
-            self.start_viewer()
+        return None    
     
     def _update_pcd_info(self, pcd_path):
         """Cập nhật thông tin về PCD file"""

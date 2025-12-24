@@ -101,9 +101,10 @@
     pcd_save:
       pcd_save_en: true
       colmap_output_en: false
-      filter_size_pcd: 0.12  # Balanced filter size
+      filter_size_pcd: 0.05  # Smaller filter size for higher point density (0.05m = 5cm, was 0.12m)
       interval: 1            # Save PCD every N scans (1 = every scan, -1 = disabled)
       incremental_map_en: false  # DISABLED: Caused segfaults, load from disk instead
+      save_raw_map: true     # Save raw (non-downsampled) map for maximum detail
 
     camera:
       model: Equirectangular
