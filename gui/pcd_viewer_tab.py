@@ -58,27 +58,28 @@ class PCDViewerTab(ttk.Frame):
         control_frame = ttk.Frame(self, padding="10")
         control_frame.pack(fill=tk.X)
         
-        # Frame chọn PCD file
-        pcd_frame = ttk.LabelFrame(control_frame, text="Chọn PCD File", padding="10")
+        # Frame chọn PCD file (ẩn các nút Browse và Auto Find)
+        pcd_frame = ttk.LabelFrame(control_frame, text="PCD File (Tự động chọn file có màu)", padding="10")
         pcd_frame.pack(fill=tk.X, padx=10, pady=5)
         
         self.pcd_path_var = tk.StringVar()
-        pcd_entry = ttk.Entry(pcd_frame, textvariable=self.pcd_path_var, width=60)
+        pcd_entry = ttk.Entry(pcd_frame, textvariable=self.pcd_path_var, width=60, state=tk.DISABLED)
         pcd_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
-        browse_btn = ttk.Button(
-            pcd_frame,
-            text="Browse",
-            command=self.browse_pcd_file
-        )
-        browse_btn.pack(side=tk.LEFT, padx=5)
+        # Ẩn các nút Browse và Auto Find - không cho người dùng chọn file
+        # browse_btn = ttk.Button(
+        #     pcd_frame,
+        #     text="Browse",
+        #     command=self.browse_pcd_file
+        # )
+        # browse_btn.pack(side=tk.LEFT, padx=5)
         
-        auto_find_btn = ttk.Button(
-            pcd_frame,
-            text="Auto Find",
-            command=self.auto_find_pcd
-        )
-        auto_find_btn.pack(side=tk.LEFT, padx=5)
+        # auto_find_btn = ttk.Button(
+        #     pcd_frame,
+        #     text="Auto Find",
+        #     command=self.auto_find_pcd
+        # )
+        # auto_find_btn.pack(side=tk.LEFT, padx=5)
         
         # Frame cấu hình
         config_frame = ttk.LabelFrame(control_frame, text="Cấu hình", padding="10")
@@ -218,8 +219,8 @@ class PCDViewerTab(ttk.Frame):
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
         
-        # Tự động tìm PCD file khi khởi động
-        self.auto_find_pcd()
+        # Tự động tìm và chọn file PCD có màu sắc khi khởi động
+        self.auto_find_rgb_pcd()
     
     def log(self, message):
         """Thêm message vào log"""
@@ -241,27 +242,146 @@ class PCDViewerTab(ttk.Frame):
             self._update_pcd_info(file)
             self.log(f"Đã chọn PCD file: {file}")
     
-    def auto_find_pcd(self):
-        """Tự động tìm PCD file trong Log/PCD directory"""
+    def check_pcd_has_rgb(self, pcd_path):
+        """Kiểm tra xem file PCD có chứa thông tin màu sắc RGB hay không"""
+        try:
+            with open(pcd_path, 'rb') as f:
+                # Đọc header của file PCD
+                header_lines = []
+                for _ in range(30):  # Đọc tối đa 30 dòng đầu
+                    line = f.readline().decode('utf-8', errors='ignore').strip()
+                    if not line or line.startswith('DATA'):
+                        break
+                    header_lines.append(line)
+                
+                # Tìm dòng FIELDS
+                fields_line = None
+                for line in header_lines:
+                    if line.startswith('FIELDS'):
+                        fields_line = line
+                        break
+                
+                fields = None
+                if fields_line:
+                    fields = fields_line.split()[1:]  # Bỏ qua từ "FIELDS"
+                    # Kiểm tra xem có r, g, b hoặc rgb trong fields
+                    # PointXYZRGB có fields: x y z rgb
+                    # Hoặc có thể có: x y z r g b
+                    has_rgb = any(field.lower() in ['r', 'g', 'b', 'rgb'] for field in fields)
+                    if has_rgb:
+                        return True
+                    else:
+                        # Log chi tiết để debug
+                        self.log(f"✗ File {Path(pcd_path).name} không có RGB (fields: {fields})")
+                        return False
+                
+                # Nếu không tìm thấy FIELDS, thử kiểm tra bằng SIZE
+                # PointXYZRGB: SIZE 4 4 4 4 (x, y, z, rgb) = 16 bytes
+                # PointXYZI: SIZE 4 4 4 4 (x, y, z, intensity) = 16 bytes
+                # PointXYZ: SIZE 4 4 4 = 12 bytes
+                size_line = None
+                for line in header_lines:
+                    if line.startswith('SIZE'):
+                        size_line = line
+                        break
+                
+                if size_line:
+                    sizes = size_line.split()[1:]
+                    try:
+                        # Đếm số lượng fields
+                        num_fields = len(fields) if fields else len(sizes)
+                        # PointXYZRGB thường có 4 fields (x, y, z, rgb) với tổng size >= 16
+                        total_size = sum(int(s) for s in sizes if s.isdigit())
+                        # Nếu có 4 fields và tổng size >= 16, có thể là RGB
+                        # Nhưng cần cẩn thận vì PointXYZI cũng có 4 fields
+                        # Tốt nhất là chỉ dựa vào FIELDS line
+                        if num_fields >= 4 and total_size >= 16:
+                            # Không thể chắc chắn nếu không có FIELDS, nên return False
+                            pass
+                    except (ValueError, IndexError):
+                        pass
+                
+                return False
+        except Exception as e:
+            self.log(f"⚠️  Lỗi khi kiểm tra file {pcd_path}: {e}")
+            return False
+    
+    def auto_find_rgb_pcd(self):
+        """Tự động tìm file PCD có màu sắc RGB trong Log/PCD directory và các thư mục con"""
         if not self.default_pcd_dir.exists():
             self.log(f"⚠️  Thư mục PCD không tồn tại: {self.default_pcd_dir}")
+            self.info_label.config(text="Thư mục PCD không tồn tại")
+            return None
+        
+        self.log("🔍 Đang tìm file PCD có màu sắc RGB...")
+        
+        # Danh sách các file ưu tiên tìm
+        priority_files = [
+            self.default_pcd_dir / "all_downsampled_points.pcd",
+            self.default_pcd_dir / "all_raw_points.pcd",
+        ]
+        
+        # Tìm trong thư mục pcd/ nếu có (thư mục chứa các scan riêng lẻ)
+        # Thử nhiều đường dẫn có thể
+        possible_map_dirs = [
+            self.fast_livo_path / "Log" / "map",
+            Path(self.fast_livo_path.parent.parent) / "Log" / "map",
+            self.workspace_path.parent / "Log" / "map",
+        ]
+        pcd_scan_dir = None
+        for map_dir in possible_map_dirs:
+            test_pcd_dir = map_dir / "pcd"
+            if test_pcd_dir.exists():
+                pcd_scan_dir = test_pcd_dir
+                break
+        
+        # Kiểm tra các file ưu tiên trước
+        for pcd_file in priority_files:
+            if pcd_file.exists():
+                if self.check_pcd_has_rgb(str(pcd_file)):
+                    self.pcd_path_var.set(str(pcd_file))
+                    self._update_pcd_info(str(pcd_file))
+                    self.log(f"✅ Đã tự động chọn file có màu: {pcd_file.name}")
+                    # Tự động khởi động viewer
+                    self.after(500, self.auto_start_viewer)
+                    return str(pcd_file)
+        
+        # Tìm trong thư mục pcd/ (các scan riêng lẻ)
+        if pcd_scan_dir and pcd_scan_dir.exists():
+            self.log(f"🔍 Tìm trong thư mục: {pcd_scan_dir}")
+            pcd_files = sorted(pcd_scan_dir.glob("*.pcd"), key=lambda x: x.stat().st_mtime, reverse=True)
+            for pcd_file in pcd_files:
+                if self.check_pcd_has_rgb(str(pcd_file)):
+                    self.pcd_path_var.set(str(pcd_file))
+                    self._update_pcd_info(str(pcd_file))
+                    self.log(f"✅ Đã tự động chọn file có màu: {pcd_file.name}")
+                    # Tự động khởi động viewer
+                    self.after(500, self.auto_start_viewer)
+                    return str(pcd_file)
+        
+        # Nếu không tìm thấy file có RGB, thử tìm bất kỳ file nào
+        self.log("⚠️  Không tìm thấy file PCD có màu sắc RGB")
+        for pcd_file in priority_files:
+            if pcd_file.exists():
+                self.pcd_path_var.set(str(pcd_file))
+                self._update_pcd_info(str(pcd_file))
+                self.log(f"⚠️  Đã chọn file (có thể không có màu): {pcd_file.name}")
+                self.info_label.config(text=f"⚠️ File có thể không có màu: {pcd_file.name}")
+                return str(pcd_file)
+        
+        self.log(f"❌ Không tìm thấy PCD file trong {self.default_pcd_dir}")
+        self.info_label.config(text="Không tìm thấy PCD file")
+        return None
+    
+    def auto_start_viewer(self):
+        """Tự động khởi động viewer sau khi tìm thấy file PCD có màu"""
+        if self.is_viewer_running:
             return
         
-        # Ưu tiên tìm all_raw_points.pcd, sau đó all_downsampled_points.pcd
-        raw_file = self.default_pcd_dir / "all_raw_points.pcd"
-        downsampled_file = self.default_pcd_dir / "all_downsampled_points.pcd"
-        
-        if raw_file.exists():
-            self.pcd_path_var.set(str(raw_file))
-            self._update_pcd_info(str(raw_file))
-            self.log(f"✓ Tự động tìm thấy: {raw_file.name}")
-        elif downsampled_file.exists():
-            self.pcd_path_var.set(str(downsampled_file))
-            self._update_pcd_info(str(downsampled_file))
-            self.log(f"✓ Tự động tìm thấy: {downsampled_file.name}")
-        else:
-            self.log(f"⚠️  Không tìm thấy PCD file trong {self.default_pcd_dir}")
-            self.info_label.config(text="Không tìm thấy PCD file")
+        pcd_path = self.pcd_path_var.get()
+        if pcd_path and Path(pcd_path).exists():
+            self.log("🚀 Tự động khởi động PCD viewer...")
+            self.start_viewer()
     
     def _update_pcd_info(self, pcd_path):
         """Cập nhật thông tin về PCD file"""
@@ -292,8 +412,12 @@ class PCDViewerTab(ttk.Frame):
         # Kiểm tra PCD path
         pcd_path = self.pcd_path_var.get()
         if not pcd_path:
-            messagebox.showerror("Lỗi", "Vui lòng chọn PCD file hoặc dùng Auto Find")
-            return
+            # Tự động tìm lại file nếu chưa có
+            self.auto_find_rgb_pcd()
+            pcd_path = self.pcd_path_var.get()
+            if not pcd_path:
+                messagebox.showerror("Lỗi", "Không tìm thấy file PCD có màu sắc")
+                return
         
         pcd_path_obj = Path(pcd_path)
         if not pcd_path_obj.exists():

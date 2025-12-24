@@ -124,7 +124,25 @@ private:
     sensor_msgs::msg::PointCloud2 msg;
     
     if (cloud_rgb_ && !cloud_rgb_->points.empty()) {
+      // Ensure width and height are set correctly
+      if (cloud_rgb_->width == 0) {
+        cloud_rgb_->width = cloud_rgb_->points.size();
+        cloud_rgb_->height = 1;
+      }
       pcl::toROSMsg(*cloud_rgb_, msg);
+      // Verify RGB data is present
+      bool has_rgb = false;
+      for (const auto& pt : cloud_rgb_->points) {
+        if (pt.r != 255 || pt.g != 255 || pt.b != 255) {
+          has_rgb = true;
+          break;
+        }
+      }
+      if (has_rgb) {
+        RCLCPP_INFO_ONCE(this->get_logger(), "Publishing PointCloud2 with RGB colors");
+      } else {
+        RCLCPP_WARN_ONCE(this->get_logger(), "PointCloud2 loaded but all points have default white color (255,255,255)");
+      }
     } else if (cloud_intensity_ && !cloud_intensity_->points.empty()) {
       // Convert PointXYZI to PointXYZRGB for better visualization
       pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_rgb(new pcl::PointCloud<pcl::PointXYZRGB>);

@@ -757,10 +757,19 @@ void LIVMapper::savePCD(bool force_save)
       try {
         if (img_en && incremental_map_rgb && incremental_map_rgb->points.size() > 0) {
           debug_file << "RGB incremental map: " << incremental_map_rgb->points.size() << " points\n";
+          // Ensure width and height are set correctly for proper PCD format with RGB colors
+          if (incremental_map_rgb->width == 0) {
+            incremental_map_rgb->width = incremental_map_rgb->points.size();
+            incremental_map_rgb->height = 1;
+          }
+          // Save with binary format to preserve RGB color information
           if (pcd_writer.writeBinary(downsampled_points_dir, *incremental_map_rgb) == 0) {
-            std::cout << GREEN << "✓ Downsampled map saved: " << downsampled_points_dir 
+            std::cout << GREEN << "✓ Downsampled map saved with RGB colors: " << downsampled_points_dir 
                       << " (" << incremental_map_rgb->points.size() << " pts)" << RESET << std::endl;
-            debug_file << "Success\n";
+            debug_file << "Success - RGB colors preserved\n";
+          } else {
+            std::cout << RED << "✗ Failed to save downsampled map: " << downsampled_points_dir << RESET << std::endl;
+            debug_file << "Failed to save\n";
           }
         } else if (!img_en && incremental_map_intensity && incremental_map_intensity->points.size() > 0) {
           debug_file << "Intensity incremental map: " << incremental_map_intensity->points.size() << " points\n";
@@ -1661,7 +1670,23 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
         cout << "current scan saved to " << all_points_dir << endl;
         if (img_en)
         {
-          pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);
+          // Ensure RGB colors are preserved when saving PCD file
+          // Verify that the point cloud has valid RGB data before saving
+          if (pcl_wait_save->points.size() > 0) {
+            // Ensure width and height are set correctly for proper PCD format
+            if (pcl_wait_save->width == 0) {
+              pcl_wait_save->width = pcl_wait_save->points.size();
+              pcl_wait_save->height = 1;
+            }
+            // Save with binary format to preserve RGB color information
+            int result = pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);
+            if (result == 0) {
+              cout << GREEN << "✓ PCD file saved with RGB colors: " << all_points_dir 
+                   << " (" << pcl_wait_save->points.size() << " points)" << RESET << endl;
+            } else {
+              cout << RED << "✗ Failed to save PCD file: " << all_points_dir << RESET << endl;
+            }
+          }
           
           // Generate ScanContext for RGB point cloud
           if (pcl_wait_save->points.size() > 0) {
