@@ -142,21 +142,13 @@ def world_to_camera(points: np.ndarray, K: np.ndarray, R:np.ndarray) -> np.ndarr
     camera_points = (points @ R.T) @ K.T
     return camera_points
 
-def spherical2equirect(sp_coords: np.ndarray,
-                       width: int,
-                       height: int)-> np.ndarray:
-    """
-    Args:
-        sp_coords (np.ndarray): Spherical coordinates (theta, phi, rho)
-        width (int): Width of the equirectangular image
-        height (int): Height of the equirectangular image
-
-    Returns:
-        np.ndarray: Equirectangular coordinates (x, y)
-    """
-
+def spherical2equirect(sp_coords: np.ndarray, width: int, height: int)-> np.ndarray:
     rho, theta, phi = sp_coords[..., 0], sp_coords[..., 1], sp_coords[..., 2]
-    x = (theta / (2 * np.pi) + 0.5) * (width)
-    y = (phi / (np.pi) + 0.5) * (height)
+    x = (theta / (2 * np.pi) + 0.5) * width
+    y = (phi / np.pi + 0.5) * height
+    
+    # Giới hạn tọa độ để không bị tràn biên
+    x = np.clip(x, 0, width - 1)
+    y = np.clip(y, 0, height - 1)
 
-    return np.stack([x, y], dtype=np.float32).transpose(2, 1, 0) # (width, height, 2)
+    return np.stack([x, y], dtype=np.float32).transpose(2, 1, 0)

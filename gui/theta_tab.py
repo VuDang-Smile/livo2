@@ -53,7 +53,7 @@ except ImportError as e:
 class SingleImageSubscriber(Node):
     """ROS2 Node để subscribe một topic image"""
     
-    def __init__(self, topic_name, callback, node_name='image_subscriber', send_to_main=None, perspec_size=512, max_workers=4):
+    def __init__(self, topic_name, callback, node_name='image_subscriber', send_to_main=None, perspec_size=600, max_workers=4):
         super().__init__(node_name)
         
         # Đảm bảo topic name có / prefix

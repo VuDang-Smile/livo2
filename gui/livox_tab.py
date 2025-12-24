@@ -777,5 +777,6 @@ class LivoxTab(ttk.Frame):
         print(f"LivoxTab đã nhận: {data}")
         self.qr_location = self.current_location
         self.qr_linear = self.current_linear
-        print(f"Toa do đã nhận: {self.current_location.x:.3f}, {self.current_location.y: .3f}, {self.current_location.z: .3f}")
-        print(f"Linear đã nhận: {self.current_linear.x:.3f}, {self.current_linear.y: .3f}, {self.current_linear.z: .3f}")
+        if self.current_location:
+            print(f"Toa do đã nhận: {self.current_location.x:.3f}, {self.current_location.y: .3f}, {self.current_location.z: .3f}")
+            print(f"Linear đã nhận: {self.current_linear.x:.3f}, {self.current_linear.y: .3f}, {self.current_linear.z: .3f}")
