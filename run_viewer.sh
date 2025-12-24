@@ -4,6 +4,11 @@
 # Lấy đường dẫn script
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+# ROS2 Network Isolation - Prevents interference from other machines
+export ROS_LOCALHOST_ONLY=1
+export ROS_DOMAIN_ID=10
+echo "🔒 ROS2 Network Isolation: LOCALHOST_ONLY=1, DOMAIN_ID=10"
+
 # Source ROS2
 if [ -f /opt/ros/jazzy/setup.bash ]; then
     source /opt/ros/jazzy/setup.bash

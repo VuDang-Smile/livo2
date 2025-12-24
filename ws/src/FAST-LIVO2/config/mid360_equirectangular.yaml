@@ -102,7 +102,8 @@
       pcd_save_en: true
       colmap_output_en: false
       filter_size_pcd: 0.12  # Balanced filter size
-      interval: -1
+      interval: 1            # Save PCD every N scans (1 = every scan, -1 = disabled)
+      incremental_map_en: false  # DISABLED: Caused segfaults, load from disk instead
 
     camera:
       model: Equirectangular

@@ -7,6 +7,12 @@ GUI với 2 tabs: Theta Driver và Livox Driver 2
 import os
 import sys
 
+# ROS2 Network Isolation - Must be set before any ROS2 imports
+# Prevents interference from other machines on the same network
+os.environ['ROS_LOCALHOST_ONLY'] = '1'
+os.environ['ROS_DOMAIN_ID'] = '10'
+print("🔒 ROS2 Network Isolation: LOCALHOST_ONLY=1, DOMAIN_ID=10")
+
 # Fix Qt plugin issue - set environment variables trước khi import bất kỳ module nào
 # Disable Qt plugin path từ OpenCV để tránh xung đột
 if 'QT_PLUGIN_PATH' in os.environ:
@@ -62,7 +68,7 @@ class MainGUI:
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Tạo tab Theta
-        self.theta_tab = ThetaTab(self.notebook)
+        self.theta_tab = ThetaTab(self.notebook, on_data_received=self.transfer_to_livox)
         self.notebook.add(self.theta_tab, text="Theta Driver")
         
         # Tạo tab Livox
@@ -93,6 +99,11 @@ class MainGUI:
         
         # Bind events
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def transfer_to_livox(self, data):
+        print(f"[MainGUI] Nhận data từ Theta, chuyển cho Livox: {data}")
+        """Hàm trung gian nhận data từ Theta và chuyển cho Livox"""
+        self.livox_tab.update_data(data)
     
     def on_closing(self):
         """Xử lý khi đóng window"""

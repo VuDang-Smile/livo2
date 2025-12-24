@@ -27,6 +27,13 @@ from cv_bridge import CvBridge
 os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '0'
 import cv2
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+from pyzbar import pyzbar
+from geometry_utils import (
+    get_camera_matrix, get_extrinsic_matrix, 
+    camera_to_world, cartesian_to_spherical, spherical2equirect
+)
+
 try:
     cv2.setNumThreads(1)
 except:
@@ -43,11 +50,10 @@ except ImportError as e:
     import sys
     sys.exit(1)
 
-
 class SingleImageSubscriber(Node):
     """ROS2 Node để subscribe một topic image"""
     
-    def __init__(self, topic_name, callback, node_name='image_subscriber'):
+    def __init__(self, topic_name, callback, node_name='image_subscriber', send_to_main=None, perspec_size=600, max_workers=4):
         super().__init__(node_name)
         
         # Đảm bảo topic name có / prefix
@@ -64,6 +70,15 @@ class SingleImageSubscriber(Node):
         self.bridge = CvBridge()
         self.callback = callback
         self.topic_name = topic_name
+        self.is_scanning = False
+        self.perspec_size = perspec_size  
+        self.max_workers = max_workers 
+        self.last_save_time = 0
+        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.save_folder = os.path.join(self.base_dir, "tests/qrcode_images")
+        self.latest_frame = None
+        self._remap_cache = {}
+        self.send_to_main = send_to_main
         self.get_logger().info(f'Đã subscribe topic {topic_name}')
     
     def image_callback(self, msg):
@@ -90,9 +105,18 @@ class SingleImageSubscriber(Node):
                     raise ValueError("Failed to decode JPEG image")
                 # Convert BGR to RGB
                 cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+                qr_codes = self.scan_qr_codes(cv_image)
+
+                if self.send_to_main and qr_codes:
+                    self.send_to_main(qr_codes)
             else:
                 # Use cv_bridge for standard encodings
                 cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
+                qr_codes = self.scan_qr_codes(cv_image)
+                print(f'[SingleImageSubscriber] qr_codes 2===========: {qr_codes}')
+                if self.send_to_main and qr_codes:
+                    self.send_to_main(qr_codes)
+
             
             # Debug: log image shape
             if self._callback_count == 1:
@@ -107,6 +131,127 @@ class SingleImageSubscriber(Node):
             traceback.print_exc()
             self.get_logger().error(traceback.format_exc())
 
+    def Equirec2Perspec(self, img: np.ndarray,
+                     FOV: float,
+                     THETA: float,
+                     PHI: float,
+                     height: int,
+                     width: int) -> np.ndarray:
+        """
+        Convert equirectangular image to perspective view with caching for speed.
+        """
+        key = (THETA, PHI, FOV, height, width)
+        if key in self._remap_cache:
+            XY = self._remap_cache[key]
+        else:
+            # Convert angles to radians
+            FOV_rad = np.deg2rad(FOV)
+            THETA_rad = np.deg2rad(THETA)
+            PHI_rad = np.deg2rad(PHI)
+
+            img_height, img_width = img.shape[:2]
+            K = get_camera_matrix(FOV_rad, width, height)
+            R = get_extrinsic_matrix(THETA_rad, PHI_rad)
+
+            # Image grid
+            x, y = np.meshgrid(np.arange(width), np.arange(height))
+            z = np.ones_like(x)
+            xyz = np.stack([x, y, z], axis=-1)
+
+            world_coords = camera_to_world(xyz, K, R)
+            sp_coords = cartesian_to_spherical(world_coords)
+            XY = spherical2equirect(sp_coords, img_width, img_height)
+
+            self._remap_cache[key] = XY  # cache for speed
+
+        persp = cv2.remap(img, XY[..., 0], XY[..., 1], cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+        return persp
+
+    # function scan scan_qr_codes
+    def scan_qr_codes(self, frame):
+        try:
+            # --- Vòng 1: 6 view, zoom cao để quét QR gần ---
+            views_round1 = [
+                (0, 0),      # front
+                (180, 0),    # back
+                (90, 0),     # right
+                (-90, 0),    # left
+                (0, 90),     # up
+                (0, -90),    # down
+            ]
+            zoom_round1 = [90, 70, 50]
+
+            # --- Vòng 2: 12 view, zoom thấp để quét QR xa ---
+            views_round2 = [
+                (0, 0), (180, 0), (90, 0), (-90, 0),
+                (0, 90), (0, -90),
+                (45, 0), (-45, 0), (0, 45), (0, -45),
+                (135, 0), (-135, 0)
+            ]
+            zoom_round2 = [30, 15, 7, 5]
+
+            rounds = [
+                (views_round1, zoom_round1),
+                (views_round2, zoom_round2)
+            ]
+
+            all_results = []
+            debug_view = None
+
+            for views, zoom_levels in rounds:
+                for fov in zoom_levels:
+                    if all_results:  # dừng nếu đã quét QR
+                        break
+
+                    def process_view(args):
+                        theta, phi = args
+                        persp = self.Equirec2Perspec(frame, fov, theta, phi,
+                                                    self.perspec_size, self.perspec_size)
+                        gray = cv2.cvtColor(persp, cv2.COLOR_BGR2GRAY)
+                        # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+                        # gray = clahe.apply(gray)
+                        # gray = cv2.GaussianBlur(gray, (3,3), 0)
+                        
+                        qr_codes = pyzbar.decode(gray)
+                        results = []
+                        debug_img = None
+
+                        for qr in qr_codes:
+                            results.append({
+                                "data": qr.data.decode('utf-8'),
+                                "rect": qr.rect,
+                                "view": (theta, phi),
+                                "zoom": fov
+                            })
+
+                            x, y, w, h = qr.rect
+                            debug_img = persp.copy()
+                            cv2.rectangle(debug_img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                            cv2.putText(debug_img, qr.data.decode('utf-8'), (x, y - 10),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+                        return results, debug_img  # trả về debug image
+
+                    with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                        futures = executor.map(process_view, views)
+                        for r, dbg in futures:
+                            all_results.extend(r)
+                            if dbg is not None and debug_view is None:
+                                debug_view = dbg  # main thread quyết định hiển thị
+
+                    # Hiển thị GUI chỉ trong main thread
+                    # if debug_view is not None:
+                    #     cv2.imshow("QR Debug View", debug_view)
+                    #     cv2.waitKey(1)
+
+                if all_results:  # dừng vòng nếu đã quét QR
+                    break
+
+            return all_results
+
+        except Exception as e:
+            self.get_logger().error(f'Error scanning QR codes: {str(e)}')
+            return []
 
 class CameraModelTab(ttk.Frame):
     """Tab cho một camera model cụ thể"""
@@ -682,9 +827,10 @@ class CameraModelTab(ttk.Frame):
 class EquirectangularTab(ttk.Frame):
     """Tab cho equirectangular (original) - chỉ subscribe, không có converter"""
     
-    def __init__(self, parent):
+    def __init__(self, parent, on_data_received=None):
         super().__init__(parent)
         
+        self.send_to_main = on_data_received
         # State
         self.ros_node = None
         self.ros_executor = None
@@ -748,7 +894,8 @@ class EquirectangularTab(ttk.Frame):
             self.ros_node = SingleImageSubscriber(
                 '/image_raw',  # Đảm bảo có / prefix
                 self.on_image_received,
-                'equirectangular_subscriber'
+                'equirectangular_subscriber',
+                self.send_to_main
             )
             
             print("Tạo executor...")
@@ -909,17 +1056,19 @@ class EquirectangularTab(ttk.Frame):
 class ThetaTab(ttk.Frame):
     """Main tab với Notebook sub-tabs cho các camera models"""
     
-    def __init__(self, parent):
+    def __init__(self, parent, on_data_received=None):
         super().__init__(parent)
         
         # State
         self.theta_driver_process = None
         self.camera_info_publisher_process = None
         self.camera_tabs = {}  # {model_name: CameraModelTab}
+        self.send_to_main = on_data_received
         
         # UI
         self.create_control_panel()
         self.create_notebook()
+
     
     def create_control_panel(self):
         """Tạo control panel ở top"""
@@ -979,7 +1128,7 @@ class ThetaTab(ttk.Frame):
         self.notebook = ttk.Notebook(self)
         
         # Tab Equirectangular (original)
-        self.tab_equirect = EquirectangularTab(self.notebook)
+        self.tab_equirect = EquirectangularTab(self.notebook, self.send_to_main)
         self.notebook.add(self.tab_equirect, text="Equirectangular")
         
         self.notebook.pack(fill=tk.BOTH, expand=True)
