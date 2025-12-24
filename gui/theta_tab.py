@@ -164,7 +164,7 @@ class SingleImageSubscriber(Node):
 
             self._remap_cache[key] = XY  # cache for speed
 
-        persp = cv2.remap(img, XY[..., 0], XY[..., 1], cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+        persp = cv2.remap(img, XY[..., 0], XY[..., 1], cv2.INTER_CUBIC, borderMode=cv2.BORDER_WRAP)
         return persp
 
     # function scan scan_qr_codes
