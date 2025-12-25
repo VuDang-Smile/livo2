@@ -27,6 +27,12 @@ except ImportError:
     HAS_OPEN3D = False
 
 try:
+    from scipy.spatial.transform import Rotation
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+
+try:
     import tkinter as tk
     from tkinter import ttk, messagebox, scrolledtext, filedialog
 except ImportError as e:
@@ -54,6 +60,8 @@ class PCDViewerTab(ttk.Frame):
         self.is_viewer_running = False
         self.is_rviz_running = False
         self.pcd_file_path = None
+        self.map_tiles_mode = False  # True = Map Tiles mode, False = Single PCD file mode
+        self.map_tiles_dir = None  # Directory containing pose.json and pcd/ folder
         
         # File size limits (MB) - để tránh crash với file quá lớn
         # Giảm giới hạn vì file 400MB đã gây crash
@@ -79,6 +87,30 @@ class PCDViewerTab(ttk.Frame):
         control_frame = ttk.Frame(self, padding="10")
         control_frame.pack(fill=tk.X)
         
+        # Frame chọn chế độ xem
+        mode_frame = ttk.LabelFrame(control_frame, text="Chế độ xem", padding="10")
+        mode_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.view_mode_var = tk.StringVar(value="single")  # "single" hoặc "tiles"
+        
+        mode_single_radio = ttk.Radiobutton(
+            mode_frame,
+            text="Single PCD File",
+            variable=self.view_mode_var,
+            value="single",
+            command=self.on_mode_changed
+        )
+        mode_single_radio.pack(side=tk.LEFT, padx=10)
+        
+        mode_tiles_radio = ttk.Radiobutton(
+            mode_frame,
+            text="Map Tiles (từ pose.json)",
+            variable=self.view_mode_var,
+            value="tiles",
+            command=self.on_mode_changed
+        )
+        mode_tiles_radio.pack(side=tk.LEFT, padx=10)
+        
         # Frame chọn nguồn PCD
         source_frame = ttk.LabelFrame(control_frame, text="Nguồn PCD File", padding="10")
         source_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -103,21 +135,29 @@ class PCDViewerTab(ttk.Frame):
         )
         source_anhsong_radio.pack(side=tk.LEFT, padx=10)
         
-        # Frame chọn PCD file
-        pcd_frame = ttk.LabelFrame(control_frame, text="PCD File", padding="10")
+        # Frame chọn PCD file hoặc Map Tiles
+        pcd_frame = ttk.LabelFrame(control_frame, text="PCD File / Map Tiles", padding="10")
         pcd_frame.pack(fill=tk.X, padx=10, pady=5)
         
         self.pcd_path_var = tk.StringVar()
         pcd_entry = ttk.Entry(pcd_frame, textvariable=self.pcd_path_var, width=60, state=tk.DISABLED)
         pcd_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
-        # Nút Browse để chọn file
-        browse_btn = ttk.Button(
+        # Nút Browse để chọn file hoặc map directory
+        self.browse_btn = ttk.Button(
             pcd_frame,
             text="Chọn File",
             command=self.browse_pcd_file
         )
-        browse_btn.pack(side=tk.LEFT, padx=5)
+        self.browse_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Nút Auto Find Latest Map (chỉ hiện khi ở chế độ tiles)
+        self.auto_find_map_btn = ttk.Button(
+            pcd_frame,
+            text="Tìm Map Mới Nhất",
+            command=self.auto_find_latest_map
+        )
+        self.auto_find_map_btn.pack(side=tk.LEFT, padx=5)
         
         # Ẩn các nút Browse và Auto Find - không cho người dùng chọn file
         # browse_btn = ttk.Button(
@@ -315,14 +355,34 @@ class PCDViewerTab(ttk.Frame):
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
         
-        # Tự động tìm và chọn file PCD có màu sắc khi khởi động (trong thread riêng với delay để tránh crash)
-        # Chỉ tìm trong nguồn default, không tìm trong ANHSON để tránh crash
+        # Tự động tìm và chọn file PCD có màu sắc hoặc map tiles khi khởi động
         # Delay 1 giây để UI hoàn toàn load xong trước khi tìm file
         def delayed_auto_find():
             import time
             time.sleep(1.0)  # Delay 1 giây
-            self.auto_find_rgb_pcd_safe()
+            if self.view_mode_var.get() == "tiles":
+                self.auto_find_latest_map_safe()
+            else:
+                self.auto_find_rgb_pcd_safe()
         threading.Thread(target=delayed_auto_find, daemon=True).start()
+    
+    def on_mode_changed(self):
+        """Xử lý khi người dùng thay đổi chế độ xem"""
+        mode = self.view_mode_var.get()
+        if mode == "tiles":
+            self.map_tiles_mode = True
+            self.browse_btn.config(text="Chọn Map Directory")
+            self.auto_find_map_btn.config(state=tk.NORMAL)
+            self.log("🔄 Đã chuyển sang chế độ: Map Tiles")
+            # Tự động tìm map mới nhất
+            threading.Thread(target=self.auto_find_latest_map_safe, daemon=True).start()
+        else:
+            self.map_tiles_mode = False
+            self.browse_btn.config(text="Chọn File")
+            self.auto_find_map_btn.config(state=tk.DISABLED)
+            self.log("🔄 Đã chuyển sang chế độ: Single PCD File")
+            # Tự động tìm file PCD
+            threading.Thread(target=self.auto_find_rgb_pcd_safe, daemon=True).start()
     
     def on_source_changed(self):
         """Xử lý khi người dùng thay đổi nguồn PCD"""
@@ -330,11 +390,15 @@ class PCDViewerTab(ttk.Frame):
         if source == "anhsong":
             self.log("🔄 Đã chuyển sang nguồn: External Drive (/media/an/ANHSON)")
             # Tự động mở file dialog để chọn file (delay lớn hơn để tránh crash)
-            self.after(500, self.browse_pcd_file_anhsong)  # Delay 500ms để UI update hoàn toàn
+            if self.view_mode_var.get() == "single":
+                self.after(500, self.browse_pcd_file_anhsong)  # Delay 500ms để UI update hoàn toàn
         else:
             self.log("🔄 Đã chuyển sang nguồn: Đường dẫn mặc định")
             # Tự động tìm lại file trong nguồn mới (trong thread riêng)
-            threading.Thread(target=self.auto_find_rgb_pcd_safe, daemon=True).start()
+            if self.view_mode_var.get() == "tiles":
+                threading.Thread(target=self.auto_find_latest_map_safe, daemon=True).start()
+            else:
+                threading.Thread(target=self.auto_find_rgb_pcd_safe, daemon=True).start()
     
     def auto_find_rgb_pcd_safe(self):
         """Wrapper an toàn cho auto_find_rgb_pcd để tránh crash"""
@@ -343,6 +407,233 @@ class PCDViewerTab(ttk.Frame):
         except Exception as e:
             self.log(f"❌ Lỗi khi tự động tìm file PCD: {e}")
             self.info_label.config(text="Lỗi khi tìm file PCD")
+    
+    def find_latest_map_directory(self):
+        """Tìm thư mục map mới nhất trong Log/ (format: map_YYYYMMDD_HHMMSS)"""
+        log_dir = self.fast_livo_path / "Log"
+        
+        if not log_dir.exists():
+            self.log(f"⚠️  Thư mục Log không tồn tại: {log_dir}")
+            return None
+        
+        latest_map_dir = None
+        latest_dir_name = ""
+        
+        try:
+            # Tìm tất cả thư mục có format map_YYYYMMDD_HHMMSS
+            for entry in log_dir.iterdir():
+                if not entry.is_dir():
+                    continue
+                
+                dir_name = entry.name
+                
+                # Kiểm tra format: map_YYYYMMDD_HHMMSS (19 ký tự: "map_" + 15 chars)
+                if dir_name.startswith("map_") and len(dir_name) == 19:
+                    # Kiểm tra xem có pose.json không
+                    pose_file = entry / "pose.json"
+                    if pose_file.exists():
+                        # So sánh lexicographic để tìm thư mục mới nhất
+                        if dir_name > latest_dir_name:
+                            latest_dir_name = dir_name
+                            latest_map_dir = entry
+            
+            if latest_map_dir:
+                self.log(f"✅ Tìm thấy map mới nhất: {latest_map_dir.name}")
+                return latest_map_dir
+            else:
+                self.log(f"⚠️  Không tìm thấy thư mục map nào trong {log_dir}")
+                return None
+                
+        except Exception as e:
+            self.log(f"❌ Lỗi khi tìm map directory: {e}")
+            return None
+    
+    def auto_find_latest_map_safe(self):
+        """Wrapper an toàn cho auto_find_latest_map"""
+        try:
+            self.auto_find_latest_map()
+        except Exception as e:
+            self.log(f"❌ Lỗi khi tự động tìm map: {e}")
+            self.info_label.config(text="Lỗi khi tìm map")
+    
+    def auto_find_latest_map(self):
+        """Tự động tìm và load map tiles từ thư mục mới nhất"""
+        self.log("🔍 Đang tìm map mới nhất...")
+        
+        latest_map = self.find_latest_map_directory()
+        if latest_map:
+            self.map_tiles_dir = latest_map
+            self.pcd_path_var.set(str(latest_map))
+            self.log(f"✅ Đã chọn map: {latest_map.name}")
+            
+            # Load và merge map tiles
+            threading.Thread(target=self._load_map_tiles_safe, args=(str(latest_map),), daemon=True).start()
+        else:
+            self.log("❌ Không tìm thấy map nào")
+            self.info_label.config(text="Không tìm thấy map")
+    
+    def _load_map_tiles_safe(self, map_dir_path):
+        """Wrapper an toàn cho load_map_tiles"""
+        try:
+            self.load_map_tiles(map_dir_path)
+        except Exception as e:
+            self.log(f"❌ Lỗi khi load map tiles: {e}")
+            def update_error():
+                self.info_label.config(text=f"Lỗi khi load map tiles: {e}")
+            self.after(0, update_error)
+    
+    def load_map_tiles(self, map_dir_path):
+        """Load và merge map tiles từ pose.json và các file PCD"""
+        if not HAS_OPEN3D:
+            self.log("❌ open3d không được cài đặt. Không thể load map tiles.")
+            self.log("💡 Cài đặt: pip3 install open3d")
+            return None
+        
+        map_dir = Path(map_dir_path)
+        pose_file = map_dir / "pose.json"
+        pcd_dir = map_dir / "pcd"
+        
+        if not pose_file.exists():
+            self.log(f"❌ Không tìm thấy pose.json tại: {pose_file}")
+            return None
+        
+        if not pcd_dir.exists():
+            self.log(f"❌ Không tìm thấy thư mục pcd/ tại: {pcd_dir}")
+            return None
+        
+        self.log(f"📂 Đang load map tiles từ: {map_dir.name}")
+        self.log(f"📄 Đọc pose.json...")
+        
+        # Đọc pose.json
+        poses = []
+        try:
+            with open(pose_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 7:
+                        try:
+                            tx, ty, tz = float(parts[0]), float(parts[1]), float(parts[2])
+                            w, x, y, z = float(parts[3]), float(parts[4]), float(parts[5]), float(parts[6])
+                            poses.append((tx, ty, tz, w, x, y, z))
+                        except ValueError:
+                            continue
+        except Exception as e:
+            self.log(f"❌ Lỗi khi đọc pose.json: {e}")
+            return None
+        
+        if not poses:
+            self.log("❌ Không có pose nào trong pose.json")
+            return None
+        
+        self.log(f"📊 Tìm thấy {len(poses)} poses")
+        self.log(f"📦 Đang load và merge {len(poses)} PCD files...")
+        
+        # Load và merge các PCD files
+        combined_pcd = o3d.geometry.PointCloud()
+        loaded_count = 0
+        failed_count = 0
+        
+        for file_index, (tx, ty, tz, w, x, y, z) in enumerate(poses):
+            pcd_file = pcd_dir / f"{file_index}.pcd"
+            
+            if not pcd_file.exists():
+                failed_count += 1
+                continue
+            
+            try:
+                # Load PCD file
+                pcd = o3d.io.read_point_cloud(str(pcd_file))
+                if len(pcd.points) == 0:
+                    failed_count += 1
+                    continue
+                
+                # Tạo transformation matrix từ quaternion và translation
+                # Quaternion: w, x, y, z
+                import numpy as np
+                
+                if HAS_SCIPY:
+                    # Sử dụng scipy để convert quaternion
+                    rotation = Rotation.from_quat([x, y, z, w])  # scipy uses [x, y, z, w]
+                    rotation_matrix = rotation.as_matrix()
+                else:
+                    # Manual quaternion to rotation matrix conversion
+                    # Quaternion: w, x, y, z
+                    qw, qx, qy, qz = w, x, y, z
+                    rotation_matrix = np.array([
+                        [1 - 2*(qy**2 + qz**2), 2*(qx*qy - qw*qz), 2*(qx*qz + qw*qy)],
+                        [2*(qx*qy + qw*qz), 1 - 2*(qx**2 + qz**2), 2*(qy*qz - qw*qx)],
+                        [2*(qx*qz - qw*qy), 2*(qy*qz + qw*qx), 1 - 2*(qx**2 + qy**2)]
+                    ])
+                
+                # Tạo transformation matrix 4x4
+                transform = np.eye(4)
+                transform[:3, :3] = rotation_matrix
+                transform[:3, 3] = [tx, ty, tz]
+                
+                # Transform point cloud
+                pcd.transform(transform)
+                
+                # Merge vào combined point cloud
+                combined_pcd += pcd
+                loaded_count += 1
+                
+                # Progress indicator
+                if loaded_count % 50 == 0 or loaded_count == len(poses):
+                    self.log(f"  📦 Đã load {loaded_count}/{len(poses)} tiles, {len(combined_pcd.points):,} points...")
+                    
+            except Exception as e:
+                failed_count += 1
+                if failed_count <= 5:  # Chỉ log 5 lỗi đầu tiên
+                    self.log(f"  ⚠️  Lỗi khi load {pcd_file.name}: {e}")
+                continue
+        
+        if loaded_count == 0:
+            self.log("❌ Không load được tile nào")
+            return None
+        
+        if failed_count > 0:
+            self.log(f"⚠️  {failed_count} tiles không load được")
+        
+        self.log(f"✅ Đã load {loaded_count} tiles, tổng {len(combined_pcd.points):,} points")
+        
+        # Lưu merged point cloud vào temp file
+        temp_dir = Path(tempfile.gettempdir()) / "pcd_viewer"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        output_path = temp_dir / f"map_tiles_{map_dir.name}_merged.pcd"
+        
+        try:
+            self.log(f"💾 Đang lưu merged map vào: {output_path.name}...")
+            success = o3d.io.write_point_cloud(str(output_path), combined_pcd, write_ascii=False)
+            
+            if success:
+                output_size_mb = output_path.stat().st_size / (1024 * 1024)
+                self.log(f"✅ Đã lưu merged map: {output_path.name} ({output_size_mb:.2f} MB, {len(combined_pcd.points):,} points)")
+                
+                # Cập nhật path để sử dụng merged file
+                self.pcd_file_path = str(output_path)
+                
+                # Cập nhật UI
+                def update_ui():
+                    self.info_label.config(
+                        text=f"Map: {map_dir.name}\n"
+                             f"Tiles: {loaded_count}/{len(poses)}\n"
+                             f"Points: {len(combined_pcd.points):,}\n"
+                             f"Size: {output_size_mb:.2f} MB"
+                    )
+                self.after(0, update_ui)
+                
+                return str(output_path)
+            else:
+                self.log("❌ Không thể lưu merged map")
+                return None
+                
+        except Exception as e:
+            self.log(f"❌ Lỗi khi lưu merged map: {e}")
+            return None
     
     def log(self, message):
         """Thêm message vào log"""
@@ -405,30 +696,58 @@ class PCDViewerTab(ttk.Frame):
         return False, file_size_mb
     
     def browse_pcd_file(self):
-        """Browse cho PCD file"""
+        """Browse cho PCD file hoặc Map directory"""
         try:
-            # Xác định thư mục ban đầu
-            source = self.pcd_source_var.get() if hasattr(self, 'pcd_source_var') else "default"
-            
-            if source == "anhsong":
-                initial_dir = "/media/an/ANHSON"
+            if self.view_mode_var.get() == "tiles":
+                # Chọn map directory
+                source = self.pcd_source_var.get() if hasattr(self, 'pcd_source_var') else "default"
+                
+                if source == "anhsong":
+                    initial_dir = "/media/an/ANHSON"
+                else:
+                    initial_dir = str(self.fast_livo_path / "Log")
+                
+                dir_path = filedialog.askdirectory(
+                    title="Chọn Map Directory (chứa pose.json và pcd/)",
+                    initialdir=initial_dir
+                )
+                if dir_path:
+                    map_dir = Path(dir_path)
+                    pose_file = map_dir / "pose.json"
+                    if not pose_file.exists():
+                        messagebox.showerror("Lỗi", f"Không tìm thấy pose.json trong: {dir_path}")
+                        return
+                    
+                    self.map_tiles_dir = map_dir
+                    self.pcd_path_var.set(dir_path)
+                    self.log(f"✅ Đã chọn map directory: {map_dir.name}")
+                    self.log(f"📁 Đường dẫn: {dir_path}")
+                    
+                    # Load map tiles
+                    threading.Thread(target=self._load_map_tiles_safe, args=(dir_path,), daemon=True).start()
             else:
-                initial_dir = self.pcd_path_var.get() or str(self.default_pcd_dir)
-            
-            file = filedialog.askopenfilename(
-                title="Chọn PCD file",
-                initialdir=initial_dir,
-                filetypes=[("PCD files", "*.pcd"), ("All files", "*.*")]
-            )
-            if file:
-                self.pcd_path_var.set(file)
-                # Chạy update info trong thread riêng để tránh crash
-                threading.Thread(target=self._update_pcd_info_safe, args=(file,), daemon=True).start()
-                self.log(f"✅ Đã chọn PCD file: {Path(file).name}")
-                self.log(f"📁 Đường dẫn: {file}")
+                # Chọn PCD file
+                source = self.pcd_source_var.get() if hasattr(self, 'pcd_source_var') else "default"
+                
+                if source == "anhsong":
+                    initial_dir = "/media/an/ANHSON"
+                else:
+                    initial_dir = self.pcd_path_var.get() or str(self.default_pcd_dir)
+                
+                file = filedialog.askopenfilename(
+                    title="Chọn PCD file",
+                    initialdir=initial_dir,
+                    filetypes=[("PCD files", "*.pcd"), ("All files", "*.*")]
+                )
+                if file:
+                    self.pcd_path_var.set(file)
+                    # Chạy update info trong thread riêng để tránh crash
+                    threading.Thread(target=self._update_pcd_info_safe, args=(file,), daemon=True).start()
+                    self.log(f"✅ Đã chọn PCD file: {Path(file).name}")
+                    self.log(f"📁 Đường dẫn: {file}")
         except Exception as e:
-            self.log(f"❌ Lỗi khi chọn file: {e}")
-            messagebox.showerror("Lỗi", f"Không thể chọn file: {e}")
+            self.log(f"❌ Lỗi khi chọn file/directory: {e}")
+            messagebox.showerror("Lỗi", f"Không thể chọn file/directory: {e}")
     
     def browse_pcd_file_anhsong(self):
         """Mở file dialog để chọn file PCD từ ANHSON"""
@@ -815,24 +1134,59 @@ class PCDViewerTab(ttk.Frame):
     def _start_viewer_worker(self):
         """Worker thread để start viewer - không block UI"""
         try:
-            # Kiểm tra PCD path
-            pcd_path = self.pcd_path_var.get()
-            if not pcd_path:
-                # Tự động tìm lại file nếu chưa có
-                self.auto_find_rgb_pcd()
-                pcd_path = self.pcd_path_var.get()
-                if not pcd_path:
+            # Kiểm tra mode
+            if self.view_mode_var.get() == "tiles":
+                # Map tiles mode
+                map_dir_path = self.pcd_path_var.get()
+                if not map_dir_path:
+                    # Tự động tìm map mới nhất
+                    self.auto_find_latest_map()
+                    map_dir_path = self.pcd_path_var.get()
+                    if not map_dir_path:
+                        def show_error():
+                            messagebox.showerror("Lỗi", "Không tìm thấy map directory")
+                        self.after(0, show_error)
+                        return
+                
+                map_dir = Path(map_dir_path)
+                if not map_dir.exists():
                     def show_error():
-                        messagebox.showerror("Lỗi", "Không tìm thấy file PCD có màu sắc")
+                        messagebox.showerror("Lỗi", f"Map directory không tồn tại: {map_dir_path}")
                     self.after(0, show_error)
                     return
-            
-            pcd_path_obj = Path(pcd_path)
-            if not pcd_path_obj.exists():
-                def show_error():
-                    messagebox.showerror("Lỗi", f"PCD file không tồn tại: {pcd_path}")
-                self.after(0, show_error)
-                return
+                
+                # Kiểm tra xem đã load map tiles chưa
+                if not self.pcd_file_path or not Path(self.pcd_file_path).exists():
+                    # Chưa load, cần load trước
+                    self.log("📦 Map tiles chưa được load, đang load...")
+                    merged_file = self.load_map_tiles(map_dir_path)
+                    if not merged_file:
+                        def show_error():
+                            messagebox.showerror("Lỗi", "Không thể load map tiles")
+                        self.after(0, show_error)
+                        return
+                    pcd_path = merged_file
+                else:
+                    pcd_path = self.pcd_file_path
+            else:
+                # Single PCD file mode
+                pcd_path = self.pcd_path_var.get()
+                if not pcd_path:
+                    # Tự động tìm lại file nếu chưa có
+                    self.auto_find_rgb_pcd()
+                    pcd_path = self.pcd_path_var.get()
+                    if not pcd_path:
+                        def show_error():
+                            messagebox.showerror("Lỗi", "Không tìm thấy file PCD có màu sắc")
+                        self.after(0, show_error)
+                        return
+                
+                pcd_path_obj = Path(pcd_path)
+                if not pcd_path_obj.exists():
+                    def show_error():
+                        messagebox.showerror("Lỗi", f"PCD file không tồn tại: {pcd_path}")
+                    self.after(0, show_error)
+                    return
             
             # Kiểm tra kích thước file và memory trước khi chạy
             is_too_large, file_size_mb = self.is_file_too_large(pcd_path, skip_if_large=False)
@@ -1115,7 +1469,11 @@ class PCDViewerTab(ttk.Frame):
             )
             
             self.log(f"📝 Bắt đầu PCD viewer")
-            self.log(f"📁 PCD file: {pcd_path_obj.name}")
+            if self.view_mode_var.get() == "tiles":
+                self.log(f"📁 Map tiles: {Path(self.pcd_path_var.get()).name}")
+                self.log(f"📁 Merged file: {pcd_path_obj.name}")
+            else:
+                self.log(f"📁 PCD file: {pcd_path_obj.name}")
             self.log(f"📁 Đường dẫn: {pcd_path}")
             self.log(f"⚙️  Topic: {topic_name}")
             self.log(f"⚙️  Frame ID: {frame_id}")

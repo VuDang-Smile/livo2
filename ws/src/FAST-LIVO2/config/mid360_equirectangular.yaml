@@ -113,3 +113,8 @@
       width: 2880
       height: 1440
       scale: 1.0  # Full resolution
+
+    map_tiles:
+      map_root_dir: ""  # Path to map directory. If empty and auto_find_latest=true, will use latest map_* directory in Log/
+      load_on_startup: false  # Set to true to automatically load map tiles on startup
+      auto_find_latest: true  # Automatically find and use the latest map_YYYYMMDD_HHMMSS directory in Log/

@@ -221,5 +221,28 @@ public:
   pcl::PointCloud<PointType>::Ptr incremental_map_intensity;
   int incremental_map_accumulate_count = 0;
   const int INCREMENTAL_MAP_VOXEL_FILTER_INTERVAL = 50; // Re-voxelize every 50 scans
+
+  // Map tiles loading (integrated from localization2)
+  struct MapTileMeta
+  {
+    bool from_disk = true;
+    int file_index = -1;
+    Eigen::Vector3d position = Eigen::Vector3d::Zero();
+    Eigen::Quaterniond orientation = Eigen::Quaterniond::Identity();
+    PointCloudXYZI::Ptr local_cloud;
+  };
+  
+  std::vector<MapTileMeta> map_tiles;
+  std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> map_tile_positions;
+  std::vector<Eigen::Quaterniond, Eigen::aligned_allocator<Eigen::Quaterniond>> map_tile_poses;
+  PointCloudXYZI::Ptr global_map_tiles;
+  std::string map_root_dir;
+  
+  // Function to load map tiles from pose.json (similar to localization2)
+  bool loadMapTiles(const std::string &map_root_path = "");
+  bool loadMapTileCloud(int tile_id, PointCloudXYZI::Ptr &cloud_out);
+  
+  // Function to find the latest map directory in Log/
+  std::string findLatestMapDirectory();
 };
 #endif

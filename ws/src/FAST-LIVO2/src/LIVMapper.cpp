@@ -19,6 +19,9 @@ which is included as part of this source code package.
 #include <chrono>
 #include <ctime>
 #include <iomanip>
+#include <filesystem>
+#include <pcl/io/pcd_io.h>
+#include <pcl/common/transforms.h>
 
 using namespace Sophus;
 LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name, const rclcpp::NodeOptions & options)
@@ -50,6 +53,9 @@ LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name, const
   // Initialize incremental maps for efficient aggregation
   incremental_map_rgb.reset(new pcl::PointCloud<pcl::PointXYZRGB>());
   incremental_map_intensity.reset(new PointCloudXYZI());
+  
+  // Initialize map tiles (for localization2 integration)
+  global_map_tiles.reset(new PointCloudXYZI());
   
   voxelmap_manager.reset(new VoxelMapManager(voxel_config, voxel_map));
   vio_manager.reset(new VIOManager());
@@ -141,6 +147,11 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   try_declare.template operator()<int>("publish.pub_scan_num", 1);
   try_declare.template operator()<bool>("publish.pub_effect_point_en", false);
   try_declare.template operator()<bool>("publish.dense_map_en", false);
+  
+  // Map tiles loading (from localization2 integration)
+  try_declare.template operator()<std::string>("map_tiles.map_root_dir", "");
+  try_declare.template operator()<bool>("map_tiles.load_on_startup", false);
+  try_declare.template operator()<bool>("map_tiles.auto_find_latest", true);  // Auto-find latest map by default
 
   // Memory management parameters
   try_declare.template operator()<int>("memory.max_lidar_buffer_size", 5);
@@ -217,6 +228,55 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   this->node->get_parameter("memory.forced_sliding_interval", forced_sliding_interval);
   this->node->get_parameter("memory.vio_feat_map_cleanup_interval", vio_feat_map_cleanup_interval);
   this->node->get_parameter("memory.vio_feat_map_cleanup_radius", vio_feat_map_cleanup_radius);
+  
+  // Map tiles loading parameters
+  std::string configured_map_root_dir;
+  bool load_map_tiles_on_startup = false;
+  bool auto_find_latest = false;
+  this->node->get_parameter("map_tiles.map_root_dir", configured_map_root_dir);
+  this->node->get_parameter("map_tiles.load_on_startup", load_map_tiles_on_startup);
+  this->node->get_parameter("map_tiles.auto_find_latest", auto_find_latest);
+  
+  if (!configured_map_root_dir.empty())
+  {
+    map_root_dir = configured_map_root_dir;
+    RCLCPP_INFO(node->get_logger(), "Map root directory configured: %s", map_root_dir.c_str());
+  }
+  else if (auto_find_latest || load_map_tiles_on_startup)
+  {
+    // Auto-find latest map directory if enabled or if load_on_startup is true
+    std::string latest_map = findLatestMapDirectory();
+    if (!latest_map.empty())
+    {
+      map_root_dir = latest_map;
+      RCLCPP_INFO(node->get_logger(), "Auto-detected latest map directory: %s", map_root_dir.c_str());
+    }
+    else
+    {
+      RCLCPP_WARN(node->get_logger(), "Could not find any map directory in Log/");
+    }
+  }
+  
+  // Auto-load map tiles on startup if enabled
+  if (load_map_tiles_on_startup)
+  {
+    if (map_root_dir.empty())
+    {
+      RCLCPP_WARN(node->get_logger(), "load_on_startup is true but no map directory found");
+    }
+    else
+    {
+      RCLCPP_INFO(node->get_logger(), "Auto-loading map tiles from %s", map_root_dir.c_str());
+      if (loadMapTiles(map_root_dir))
+      {
+        RCLCPP_INFO(node->get_logger(), "Successfully loaded map tiles on startup");
+      }
+      else
+      {
+        RCLCPP_WARN(node->get_logger(), "Failed to load map tiles on startup");
+      }
+    }
+  }
 
   p_pre->blind_sqr = p_pre->blind * p_pre->blind;
 }
@@ -2132,4 +2192,219 @@ void LIVMapper::publish_path(const rclcpp::Publisher<nav_msgs::msg::Path>::Share
   msg_body_pose.header.frame_id = "camera_init";
   path.poses.push_back(msg_body_pose);
   pubPath->publish(path);
+}
+
+// Find the latest map directory in Log/ folder
+// Returns the path to the most recent map_YYYYMMDD_HHMMSS directory
+// Since directory names follow format map_YYYYMMDD_HHMMSS, we can compare them lexicographically
+std::string LIVMapper::findLatestMapDirectory()
+{
+  namespace fs = std::filesystem;
+  
+  fs::path log_dir = fs::path(root_dir) / "Log";
+  
+  if (!fs::exists(log_dir) || !fs::is_directory(log_dir))
+  {
+    RCLCPP_WARN(node->get_logger(), "Log directory does not exist: %s", log_dir.string().c_str());
+    return "";
+  }
+  
+  std::string latest_map_dir = "";
+  std::string latest_dir_name = "";
+  
+  // Iterate through all directories in Log/
+  for (const auto &entry : fs::directory_iterator(log_dir))
+  {
+    if (!entry.is_directory())
+    {
+      continue;
+    }
+    
+    std::string dir_name = entry.path().filename().string();
+    
+    // Check if directory name matches pattern map_YYYYMMDD_HHMMSS
+    // Format: map_YYYYMMDD_HHMMSS (total 19 characters: "map_" + 15 chars)
+    if (dir_name.find("map_") == 0 && dir_name.length() == 19)
+    {
+      // Check if pose.json exists in this directory
+      fs::path pose_path = entry.path() / "pose.json";
+      if (!fs::exists(pose_path))
+      {
+        RCLCPP_DEBUG(node->get_logger(), "Skipping %s: pose.json not found", dir_name.c_str());
+        continue;
+      }
+      
+      // Since directory names follow format map_YYYYMMDD_HHMMSS,
+      // lexicographic comparison will give us the latest one
+      if (dir_name > latest_dir_name)
+      {
+        latest_dir_name = dir_name;
+        latest_map_dir = entry.path().string();
+      }
+    }
+  }
+  
+  if (latest_map_dir.empty())
+  {
+    RCLCPP_WARN(node->get_logger(), "No map directory found in %s", log_dir.string().c_str());
+  }
+  else
+  {
+    RCLCPP_INFO(node->get_logger(), "Found latest map directory: %s", latest_map_dir.c_str());
+  }
+  
+  return latest_map_dir;
+}
+
+// Load map tiles from pose.json (integrated from localization2)
+// This function reads pose.json file and loads corresponding PCD files
+// Format of pose.json: each line contains: tx ty tz w x y z (position and quaternion)
+// PCD files should be in map_root_dir/pcd/ directory named as 0.pcd, 1.pcd, 2.pcd, etc.
+bool LIVMapper::loadMapTiles(const std::string &map_root_path)
+{
+  namespace fs = std::filesystem;
+  
+  // Clear existing map tiles
+  global_map_tiles->clear();
+  map_tiles.clear();
+  map_tile_positions.clear();
+  map_tile_poses.clear();
+  
+  // Determine map root directory
+  if (!map_root_path.empty())
+  {
+    map_root_dir = map_root_path;
+  }
+  else if (map_root_dir.empty())
+  {
+    // Try to find the latest map directory in Log/
+    std::string latest_map = findLatestMapDirectory();
+    if (!latest_map.empty())
+    {
+      map_root_dir = latest_map;
+      RCLCPP_INFO(node->get_logger(), "Auto-detected latest map directory: %s", map_root_dir.c_str());
+    }
+    else
+    {
+      // Fallback to default location
+      map_root_dir = (fs::path(root_dir) / "map").string();
+      RCLCPP_WARN(node->get_logger(), "Using default map directory: %s", map_root_dir.c_str());
+    }
+  }
+  
+  // Check if pose.json exists
+  fs::path pose_path = fs::path(map_root_dir) / "pose.json";
+  if (!fs::exists(pose_path))
+  {
+    RCLCPP_WARN(node->get_logger(), "pose.json not found at %s", pose_path.string().c_str());
+    return false;
+  }
+  
+  // Open and read pose.json
+  std::ifstream pose_file(pose_path.string());
+  if (!pose_file.is_open())
+  {
+    RCLCPP_ERROR(node->get_logger(), "Failed to open %s", pose_path.string().c_str());
+    return false;
+  }
+  
+  double tx, ty, tz, w, x, y, z;
+  int file_index = 0;
+  int tiles_loaded = 0;
+  
+  // Read each line from pose.json
+  while (pose_file >> tx >> ty >> tz >> w >> x >> y >> z)
+  {
+    Eigen::Quaterniond q(w, x, y, z);
+    Eigen::Vector3d p(tx, ty, tz);
+    
+    // Load corresponding PCD file
+    auto temp = std::make_shared<PointCloudXYZI>();
+    fs::path pcd_path = fs::path(map_root_dir) / "pcd" / (std::to_string(file_index) + ".pcd");
+    
+    if (pcl::io::loadPCDFile(pcd_path.string(), *temp) == -1)
+    {
+      RCLCPP_WARN(node->get_logger(), "Failed to load map tile %s", pcd_path.string().c_str());
+      ++file_index;
+      continue;
+    }
+    
+    // Store position and pose
+    map_tile_positions.push_back(p);
+    map_tile_poses.push_back(q);
+    
+    // Create metadata for this tile
+    MapTileMeta meta;
+    meta.from_disk = true;
+    meta.file_index = file_index;
+    meta.position = p;
+    meta.orientation = q;
+    map_tiles.push_back(meta);
+    
+    // Transform point cloud according to pose
+    Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
+    transform.block<3, 3>(0, 0) = q.toRotationMatrix().cast<float>();
+    transform.block<3, 1>(0, 3) = p.cast<float>();
+    
+    pcl::transformPointCloud(*temp, *temp, transform);
+    
+    // Merge into global map
+    *global_map_tiles += *temp;
+    
+    ++file_index;
+    ++tiles_loaded;
+    
+    if (tiles_loaded % 10 == 0)
+    {
+      RCLCPP_INFO(node->get_logger(), "Loaded %d map tiles, total points: %zu", 
+                  tiles_loaded, global_map_tiles->points.size());
+    }
+  }
+  
+  pose_file.close();
+  
+  if (tiles_loaded == 0)
+  {
+    RCLCPP_ERROR(node->get_logger(), "No map tiles loaded from %s", map_root_dir.c_str());
+    return false;
+  }
+  
+  RCLCPP_INFO(node->get_logger(), "Successfully loaded %d map tiles from %s (total points: %zu)", 
+              tiles_loaded, map_root_dir.c_str(), global_map_tiles->points.size());
+  
+  return true;
+}
+
+// Load a specific map tile by ID
+bool LIVMapper::loadMapTileCloud(int tile_id, PointCloudXYZI::Ptr &cloud_out)
+{
+  if (tile_id < 0 || tile_id >= static_cast<int>(map_tiles.size()))
+  {
+    RCLCPP_WARN(node->get_logger(), "Map tile id %d is out of bounds (available %zu).", 
+                tile_id, map_tiles.size());
+    return false;
+  }
+  
+  const auto &meta = map_tiles[tile_id];
+  if (meta.from_disk)
+  {
+    namespace fs = std::filesystem;
+    fs::path pcd_path = fs::path(map_root_dir) / "pcd" / (std::to_string(meta.file_index) + ".pcd");
+    
+    if (pcl::io::loadPCDFile(pcd_path.string(), *cloud_out) == -1)
+    {
+      RCLCPP_WARN(node->get_logger(), "Failed to load map tile %s", pcd_path.string().c_str());
+      return false;
+    }
+    return true;
+  }
+  
+  if (!meta.local_cloud)
+  {
+    RCLCPP_WARN(node->get_logger(), "Virtual tile %d has no cached point cloud.", tile_id);
+    return false;
+  }
+  
+  pcl::copyPointCloud(*meta.local_cloud, *cloud_out);
+  return true;
 }
