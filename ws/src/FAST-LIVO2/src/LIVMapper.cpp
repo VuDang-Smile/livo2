@@ -768,7 +768,7 @@ void LIVMapper::savePCD(bool force_save)
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr raw_merged_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
         int loaded_count = 0;
         
-        for (int i = 1; i <= pcd_index; i++) {
+        for (int i = 0; i < pcd_index; i++) {
           std::string scan_file = pcd_source_dir + std::to_string(i) + ".pcd";
           struct stat file_info;
           if (stat(scan_file.c_str(), &file_info) == 0) {
@@ -776,8 +776,8 @@ void LIVMapper::savePCD(bool force_save)
             if (pcl::io::loadPCDFile<pcl::PointXYZRGB>(scan_file, *scan_cloud) == 0) {
               *raw_merged_cloud += *scan_cloud;
               loaded_count++;
-              if (i % 100 == 0 || i == pcd_index) {
-                std::cout << YELLOW << "  Loaded " << i << "/" << pcd_index << " scans, " 
+              if (i % 100 == 0 || i == pcd_index - 1) {
+                std::cout << YELLOW << "  Loaded " << (i + 1) << "/" << pcd_index << " scans, " 
                           << raw_merged_cloud->points.size() << " points..." << RESET << std::endl;
               }
             }
@@ -901,7 +901,7 @@ void LIVMapper::savePCD(bool force_save)
             pcl::PointCloud<pcl::PointXYZRGB>::Ptr merged_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
             int loaded_count = 0;
             
-            for (int i = 1; i <= pcd_index; i++) {
+            for (int i = 0; i < pcd_index; i++) {
               std::string scan_file = pcd_source_dir + std::to_string(i) + ".pcd";
               struct stat file_info;
               if (stat(scan_file.c_str(), &file_info) == 0) {
@@ -909,8 +909,8 @@ void LIVMapper::savePCD(bool force_save)
                 if (pcl::io::loadPCDFile<pcl::PointXYZRGB>(scan_file, *scan_cloud) == 0) {
                   *merged_cloud += *scan_cloud;
                   loaded_count++;
-                  if (i % 50 == 0 || i == pcd_index) {
-                    std::cout << YELLOW << "  Loaded " << i << "/" << pcd_index << " scans, " 
+                  if (i % 50 == 0 || i == pcd_index - 1) {
+                    std::cout << YELLOW << "  Loaded " << (i + 1) << "/" << pcd_index << " scans, " 
                               << merged_cloud->points.size() << " points..." << RESET << std::endl;
                   }
                 }
@@ -1880,7 +1880,7 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
 
     if ((pcl_wait_save->size() > 0 || pcl_wait_save_intensity->size() > 0) && pcd_save_interval > 0 && scan_wait_num >= pcd_save_interval)
     {
-      pcd_index++;
+      // Save file with current pcd_index (starting from 0, like recorder project)
       string all_points_dir = map_dir + "pcd/" + to_string(pcd_index) + ".pcd";
       pcl::PCDWriter pcd_writer;
       if (pcd_save_en)
@@ -2043,6 +2043,7 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
         Eigen::Quaterniond q(_state.rot_end);
         fout_pcd_pos << _state.pos_end[0] << " " << _state.pos_end[1] << " " << _state.pos_end[2] << " " << q.w() << " " << q.x() << " " << q.y()
                      << " " << q.z() << " " << endl;
+        pcd_index++;  // Increment after saving (next file will be pcd_index+1)
         scan_wait_num = 0;
       }
     }
