@@ -261,15 +261,6 @@ class PCDViewerTab(ttk.Frame):
         )
         rviz_checkbox.pack(anchor=tk.W, padx=5, pady=2)
         
-        # Skip large files option
-        self.skip_large_files_var = tk.BooleanVar(value=True)
-        skip_large_checkbox = ttk.Checkbutton(
-            config_frame,
-            text=f"Bỏ qua file quá lớn (> {self.max_file_size_mb} MB) khi tự động tìm",
-            variable=self.skip_large_files_var
-        )
-        skip_large_checkbox.pack(anchor=tk.W, padx=5, pady=2)
-        
         # Auto downsample large files option
         self.auto_downsample_var = tk.BooleanVar(value=True)
         downsample_checkbox = ttk.Checkbutton(
