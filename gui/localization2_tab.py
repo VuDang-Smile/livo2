@@ -17,6 +17,15 @@ import tempfile
 import queue
 import re
 import shutil
+from functools import partial
+
+# Multiprocessing for parallel downsampling
+try:
+    from multiprocessing import Pool, cpu_count
+    HAS_MULTIPROCESSING = True
+except ImportError:
+    HAS_MULTIPROCESSING = False
+    cpu_count = lambda: 1
 
 # Open3D và scipy imports (optional, for map loading)
 try:
@@ -119,11 +128,16 @@ class Localization2Tab(ttk.Frame):
         self.selected_map_dir = None
         self.map_info_loaded = False  # Flag để biết đã load map info chưa
         
-        # Map size limits (để tránh crash RViz)
+        # Map size limits (để tránh crash RViz và đảm bảo RViz mượt)
         self.max_map_points = 50_000_000  # 50M points - giới hạn an toàn
-        self.warning_map_points = 30_000_000  # 30M points - cảnh báo
-        self.safe_map_points = 20_000_000  # 20M points - kích thước an toàn
-        self.downsample_voxel_size = 0.15  # Voxel size cho downsample (m)
+        self.warning_map_points = 5_000_000  # 5M points - tự động optimize (giảm từ 8M)
+        self.safe_map_points = 2_000_000  # 2M points - luôn optimize (giảm từ 3M)
+        self.downsample_voxel_size = 0.22  # Voxel size cho downsample (m) - tăng để downsample nhiều hơn (0.18 -> 0.22)
+        
+        # Per-file PCD limits (để RViz mượt hơn - giảm mạnh để downsample nhiều hơn)
+        self.max_points_per_file = 500_000  # 500K points per file - tự động downsample nếu vượt (giảm từ 800K)
+        self.file_downsample_voxel_size = 0.15  # Voxel size cơ bản cho auto-downsample file (m) - tăng (0.12 -> 0.15)
+        self.target_points_per_file = 300_000  # Target points sau downsample (~300K để RViz rất mượt, giảm từ 500K)
         
         # Localization data
         self.position_var = None
@@ -352,6 +366,148 @@ class Localization2Tab(ttk.Frame):
         
         return None
     
+    def _check_pcd_format(self, pcd_file_path):
+        """
+        Kiểm tra format của PCD file (có RGB hay không)
+        Returns: True nếu có RGB, False nếu không
+        """
+        try:
+            # Đọc header của PCD file để kiểm tra format
+            with open(pcd_file_path, 'rb') as f:
+                header = f.read(2048).decode('utf-8', errors='ignore')
+                # Kiểm tra xem có FIELDS chứa rgb hoặc rgba không
+                if 'FIELDS' in header:
+                    fields_line = [line for line in header.split('\n') if 'FIELDS' in line]
+                    if fields_line:
+                        fields = fields_line[0].upper()
+                        # Kiểm tra có rgb hoặc rgba trong FIELDS
+                        if 'RGB' in fields or 'RGBA' in fields:
+                            return True
+        except:
+            pass
+        return False
+    
+    def _read_pcd_with_auto_downsample(self, pcd_file_path, preserve_colors=True):
+        """
+        Đọc PCD file với tự động downsample nếu quá lớn
+        Đảm bảo đọc đúng dữ liệu đã quét (colors, normals nếu có)
+        Voxel size được tính động: càng nhiều points → downsample càng nhiều
+        
+        Args:
+            pcd_file_path: Path đến PCD file
+            preserve_colors: Có giữ colors không (default: True)
+            
+        Returns:
+            tuple: (point_cloud, was_downsampled, voxel_size_used)
+                - point_cloud: Point cloud đã được xử lý (downsample nếu cần)
+                - was_downsampled: True nếu đã downsample, False nếu không
+                - voxel_size_used: Voxel size đã sử dụng (None nếu không downsample)
+        """
+        if not HAS_OPEN3D:
+            return None, False
+        
+        try:
+            # Kiểm tra format PCD file trước khi đọc
+            has_rgb_in_file = self._check_pcd_format(pcd_file_path)
+            
+            # Đọc PCD file (open3d tự động detect format và preserve colors/normals)
+            # Không cần chỉ định format='auto' vì đó là default
+            pcd = o3d.io.read_point_cloud(str(pcd_file_path))
+            
+            if len(pcd.points) == 0:
+                return None, False, None
+            
+            num_points = len(pcd.points)
+            was_downsampled = False
+            voxel_size_used = None
+            
+            # Kiểm tra xem colors có được đọc đúng không
+            has_colors_after_read = pcd.has_colors()
+            if has_rgb_in_file and not has_colors_after_read:
+                # File có RGB nhưng không đọc được - có thể là format issue
+                # Thử đọc lại với format cụ thể
+                try:
+                    # Thử đọc với format PCD (không chỉ định format cụ thể)
+                    pcd = o3d.io.read_point_cloud(str(pcd_file_path))
+                    has_colors_after_read = pcd.has_colors()
+                except:
+                    pass
+            
+            # Kiểm tra nếu file quá lớn, tự động downsample
+            if num_points > self.max_points_per_file:
+                import numpy as np
+                
+                # Kiểm tra và preserve colors
+                has_colors = pcd.has_colors()
+                has_normals = pcd.has_normals()
+                
+                # Lưu colors gốc trước khi xử lý (để đảm bảo không mất dữ liệu)
+                original_colors = None
+                if has_colors:
+                    original_colors = np.asarray(pcd.colors).copy()
+                    # Open3D lưu colors trong range 0-1, nhưng PCD file có thể là 0-255
+                    # Kiểm tra xem colors có trong range nào
+                    colors = np.asarray(pcd.colors)
+                    # Nếu colors > 1.0, có thể là đã được normalize sai hoặc format khác
+                    # Chỉ normalize nếu thực sự cần (colors > 1.0 và có vẻ như là 0-255)
+                    if colors.max() > 1.0 and colors.max() <= 255.0:
+                        # Normalize từ 0-255 về 0-1 (open3d format)
+                        pcd.colors = o3d.utility.Vector3dVector(colors / 255.0)
+                    # Nếu colors đã trong range 0-1, giữ nguyên
+                
+                # Tính toán voxel size động dựa trên số points
+                # Càng nhiều points thì downsample càng nhiều (voxel size lớn hơn)
+                # Voxel downsample giảm points theo volume (tỷ lệ với voxel_size^3)
+                # Công thức: voxel_size = base_size * (num_points / target_points)^(1/3)
+                reduction_ratio = num_points / self.target_points_per_file
+                # Cube root để tính voxel size (vì volume tỷ lệ với size^3)
+                dynamic_voxel_size = self.file_downsample_voxel_size * (reduction_ratio ** (1.0/3.0))
+                
+                # Giới hạn voxel size trong khoảng hợp lý (0.05m - 0.5m)
+                dynamic_voxel_size = max(0.05, min(0.5, dynamic_voxel_size))
+                voxel_size_used = dynamic_voxel_size
+                
+                # Downsample với voxel size động (càng nhiều points → voxel size càng lớn → downsample càng nhiều)
+                if preserve_colors:
+                    # Voxel downsample tự động preserve colors
+                    pcd = pcd.voxel_down_sample(voxel_size=dynamic_voxel_size)
+                else:
+                    pcd = pcd.voxel_down_sample(voxel_size=dynamic_voxel_size)
+                
+                # Đảm bảo colors được preserve sau downsample
+                if has_colors and not pcd.has_colors():
+                    # Nếu mất colors sau downsample (hiếm khi xảy ra với open3d)
+                    # Khôi phục từ original_colors đã lưu
+                    if HAS_SCIPY and cKDTree and original_colors is not None:
+                        # Đọc lại file gốc để lấy points gốc
+                        original_pcd = o3d.io.read_point_cloud(str(pcd_file_path), format='auto')
+                        original_points = np.asarray(original_pcd.points)
+                        downsampled_points = np.asarray(pcd.points)
+                        
+                        # Tìm colors gần nhất từ original
+                        tree = cKDTree(original_points)
+                        _, indices = tree.query(downsampled_points, k=1)
+                        downsampled_colors = original_colors[indices]
+                        pcd.colors = o3d.utility.Vector3dVector(downsampled_colors)
+                    elif original_colors is not None:
+                        # Fallback: sử dụng colors trung bình nếu không có scipy
+                        # (không lý tưởng nhưng tốt hơn không có colors)
+                        import numpy as np
+                        avg_color = np.mean(original_colors, axis=0)
+                        downsampled_colors = np.tile(avg_color, (len(pcd.points), 1))
+                        pcd.colors = o3d.utility.Vector3dVector(downsampled_colors)
+                
+                was_downsampled = True
+                
+            return pcd, was_downsampled, voxel_size_used
+            
+        except Exception as e:
+            import traceback
+            # Log lỗi chi tiết để debug
+            print(f"Error reading PCD file {pcd_file_path}: {e}")
+            print(traceback.format_exc())
+            return None, False, None
+    
     def is_map_valid(self, map_dir):
         """Kiểm tra map directory có dữ liệu hợp lệ không (giống pcd_viewer_tab.py)"""
         if not map_dir.exists():
@@ -567,8 +723,7 @@ class Localization2Tab(ttk.Frame):
         total_points = 0
         loaded_count = 0
         failed_count = 0
-        
-        import numpy as np
+        downsampled_count = 0
         
         for file_index, (tx, ty, tz, w, x, y, z) in enumerate(poses):
             pcd_file = pcd_dir / f"{file_index}.pcd"
@@ -578,18 +733,24 @@ class Localization2Tab(ttk.Frame):
                 continue
             
             try:
-                # Load PCD file
-                pcd = o3d.io.read_point_cloud(str(pcd_file))
-                if len(pcd.points) == 0:
+                # Đọc PCD file với auto-downsample nếu cần
+                pcd, was_downsampled, voxel_size = self._read_pcd_with_auto_downsample(pcd_file, preserve_colors=True)
+                
+                if pcd is None or len(pcd.points) == 0:
                     failed_count += 1
                     continue
                 
-                total_points += len(pcd.points)
+                num_points = len(pcd.points)
+                total_points += num_points
                 loaded_count += 1
+                
+                if was_downsampled:
+                    downsampled_count += 1
                 
                 # Progress indicator
                 if loaded_count % 50 == 0 or loaded_count == len(poses):
-                    self.log_message(f"  📦 Đã đọc {loaded_count}/{len(poses)} tiles, {total_points:,} points...")
+                    status = f" (auto-downsampled: {downsampled_count})" if downsampled_count > 0 else ""
+                    self.log_message(f"  📦 Đã đọc {loaded_count}/{len(poses)} tiles, {total_points:,} points{status}...")
                     
             except Exception as e:
                 failed_count += 1
@@ -604,14 +765,19 @@ class Localization2Tab(ttk.Frame):
         if failed_count > 0:
             self.log_message(f"⚠️  {failed_count} tiles không đọc được")
         
-        self.log_message(f"✅ Đã đọc {loaded_count} tiles, tổng {total_points:,} points")
+        if downsampled_count > 0:
+            self.log_message(f"✅ Đã đọc {loaded_count} tiles, tổng {total_points:,} points")
+            self.log_message(f"   📉 {downsampled_count} files đã được tự động downsample (> {self.max_points_per_file:,} points/file)")
+        else:
+            self.log_message(f"✅ Đã đọc {loaded_count} tiles, tổng {total_points:,} points")
         
         return {
             'name': map_dir.name,
             'total_poses': len(poses),
             'loaded_count': loaded_count,
             'failed_count': failed_count,
-            'total_points': total_points
+            'total_points': total_points,
+            'downsampled_count': downsampled_count
         }
     
     def clear_log(self):
@@ -712,7 +878,7 @@ class Localization2Tab(ttk.Frame):
             self.log_message(f"⚠️ Map quá nặng ({total_points:,} points > {self.max_map_points:,})")
             self.log_message("📉 Tự động downsample map để tránh crash RViz...")
             
-            downsampled_map_dir = self.downsample_map_tiles(str(map_path))
+            downsampled_map_dir = self.downsample_map_tiles(str(map_path), total_map_points=total_points)
             if downsampled_map_dir:
                 self.log_message(f"✅ Đã downsample map thành công")
                 return downsampled_map_dir
@@ -720,36 +886,249 @@ class Localization2Tab(ttk.Frame):
                 self.log_message("⚠️ Không thể downsample map, tiếp tục với map gốc (có thể crash RViz)")
                 return str(map_path)
         elif total_points > self.warning_map_points:
-            self.log_message(f"⚠️ Map khá nặng ({total_points:,} points), có thể gây chậm RViz")
-            # Hỏi người dùng có muốn downsample không (trong main thread)
-            response_queue = queue.Queue()
-            def ask_response():
-                response = messagebox.askyesno(
-                    "Map Warning",
-                    f"Map có {total_points:,} points (khá lớn).\n\n"
-                    f"Bạn có muốn downsample để tăng tốc độ không?\n\n"
-                    f"• YES: Downsample map (an toàn hơn)\n"
-                    f"• NO: Sử dụng map gốc (có thể chậm)"
-                )
-                response_queue.put(response)
+            # Map > 5M points - tự động optimize để tránh lag RViz
+            self.log_message(f"⚠️ Map khá nặng ({total_points:,} points > {self.warning_map_points:,})")
+            self.log_message("📉 Tự động downsample toàn bộ map để RViz mượt hơn...")
             
-            self.after(0, ask_response)
-            try:
-                response = response_queue.get(timeout=60)
-                if response:
-                    self.log_message("📉 Đang downsample map...")
-                    downsampled_map_dir = self.downsample_map_tiles(str(map_path))
-                    if downsampled_map_dir:
-                        self.log_message(f"✅ Đã downsample map thành công")
-                        return downsampled_map_dir
-            except queue.Empty:
-                self.log_message("⚠️ Timeout, sử dụng map gốc")
+            # Tự động downsample map với voxel size động (không hỏi user để tránh gián đoạn)
+            downsampled_map_dir = self.downsample_map_tiles(str(map_path), total_map_points=total_points)
+            if downsampled_map_dir:
+                self.log_message(f"✅ Đã downsample map thành công")
+                return downsampled_map_dir
+            else:
+                self.log_message("⚠️ Không thể downsample map, tiếp tục với map gốc")
+        elif total_points > self.safe_map_points:
+            # Map 2M-5M points - vẫn có thể lag, nên optimize tất cả files
+            self.log_message(f"ℹ️ Map có {total_points:,} points (có thể gây lag nhẹ)")
+            self.log_message("📉 Tự động optimize tất cả files để RViz mượt hơn...")
+        
+        # Luôn kiểm tra và auto-downsample các file PCD quá lớn
+        # Để đảm bảo RViz mượt khi đọc từng file (ngay cả khi tổng map < 10M)
+        # Truyền total_points để nếu map > safe_map_points, downsample tất cả files
+        optimized_map_dir = self._auto_downsample_large_files(str(map_path), total_map_points=total_points)
+        if optimized_map_dir:
+            return optimized_map_dir
         
         # Map OK, sử dụng map gốc
         return str(map_path)
     
-    def downsample_map_tiles(self, map_dir_path):
-        """Downsample tất cả PCD tiles trong map directory"""
+    def _auto_downsample_large_files(self, map_dir_path, total_map_points=None):
+        """
+        Tự động downsample các file PCD quá lớn (> max_points_per_file) 
+        hoặc tất cả các file nếu tổng map > safe_map_points
+        để đảm bảo RViz mượt khi chạy Localization2
+        
+        Args:
+            map_dir_path: Path đến map directory
+            total_map_points: Tổng số points của map (nếu biết trước)
+        
+        Returns:
+            str: Path đến map directory đã được xử lý (nếu có file cần downsample)
+                 None nếu không có file nào cần downsample
+        """
+        if not HAS_OPEN3D:
+            return None
+        
+        map_dir = Path(map_dir_path)
+        pose_file = map_dir / "pose.json"
+        pcd_dir = map_dir / "pcd"
+        
+        if not pose_file.exists() or not pcd_dir.exists():
+            return None
+        
+        # Đọc pose.json để biết các file cần kiểm tra
+        poses = []
+        try:
+            with open(pose_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 7:
+                        try:
+                            tx, ty, tz = float(parts[0]), float(parts[1]), float(parts[2])
+                            w, x, y, z = float(parts[3]), float(parts[4]), float(parts[5]), float(parts[6])
+                            poses.append((tx, ty, tz, w, x, y, z))
+                        except ValueError:
+                            continue
+        except Exception as e:
+            return None
+        
+        # Nếu tổng map > safe_map_points, downsample tất cả các file (không chỉ file lớn)
+        should_downsample_all = total_map_points and total_map_points > self.safe_map_points
+        
+        # Kiểm tra từng file PCD
+        large_files = []
+        total_points_checked = 0
+        for file_index, _ in enumerate(poses):
+            pcd_file = pcd_dir / f"{file_index}.pcd"
+            if not pcd_file.exists():
+                continue
+            
+            try:
+                # Đọc nhanh để kiểm tra số points
+                pcd = o3d.io.read_point_cloud(str(pcd_file))
+                num_points = len(pcd.points)
+                total_points_checked += num_points
+                
+                # Nếu tổng map lớn, downsample tất cả các file
+                # Hoặc nếu file riêng lẻ quá lớn, downsample file đó
+                if should_downsample_all or num_points > self.max_points_per_file:
+                    large_files.append((file_index, pcd_file, num_points))
+            except:
+                continue
+        
+        # Nếu không có file nào cần xử lý, không cần optimize
+        if not large_files:
+            return None
+        
+        # Có file cần xử lý, tạo bản copy đã được xử lý
+        if should_downsample_all:
+            self.log_message(f"📉 Map có {total_map_points:,} points > {self.safe_map_points:,}")
+            self.log_message(f"   Tự động downsample tất cả {len(large_files)} files để RViz mượt hơn...")
+        else:
+            self.log_message(f"📉 Phát hiện {len(large_files)} file PCD quá lớn (> {self.max_points_per_file:,} points/file)")
+            self.log_message("   Tự động downsample các file này để RViz mượt hơn...")
+        
+        # Tạo thư mục optimized map
+        temp_dir = Path(tempfile.gettempdir()) / "localization2_optimized"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        optimized_map_dir = temp_dir / f"{map_dir.name}_optimized"
+        optimized_map_dir.mkdir(exist_ok=True)
+        optimized_pcd_dir = optimized_map_dir / "pcd"
+        optimized_pcd_dir.mkdir(exist_ok=True)
+        
+        # Copy pose.json
+        shutil.copy2(pose_file, optimized_map_dir / "pose.json")
+        
+        # Xử lý từng file
+        processed_count = 0
+        for file_index, original_pcd_file, original_points in large_files:
+            try:
+                # Đọc và auto-downsample file (voxel size động dựa trên số points)
+                pcd, was_downsampled, voxel_size = self._read_pcd_with_auto_downsample(original_pcd_file, preserve_colors=True)
+                
+                if pcd is None:
+                    # Copy file gốc nếu không đọc được
+                    shutil.copy2(original_pcd_file, optimized_pcd_dir / f"{file_index}.pcd")
+                    continue
+                
+                # Lưu file đã được xử lý
+                # Đảm bảo colors được lưu đúng format (PointXYZRGB nếu có colors)
+                output_file = optimized_pcd_dir / f"{file_index}.pcd"
+                # Open3D tự động detect format dựa trên có colors hay không
+                # write_ascii=False: lưu binary format (nhanh hơn, nhỏ hơn)
+                # compressed=False: không nén để đảm bảo tương thích tốt
+                success = o3d.io.write_point_cloud(
+                    str(output_file),
+                    pcd,
+                    write_ascii=False,
+                    compressed=False
+                )
+                
+                if success:
+                    reduction = (1 - len(pcd.points) / original_points) * 100 if original_points > 0 else 0
+                    color_status = "✅ RGB" if pcd.has_colors() else "⚠️ No RGB"
+                    voxel_info = f" (voxel={voxel_size:.3f}m)" if voxel_size else ""
+                    self.log_message(f"   📦 File {file_index}.pcd: {original_points:,} → {len(pcd.points):,} points ({reduction:.1f}% reduction){voxel_info} {color_status}")
+                    processed_count += 1
+                else:
+                    # Copy file gốc nếu không lưu được
+                    shutil.copy2(original_pcd_file, optimized_pcd_dir / f"{file_index}.pcd")
+                    
+            except Exception as e:
+                # Copy file gốc nếu có lỗi
+                try:
+                    shutil.copy2(original_pcd_file, optimized_pcd_dir / f"{file_index}.pcd")
+                except:
+                    pass
+                continue
+        
+        # Copy các file không quá lớn từ map gốc
+        for file_index, _ in enumerate(poses):
+            if file_index in [f[0] for f in large_files]:
+                continue  # Đã xử lý rồi
+            
+            original_pcd_file = pcd_dir / f"{file_index}.pcd"
+            if original_pcd_file.exists():
+                try:
+                    shutil.copy2(original_pcd_file, optimized_pcd_dir / f"{file_index}.pcd")
+                except:
+                    pass
+        
+        if processed_count > 0:
+            self.log_message(f"✅ Đã tự động downsample {processed_count} file PCD quá lớn")
+            self.log_message(f"   Optimized map: {optimized_map_dir}")
+            return str(optimized_map_dir)
+        
+        return None
+    
+    @staticmethod
+    def _downsample_single_file(args):
+        """
+        Worker function để downsample một file PCD (dùng cho multiprocessing)
+        Args: (pcd_file_path, output_path, dynamic_voxel_size, max_points_per_file, target_points_per_file, file_downsample_voxel_size)
+        Returns: (success, file_index, original_points, downsampled_points, has_colors, error_msg)
+        """
+        try:
+            pcd_file_path, output_path, dynamic_voxel_size, max_points_per_file, target_points_per_file, file_downsample_voxel_size = args
+            
+            if not HAS_OPEN3D:
+                return (False, None, 0, 0, False, "open3d not available")
+            
+            import numpy as np
+            
+            # Đọc PCD file
+            pcd = o3d.io.read_point_cloud(str(pcd_file_path), format='auto')
+            if len(pcd.points) == 0:
+                return (False, None, 0, 0, False, "Empty point cloud")
+            
+            original_points = len(pcd.points)
+            has_colors = pcd.has_colors()
+            
+            # Auto-downsample nếu file quá lớn
+            if original_points > max_points_per_file:
+                if has_colors:
+                    colors = np.asarray(pcd.colors)
+                    if colors.max() > 1.0 and colors.max() <= 255.0:
+                        pcd.colors = o3d.utility.Vector3dVector(colors / 255.0)
+                
+                # Tính voxel size động
+                reduction_ratio = original_points / target_points_per_file
+                file_voxel_size = file_downsample_voxel_size * (reduction_ratio ** (1.0/3.0))
+                file_voxel_size = max(0.05, min(0.5, file_voxel_size))
+                
+                pcd = pcd.voxel_down_sample(voxel_size=file_voxel_size)
+            
+            # Downsample thêm với voxel size của map
+            if len(pcd.points) > 0:
+                pcd = pcd.voxel_down_sample(voxel_size=dynamic_voxel_size)
+            
+            downsampled_points = len(pcd.points)
+            
+            # Lưu file
+            success = o3d.io.write_point_cloud(
+                str(output_path),
+                pcd,
+                write_ascii=False,
+                compressed=False
+            )
+            
+            if success:
+                return (True, None, original_points, downsampled_points, pcd.has_colors(), None)
+            else:
+                return (False, None, original_points, 0, False, "Failed to write file")
+                
+        except Exception as e:
+            return (False, None, 0, 0, False, str(e))
+    
+    def downsample_map_tiles(self, map_dir_path, total_map_points=None):
+        """
+        Downsample tất cả PCD tiles trong map directory (song song để nhanh hơn)
+        Voxel size được tính động dựa trên tổng số points để đảm bảo giảm đủ
+        """
         if not HAS_OPEN3D:
             self.log_message("❌ open3d không được cài đặt. Không thể downsample map.")
             self.log_message("💡 Cài đặt: pip3 install open3d")
@@ -762,6 +1141,22 @@ class Localization2Tab(ttk.Frame):
         if not pose_file.exists() or not pcd_dir.exists():
             self.log_message("❌ Map directory không hợp lệ")
             return None
+        
+        # Tính toán voxel size động dựa trên tổng số points
+        # Map càng lớn → voxel size càng lớn → downsample càng nhiều
+        if total_map_points:
+            # Target: giảm xuống ~2-3M points để RViz rất mượt (giảm từ 4M)
+            target_points = 2_500_000  # 2.5M points target (giảm từ 4M)
+            if total_map_points > target_points:
+                reduction_ratio = total_map_points / target_points
+                # Cube root vì volume tỷ lệ với size^3
+                dynamic_voxel_size = self.downsample_voxel_size * (reduction_ratio ** (1.0/3.0))
+                # Giới hạn trong khoảng hợp lý (0.18m - 0.35m) - tăng để downsample nhiều hơn
+                dynamic_voxel_size = max(0.18, min(0.35, dynamic_voxel_size))
+            else:
+                dynamic_voxel_size = self.downsample_voxel_size
+        else:
+            dynamic_voxel_size = self.downsample_voxel_size
         
         # Tạo thư mục downsampled map
         temp_dir = Path(tempfile.gettempdir()) / "localization2_downsampled"
@@ -795,96 +1190,140 @@ class Localization2Tab(ttk.Frame):
             self.log_message(f"❌ Lỗi khi đọc pose.json: {e}")
             return None
         
-        self.log_message(f"📉 Đang downsample {len(poses)} PCD tiles (voxel_size={self.downsample_voxel_size}m)...")
+        self.log_message(f"📉 Đang downsample {len(poses)} PCD tiles (voxel_size={dynamic_voxel_size:.3f}m)...")
         
-        # Downsample từng PCD file
+        # Chuẩn bị danh sách files để xử lý song song
+        files_to_process = []
+        for file_index, _ in enumerate(poses):
+            pcd_file = pcd_dir / f"{file_index}.pcd"
+            if pcd_file.exists():
+                downsampled_pcd_file = downsampled_pcd_dir / f"{file_index}.pcd"
+                files_to_process.append((
+                    str(pcd_file),
+                    str(downsampled_pcd_file),
+                    dynamic_voxel_size,
+                    self.max_points_per_file,
+                    self.target_points_per_file,
+                    self.file_downsample_voxel_size
+                ))
+        
+        # Sử dụng multiprocessing để xử lý song song (nhanh hơn nhiều)
         loaded_count = 0
         failed_count = 0
         total_points_before = 0
         total_points_after = 0
+        has_rgb_count = 0
         
-        for file_index, (tx, ty, tz, w, x, y, z) in enumerate(poses):
-            pcd_file = pcd_dir / f"{file_index}.pcd"
-            downsampled_pcd_file = downsampled_pcd_dir / f"{file_index}.pcd"
-            
-            if not pcd_file.exists():
-                failed_count += 1
-                continue
+        if HAS_MULTIPROCESSING and len(files_to_process) > 10:
+            # Sử dụng multiprocessing nếu có nhiều files (>10)
+            num_workers = min(cpu_count(), 8)  # Tối đa 8 workers để tránh quá tải
+            self.log_message(f"   🚀 Sử dụng {num_workers} workers để downsample song song (nhanh hơn ~{num_workers}x)...")
             
             try:
-                # Load PCD file (open3d tự động detect và giữ RGB colors nếu có)
-                pcd = o3d.io.read_point_cloud(str(pcd_file))
-                if len(pcd.points) == 0:
-                    failed_count += 1
-                    continue
+                with Pool(processes=num_workers) as pool:
+                    results = pool.map(self._downsample_single_file, files_to_process)
                 
-                total_points_before += len(pcd.points)
-                
-                # Kiểm tra xem có colors không
-                has_colors = pcd.has_colors()
-                if has_colors:
-                    # Đảm bảo colors được normalize đúng (0-1 range)
-                    import numpy as np
-                    colors = np.asarray(pcd.colors)
-                    if colors.max() > 1.0:
-                        # Colors có thể ở dạng 0-255, normalize về 0-1
-                        pcd.colors = o3d.utility.Vector3dVector(colors / 255.0)
-                
-                # Downsample (open3d tự động preserve colors nếu có)
-                downsampled_pcd = pcd.voxel_down_sample(voxel_size=self.downsample_voxel_size)
-                total_points_after += len(downsampled_pcd.points)
-                
-                # Đảm bảo colors được preserve sau downsample
-                # Open3d's voxel_down_sample() tự động preserve colors, nhưng kiểm tra để chắc chắn
-                if has_colors and not downsampled_pcd.has_colors():
-                    # Nếu mất colors sau downsample (hiếm khi xảy ra), khôi phục colors từ original
-                    self.log_message(f"  ⚠️  Colors bị mất sau downsample cho {pcd_file.name}, đang khôi phục...")
-                    if HAS_SCIPY and cKDTree:
-                        # Thử với KDTree để tìm nearest colors
-                        import numpy as np
-                        original_points = np.asarray(pcd.points)
-                        original_colors = np.asarray(pcd.colors)
-                        downsampled_points = np.asarray(downsampled_pcd.points)
+                # Xử lý kết quả
+                for i, (success, _, orig_points, down_points, has_colors, error_msg) in enumerate(results):
+                    if success:
+                        loaded_count += 1
+                        total_points_before += orig_points
+                        total_points_after += down_points
+                        if has_colors:
+                            has_rgb_count += 1
                         
-                        # Tìm colors cho downsampled points từ original
-                        tree = cKDTree(original_points)
-                        _, indices = tree.query(downsampled_points, k=1)
-                        downsampled_colors = original_colors[indices]
-                        downsampled_pcd.colors = o3d.utility.Vector3dVector(downsampled_colors)
+                        # Progress indicator
+                        if loaded_count % 50 == 0 or loaded_count == len(files_to_process):
+                            reduction = (1 - total_points_after / total_points_before) * 100 if total_points_before > 0 else 0
+                            self.log_message(f"  📦 Đã downsample {loaded_count}/{len(files_to_process)} tiles, "
+                                           f"{total_points_after:,} points ({reduction:.1f}% reduction)...")
                     else:
-                        # Fallback: tạo colors trắng nếu không có scipy
-                        import numpy as np
-                        default_colors = np.ones((len(downsampled_pcd.points), 3))
-                        downsampled_pcd.colors = o3d.utility.Vector3dVector(default_colors)
+                        failed_count += 1
+                        if failed_count <= 5 and error_msg:
+                            self.log_message(f"  ⚠️  Lỗi: {error_msg}")
+            except Exception as e:
+                self.log_message(f"  ⚠️  Lỗi multiprocessing, chuyển sang xử lý tuần tự: {e}")
+                # Reset counters for sequential processing
+                loaded_count = 0
+                failed_count = 0
+                total_points_before = 0
+                total_points_after = 0
+                has_rgb_count = 0
+        
+        # Xử lý tuần tự nếu không dùng multiprocessing hoặc có lỗi
+        use_sequential = not (HAS_MULTIPROCESSING and len(files_to_process) > 10) or loaded_count == 0
+        if use_sequential:
+            for file_index, (tx, ty, tz, w, x, y, z) in enumerate(poses):
+                pcd_file = pcd_dir / f"{file_index}.pcd"
+                downsampled_pcd_file = downsampled_pcd_dir / f"{file_index}.pcd"
                 
-                # Lưu file đã downsample (open3d tự động lưu RGB nếu có colors)
-                success = o3d.io.write_point_cloud(
-                    str(downsampled_pcd_file), 
-                    downsampled_pcd, 
-                    write_ascii=False,
-                    compressed=False  # Đảm bảo format đúng
-                )
-                if not success:
+                if not pcd_file.exists():
                     failed_count += 1
                     continue
                 
-                loaded_count += 1
-                
-                # Kiểm tra colors sau downsample
-                has_colors_after = downsampled_pcd.has_colors()
-                color_status = "✅ RGB" if has_colors_after else "⚠️ No RGB"
-                
-                # Progress indicator
-                if loaded_count % 50 == 0 or loaded_count == len(poses):
-                    reduction = (1 - total_points_after / total_points_before) * 100 if total_points_before > 0 else 0
-                    self.log_message(f"  📦 Đã downsample {loaded_count}/{len(poses)} tiles, "
-                                   f"{total_points_after:,} points ({reduction:.1f}% reduction) {color_status}...")
+                try:
+                    # Đọc PCD file với auto-downsample nếu file quá lớn
+                    pcd, was_auto_downsampled, voxel_size = self._read_pcd_with_auto_downsample(pcd_file, preserve_colors=True)
                     
-            except Exception as e:
-                failed_count += 1
-                if failed_count <= 5:
-                    self.log_message(f"  ⚠️  Lỗi khi downsample {pcd_file.name}: {e}")
-                continue
+                    if pcd is None or len(pcd.points) == 0:
+                        failed_count += 1
+                        continue
+                    
+                    # Đếm points gốc
+                    if was_auto_downsampled:
+                        try:
+                            original_pcd = o3d.io.read_point_cloud(str(pcd_file))
+                            points_before_file = len(original_pcd.points) if original_pcd else len(pcd.points)
+                        except:
+                            points_before_file = int(len(pcd.points) * 1.5)
+                    else:
+                        points_before_file = len(pcd.points)
+                    
+                    total_points_before += points_before_file
+                    has_colors = pcd.has_colors()
+                    
+                    # Downsample thêm với voxel size động
+                    downsampled_pcd = pcd.voxel_down_sample(voxel_size=dynamic_voxel_size)
+                    total_points_after += len(downsampled_pcd.points)
+                    
+                    # Đảm bảo colors được preserve
+                    if has_colors and not downsampled_pcd.has_colors():
+                        import numpy as np
+                        if HAS_SCIPY and cKDTree:
+                            original_points = np.asarray(pcd.points)
+                            original_colors = np.asarray(pcd.colors)
+                            downsampled_points = np.asarray(downsampled_pcd.points)
+                            tree = cKDTree(original_points)
+                            _, indices = tree.query(downsampled_points, k=1)
+                            downsampled_colors = original_colors[indices]
+                            downsampled_pcd.colors = o3d.utility.Vector3dVector(downsampled_colors)
+                    
+                    # Lưu file
+                    success = o3d.io.write_point_cloud(
+                        str(downsampled_pcd_file), 
+                        downsampled_pcd, 
+                        write_ascii=False,
+                        compressed=False
+                    )
+                    if not success:
+                        failed_count += 1
+                        continue
+                    
+                    loaded_count += 1
+                    if downsampled_pcd.has_colors():
+                        has_rgb_count += 1
+                    
+                    # Progress indicator
+                    if loaded_count % 50 == 0 or loaded_count == len(poses):
+                        reduction = (1 - total_points_after / total_points_before) * 100 if total_points_before > 0 else 0
+                        self.log_message(f"  📦 Đã downsample {loaded_count}/{len(poses)} tiles, "
+                                       f"{total_points_after:,} points ({reduction:.1f}% reduction)...")
+                        
+                except Exception as e:
+                    failed_count += 1
+                    if failed_count <= 5:
+                        self.log_message(f"  ⚠️  Lỗi khi downsample {pcd_file.name}: {e}")
+                    continue
         
         if loaded_count == 0:
             self.log_message("❌ Không downsample được tile nào")
@@ -901,8 +1340,9 @@ class Localization2Tab(ttk.Frame):
         
         self.log_message(f"✅ Đã downsample {loaded_count} tiles")
         self.log_message(f"   Points: {total_points_before:,} → {total_points_after:,} ({reduction:.1f}% reduction)")
-        if has_rgb:
-            self.log_message(f"   ✅ RGB colors preserved - map sẽ hiển thị đầy đủ màu sắc")
+        if has_rgb_count > 0:
+            rgb_percent = (has_rgb_count / loaded_count) * 100 if loaded_count > 0 else 0
+            self.log_message(f"   ✅ {has_rgb_count}/{loaded_count} files có RGB colors ({rgb_percent:.1f}%) - map sẽ hiển thị đầy đủ màu sắc")
         else:
             self.log_message(f"   ⚠️ No RGB colors detected - map sẽ hiển thị màu vàng mặc định")
         self.log_message(f"   Downsampled map: {downsampled_map_dir}")
