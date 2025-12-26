@@ -21,6 +21,7 @@ DRIVE_WS_SETUP_SCRIPT="$SCRIPT_DIR/dependencies/drive_ws/install/setup.sh"
 # Danh sách packages trong ws/src
 declare -a PACKAGES=(
     "fast_livo"
+    "fast_lio_localization"
     "direct_visual_lidar_calibration"
     "theta_driver"
     "vikit_common"
@@ -30,7 +31,7 @@ declare -a PACKAGES=(
 
 # Mảng lưu trạng thái chọn của từng package (0 = chưa chọn, 1 = đã chọn)
 declare -a SELECTED=(
-    0 0 0 0 0 0
+    0 0 0 0 0 0 0
 )
 
 # Hàm hiển thị menu
