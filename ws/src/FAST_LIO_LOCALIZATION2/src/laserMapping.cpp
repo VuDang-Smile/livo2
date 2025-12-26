@@ -923,8 +923,9 @@ bool load_file(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
                 has_rgb = true;
                 global_map_has_rgb = true;
                 
-                // Transform RGB cloud
-                pcl::transformPointCloud(*temp_rgb, *temp_rgb, p, q);
+                // NOTE: Tiles từ FAST-LIVO2 đã ở global frame (từ laserCloudWorldRGB)
+                // KHÔNG transform lại vì sẽ làm sai bản đồ
+                // pcl::transformPointCloud(*temp_rgb, *temp_rgb, p, q);  // COMMENTED OUT - tiles already in global frame
                 *global_map_rgb += *temp_rgb;
                 
                 // Convert to PointXYZINormal for localization processing
@@ -960,7 +961,9 @@ bool load_file(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
             }
             
             scManager->makeAndSaveScancontextAndKeys(*temp);
-            pcl::transformPointCloud(*temp, *temp, p, q);
+            // NOTE: Tiles từ FAST-LIVO2 đã ở global frame (từ laserCloudWorldRGB)
+            // KHÔNG transform lại vì sẽ làm sai bản đồ
+            // pcl::transformPointCloud(*temp, *temp, p, q);  // COMMENTED OUT - tiles already in global frame
             *global_map += *temp;
         }
         

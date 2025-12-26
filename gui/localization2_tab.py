@@ -671,7 +671,14 @@ class Localization2Tab(ttk.Frame):
             self.after(0, update_error)
     
     def load_map_tiles_info(self, map_dir_path):
-        """Load và tính toán thông tin về map tiles (giống pcd_viewer_tab.py nhưng không merge)"""
+        """Load và tính toán thông tin về map tiles (tích hợp từ Recorder project)
+        
+        Cách đọc tiles PCD (từ Recorder):
+        1. Đọc pose.json để lấy danh sách poses và file_index
+        2. Sử dụng glob để tìm tất cả PCD files trong pcd/ directory (validation)
+        3. Đọc từng PCD file theo file_index: pcd_dir / f"{file_index}.pcd"
+        4. Validate số lượng PCD files khớp với số poses
+        """
         if not HAS_OPEN3D:
             self.log_message("⚠️ open3d không được cài đặt. Không thể load map info chi tiết.")
             self.log_message("💡 Cài đặt: pip3 install open3d")
@@ -717,19 +724,34 @@ class Localization2Tab(ttk.Frame):
             return None
         
         self.log_message(f"📊 Tìm thấy {len(poses)} poses")
+        
+        # Validation: Sử dụng glob để tìm tất cả PCD files (cách của Recorder)
+        pcd_files_glob = list(pcd_dir.glob("*.pcd"))
+        pcd_files_count = len(pcd_files_glob)
+        self.log_message(f"📦 Tìm thấy {pcd_files_count} file PCD trong thư mục pcd/ (glob)")
+        
+        # Cảnh báo nếu số lượng không khớp
+        if pcd_files_count != len(poses):
+            self.log_message(f"⚠️  Số lượng PCD files ({pcd_files_count}) không khớp với số poses ({len(poses)})")
+            self.log_message(f"   Sẽ đọc theo file_index từ pose.json (0.pcd, 1.pcd, ...)")
+        
         self.log_message(f"📦 Đang đọc thông tin từ {len(poses)} PCD files...")
         
-        # Đọc thông tin từ các PCD files (không merge, chỉ đếm points)
+        # Đọc thông tin từ các PCD files theo file_index (giống Recorder)
+        # Recorder sử dụng: pcd_dir / f"{file_index}.pcd"
         total_points = 0
         loaded_count = 0
         failed_count = 0
         downsampled_count = 0
+        missing_files = []
         
         for file_index, (tx, ty, tz, w, x, y, z) in enumerate(poses):
+            # Cách đọc tiles từ Recorder: sử dụng file_index để tạo path
             pcd_file = pcd_dir / f"{file_index}.pcd"
             
             if not pcd_file.exists():
                 failed_count += 1
+                missing_files.append(file_index)
                 continue
             
             try:
@@ -764,6 +786,8 @@ class Localization2Tab(ttk.Frame):
         
         if failed_count > 0:
             self.log_message(f"⚠️  {failed_count} tiles không đọc được")
+            if missing_files and len(missing_files) <= 10:
+                self.log_message(f"   Missing files: {missing_files[:10]}{'...' if len(missing_files) > 10 else ''}")
         
         if downsampled_count > 0:
             self.log_message(f"✅ Đã đọc {loaded_count} tiles, tổng {total_points:,} points")
@@ -777,7 +801,8 @@ class Localization2Tab(ttk.Frame):
             'loaded_count': loaded_count,
             'failed_count': failed_count,
             'total_points': total_points,
-            'downsampled_count': downsampled_count
+            'downsampled_count': downsampled_count,
+            'pcd_files_found': pcd_files_count  # Thêm thông tin về số PCD files tìm được bằng glob
         }
     
     def clear_log(self):
@@ -918,6 +943,10 @@ class Localization2Tab(ttk.Frame):
         hoặc tất cả các file nếu tổng map > safe_map_points
         để đảm bảo RViz mượt khi chạy Localization2
         
+        Cách đọc tiles PCD (tích hợp từ Recorder):
+        - Đọc pose.json để lấy file_index
+        - Sử dụng file_index để tạo path: pcd_dir / f"{file_index}.pcd"
+        
         Args:
             map_dir_path: Path đến map directory
             total_map_points: Tổng số points của map (nếu biết trước)
@@ -936,7 +965,7 @@ class Localization2Tab(ttk.Frame):
         if not pose_file.exists() or not pcd_dir.exists():
             return None
         
-        # Đọc pose.json để biết các file cần kiểm tra
+        # Đọc pose.json để biết các file cần kiểm tra (cách của Recorder)
         poses = []
         try:
             with open(pose_file, 'r') as f:
@@ -958,10 +987,11 @@ class Localization2Tab(ttk.Frame):
         # Nếu tổng map > safe_map_points, downsample tất cả các file (không chỉ file lớn)
         should_downsample_all = total_map_points and total_map_points > self.safe_map_points
         
-        # Kiểm tra từng file PCD
+        # Kiểm tra từng file PCD theo file_index (cách của Recorder)
         large_files = []
         total_points_checked = 0
         for file_index, _ in enumerate(poses):
+            # Cách đọc tiles từ Recorder: sử dụng file_index để tạo path
             pcd_file = pcd_dir / f"{file_index}.pcd"
             if not pcd_file.exists():
                 continue
@@ -1128,6 +1158,10 @@ class Localization2Tab(ttk.Frame):
         """
         Downsample tất cả PCD tiles trong map directory (song song để nhanh hơn)
         Voxel size được tính động dựa trên tổng số points để đảm bảo giảm đủ
+        
+        Cách đọc tiles PCD (tích hợp từ Recorder):
+        - Đọc pose.json để lấy file_index
+        - Sử dụng file_index để tạo path: pcd_dir / f"{file_index}.pcd"
         """
         if not HAS_OPEN3D:
             self.log_message("❌ open3d không được cài đặt. Không thể downsample map.")
@@ -1251,9 +1285,11 @@ class Localization2Tab(ttk.Frame):
                 has_rgb_count = 0
         
         # Xử lý tuần tự nếu không dùng multiprocessing hoặc có lỗi
+        # Cách đọc tiles từ Recorder: sử dụng file_index để tạo path
         use_sequential = not (HAS_MULTIPROCESSING and len(files_to_process) > 10) or loaded_count == 0
         if use_sequential:
             for file_index, (tx, ty, tz, w, x, y, z) in enumerate(poses):
+                # Cách đọc tiles từ Recorder: pcd_dir / f"{file_index}.pcd"
                 pcd_file = pcd_dir / f"{file_index}.pcd"
                 downsampled_pcd_file = downsampled_pcd_dir / f"{file_index}.pcd"
                 
