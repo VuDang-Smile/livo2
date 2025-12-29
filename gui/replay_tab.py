@@ -74,59 +74,31 @@ class ReplayTab(ttk.Frame):
         config_frame = ttk.LabelFrame(control_frame, text="Cấu hình Replay", padding="10")
         config_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Rate option
+        # Rate option (giống Bag Mapping Tab)
         rate_frame = ttk.Frame(config_frame)
-        rate_frame.pack(fill=tk.X, padx=5, pady=2)
-        
-        ttk.Label(
+        rate_frame.pack(side=tk.LEFT, padx=5)
+        ttk.Label(rate_frame, text="Bag Rate:").pack(side=tk.LEFT, padx=5)
+        self.rate_var = tk.StringVar(value="0.5")
+        rate_combo = ttk.Combobox(
             rate_frame,
-            text="Rate:",
-            font=("Arial", 10)
-        ).pack(side=tk.LEFT, padx=5)
-        
-        self.rate_var = tk.StringVar(value="1.0")
-        rate_spinbox = ttk.Spinbox(
-            rate_frame,
-            from_=0.1,
-            to=10.0,
-            increment=0.1,
             textvariable=self.rate_var,
-            width=10,
-            format="%.1f"
+            values=["0.25", "0.5", "0.75", "1.0", "1.5", "2.0"],
+            state="readonly",
+            width=10
         )
-        rate_spinbox.pack(side=tk.LEFT, padx=5)
-        
-        ttk.Label(
-            rate_frame,
-            text="(1.0 = real-time, 2.0 = 2x speed, 0.5 = half speed)",
-            font=("Arial", 9),
-            foreground="gray"
-        ).pack(side=tk.LEFT, padx=10)
+        rate_combo.pack(side=tk.LEFT)
+        rate_combo.bind("<<ComboboxSelected>>", self.on_rate_change)
         
         # Loop option
+        loop_frame = ttk.Frame(config_frame)
+        loop_frame.pack(side=tk.LEFT, padx=10)
         self.loop_var = tk.BooleanVar(value=False)
         loop_checkbox = ttk.Checkbutton(
-            config_frame,
+            loop_frame,
             text="Loop (lặp lại khi kết thúc)",
             variable=self.loop_var
         )
-        loop_checkbox.pack(anchor=tk.W, padx=5, pady=2)
-        
-        # Clock option
-        self.clock_var = tk.BooleanVar(value=True)
-        clock_checkbox = ttk.Checkbutton(
-            config_frame,
-            text="Publish clock (--clock)",
-            variable=self.clock_var
-        )
-        clock_checkbox.pack(anchor=tk.W, padx=5, pady=2)
-        
-        ttk.Label(
-            config_frame,
-            text="(Publish /clock topic để đồng bộ thời gian)",
-            font=("Arial", 9),
-            foreground="gray"
-        ).pack(anchor=tk.W, padx=25, pady=0)
+        loop_checkbox.pack(side=tk.LEFT)
         
         # Frame nút điều khiển
         button_frame = ttk.Frame(control_frame)
@@ -187,11 +159,21 @@ class ReplayTab(ttk.Frame):
         self.log_text.see(tk.END)
         self.log_text.config(state=tk.DISABLED)
     
+    def on_rate_change(self, event=None):
+        """Callback khi thay đổi bag rate (giống Bag Mapping Tab)"""
+        try:
+            rate = float(self.rate_var.get())
+            self.log(f"⚡ Bag rate: {rate}x")
+        except ValueError:
+            self.rate_var.set("0.5")
+            self.log(f"⚠️ Rate không hợp lệ, sử dụng mặc định: 0.5x")
+    
     def browse_bag_folder(self):
         """Browse cho bag folder"""
+        initial_dir = "/media/an/ANHSON"
         folder = filedialog.askdirectory(
             title="Chọn thư mục chứa bag files",
-            initialdir=self.bag_path_var.get() or str(self.workspace_path)
+            initialdir=self.bag_path_var.get() or initial_dir
         )
         if folder:
             self.bag_path_var.set(folder)
@@ -285,33 +267,26 @@ class ReplayTab(ttk.Frame):
         drive_ws_setup = self.drive_ws_path / "install" / "setup.sh"
         use_drive_ws = drive_ws_setup.exists()
         
-        # Lấy các options
+        # Lấy các options (giống Bag Mapping Tab)
         try:
             rate = float(self.rate_var.get())
             if rate <= 0:
-                rate = 1.0
+                rate = 0.5
         except ValueError:
-            rate = 1.0
-            self.log("⚠️  Giá trị rate không hợp lệ, sử dụng mặc định 1.0")
+            rate = 0.5
+            self.log("⚠️  Giá trị rate không hợp lệ, sử dụng mặc định 0.5x")
         
         loop = self.loop_var.get()
-        clock = self.clock_var.get()
         
         # Build command
         ros2_setup = "/opt/ros/jazzy/setup.bash"
         
-        # Build ros2 bag play command
-        bag_play_cmd = f"ros2 bag play {bag_path}"
+        # Build ros2 bag play command (giống Bag Mapping Tab - luôn có rate)
+        bag_play_cmd = f"ros2 bag play {bag_path} --rate {rate}"
         
-        # Thêm options
-        if rate != 1.0:
-            bag_play_cmd += f" --rate {rate}"
-        
+        # Thêm loop option nếu được chọn
         if loop:
             bag_play_cmd += " --loop"
-        
-        if clock:
-            bag_play_cmd += " --clock"
         
         # Source theo thứ tự: ROS2 base -> drive_ws (nếu có) -> ws
         self.log("🔧 Đang chuẩn bị source environment...")
@@ -335,9 +310,8 @@ class ReplayTab(ttk.Frame):
         
         self.log(f"📝 Bắt đầu replay bag: {bag_path_obj.name}")
         self.log(f"📁 Bag path: {bag_path}")
-        self.log(f"⚙️  Rate: {rate}x")
+        self.log(f"⚡ Rate: {rate}x")
         self.log(f"⚙️  Loop: {'Có' if loop else 'Không'}")
-        self.log(f"⚙️  Clock: {'Có' if clock else 'Không'}")
         
         try:
             # Sử dụng env để đảm bảo clean environment
@@ -365,7 +339,7 @@ class ReplayTab(ttk.Frame):
                 foreground="orange"
             )
             self.info_label.config(
-                text=f"Đang replay: {bag_path_obj.name}\nRate: {rate}x | Loop: {'Có' if loop else 'Không'} | Clock: {'Có' if clock else 'Không'}"
+                text=f"Đang replay: {bag_path_obj.name}\nRate: {rate}x | Loop: {'Có' if loop else 'Không'}"
             )
             
             # Start thread để đọc output

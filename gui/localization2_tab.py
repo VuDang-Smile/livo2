@@ -145,6 +145,52 @@ class Localization2Tab(ttk.Frame):
         self.velocity_var = None
         self.timestamp_var = None
         
+        # Localization data storage (from Recorder)
+        self.current_localization = None
+        self.localization_history = []
+        self.max_history_size = 100
+        
+        # Map bounds for drift detection (from Recorder)
+        self.map_bounds = None  # {'x': {'min': float, 'max': float}, 'y': {'min': float, 'max': float}, 'z': {'min': float, 'max': float}}
+        self.map_bounds_original = None  # Original bounds without expansion (for strict drift detection)
+        self.out_of_bounds_detected = False
+        self.last_restart_time = 0
+        self.restart_cooldown = 10.0  # Minimum seconds between restarts
+        self.out_of_bounds_margin = 3.0  # Margin in meters beyond bounds before restarting
+        self.out_of_bounds_count = 0  # Count consecutive out-of-bounds detections
+        self.out_of_bounds_threshold = 1  # Restart after N consecutive detections
+        self.is_restarting = False  # Flag to prevent multiple simultaneous restarts
+        self.restart_lock = threading.Lock()  # Lock for thread-safe restart operations
+        self.localization_start_time = 0  # Track when localization started
+        self.initialization_grace_period = 10.0  # Seconds after start to ignore drift
+        self.auto_restart_on_crash = True  # Auto-restart when process crashes
+        self.crash_restart_count = 0  # Count consecutive crash restarts
+        self.max_crash_restarts = 5  # Maximum consecutive crash restarts
+        self.user_stopped = False  # Flag to track if user manually stopped
+        
+        # Global localization monitoring (from Recorder)
+        self.last_global_localization_time = 0  # Track when global localization last occurred
+        self.global_localization_grace_period = 3.0  # Seconds after global localization to allow position adjustment
+        self.drift_threshold_after_global_loc = 3.0  # Larger threshold after global localization
+        self.global_localization_fail_count = 0  # Count consecutive global localization failures
+        self.global_localization_fail_threshold = 3  # Restart after N consecutive failures
+        
+        # Drift detection within bounds (from Recorder)
+        self.restart_due_to_drift = False  # Flag to track if last restart was due to drift
+        self.last_drift_restart_time = 0  # Timestamp of last restart due to drift
+        self.drift_restart_window = 60.0  # Seconds after drift restart to use stricter detection
+        self.last_position = None  # {'x': float, 'y': float, 'z': float, 'timestamp': float}
+        self.position_jump_threshold = 10.0  # Maximum reasonable distance between updates (meters)
+        self.max_reasonable_speed = 5.0  # Initial maximum reasonable speed (m/s)
+        self.position_jump_count = 0  # Count consecutive position jumps
+        self.position_jump_threshold_count = 3  # Restart after N consecutive jumps
+        # Speed history for adaptive threshold calculation
+        self.speed_history = []  # List of recent speeds for adaptive threshold
+        self.speed_history_max_size = 100  # Keep last 100 speed measurements
+        self.speed_threshold_multiplier = 3.0  # Threshold = mean + multiplier * std
+        self.min_speed_samples = 10  # Minimum samples before using adaptive threshold
+        self.adaptive_speed_threshold_enabled = True  # Enable adaptive speed threshold
+        
         # Tạo UI
         self.create_widgets()
     
@@ -841,6 +887,18 @@ class Localization2Tab(ttk.Frame):
         self.log_message("Starting Localization2...")
         self.log_message(f"Map directory: {self.selected_map_dir}")
         
+        # Reset drift detection state
+        self.localization_start_time = time.time()
+        self.out_of_bounds_count = 0
+        self.position_jump_count = 0
+        self.last_position = None
+        self.out_of_bounds_detected = False
+        self.last_global_localization_time = 0
+        self.global_localization_fail_count = 0
+        self.restart_due_to_drift = False
+        self.last_drift_restart_time = 0
+        self.user_stopped = False
+        
         # Update UI
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
@@ -855,6 +913,31 @@ class Localization2Tab(ttk.Frame):
                 self.log_message("❌ Failed to prepare map for localization")
                 self._reset_ui_state()
                 return
+            
+            # Extract map bounds for drift detection (from Recorder)
+            self.log_message("📏 Đang trích xuất bounds từ bản đồ...")
+            extracted_bounds = self._extract_map_bounds(map_dir_to_use)
+            if extracted_bounds:
+                # Expand bounds to account for tile transformations and global localization matching
+                expansion_margin = 25.0  # Expand bounds by 25m
+                expanded_bounds = {
+                    'x': {
+                        'min': extracted_bounds['x']['min'] - expansion_margin,
+                        'max': extracted_bounds['x']['max'] + expansion_margin
+                    },
+                    'y': {
+                        'min': extracted_bounds['y']['min'] - expansion_margin,
+                        'max': extracted_bounds['y']['max'] + expansion_margin
+                    },
+                    'z': extracted_bounds['z']
+                }
+                self.map_bounds_original = extracted_bounds  # Use original for strict drift detection
+                self.map_bounds = expanded_bounds  # Use expanded for display
+                self.log_message(f"✅ Map bounds (đã mở rộng {expansion_margin}m): X=[{self.map_bounds_original['x']['min']:.2f}, {self.map_bounds_original['x']['max']:.2f}], Y=[{self.map_bounds_original['y']['min']:.2f}, {self.map_bounds_original['y']['max']:.2f}]")
+            else:
+                self.log_message("⚠️ Không thể trích xuất bounds từ bản đồ, tính năng phát hiện trôi sẽ bị tắt")
+                self.map_bounds = None
+                self.map_bounds_original = None
             
             # Start localization với map đã được xử lý
             self._start_localization2_with_map(map_dir_to_use)
@@ -1428,6 +1511,39 @@ class Localization2Tab(ttk.Frame):
                     break
                 
                 line_stripped = line.strip()
+                line_lower = line_stripped.lower()
+                
+                # Detect global localization events (from Recorder)
+                # NOTE: "global match map id" chỉ là match ban đầu, chưa chắc đã thành công
+                # Chỉ reset fail counter khi thực sự applied/successful
+                if ("applied global localization" in line_lower or 
+                    "global localization successfully" in line_lower):
+                    # Global localization actually succeeded
+                    self.last_global_localization_time = time.time()
+                    self.global_localization_fail_count = 0  # Reset fail counter on success
+                    self.log_message("   🔍 Phát hiện global localization thành công, tăng threshold drift detection tạm thời...")
+                
+                # Detect global localization failures (bao gồm cả khi match nhưng bị reject sau ICP)
+                elif ("rejecting global localization" in line_lower or
+                      "global localization rejected" in line_lower or
+                      "gicp fallback rejected" in line_lower or
+                      ("global match map id" in line_lower and "rejecting" in line_lower)):
+                    # Global localization failed
+                    self.global_localization_fail_count += 1
+                    self.log_message(f"   ⚠️ Phát hiện global localization fail (Lần {self.global_localization_fail_count}/{self.global_localization_fail_threshold})")
+                    
+                    # Check if we should restart due to repeated failures
+                    if self.global_localization_fail_count >= self.global_localization_fail_threshold:
+                        self.log_message(f"   🚨 Global localization fail {self.global_localization_fail_count} lần liên tục, khởi động lại localization...")
+                        # Schedule restart on main thread
+                        self.after(0, self._restart_on_global_loc_fail)
+                
+                # Detect khi có "global match map id" nhưng sau đó bị reject (pattern: match -> reject)
+                # Pattern này xảy ra khi ScanContext match nhưng ICP refinement fail
+                elif "global match map id" in line_lower:
+                    # Chỉ log, không reset counter vì chưa chắc thành công
+                    # Sẽ đợi xem có "rejecting" sau đó không
+                    pass
                 
                 # Filter warnings về missing fields (chỉ hiển thị summary)
                 should_filter = False
@@ -1468,6 +1584,7 @@ class Localization2Tab(ttk.Frame):
     def stop_localization2(self):
         """Stop Localization2"""
         self.log_message("Stopping Localization2...")
+        self.user_stopped = True  # Mark as user stopped
         
         # Stop ROS listener
         self.stop_ros_listener()
@@ -1561,12 +1678,26 @@ class Localization2Tab(ttk.Frame):
             self.is_ros_running = False
     
     def update_localization_data(self, msg):
-        """Update localization data from ROS message"""
+        """Update localization data from ROS message (with drift detection from Recorder)"""
         try:
             # Extract data from message
             pos = msg.pose.pose.position
             orient = msg.pose.pose.orientation
             vel = msg.twist.twist.linear
+            
+            # Store current localization data (from Recorder)
+            current_time = time.time()
+            self.current_localization = {
+                'position': {'x': pos.x, 'y': pos.y, 'z': pos.z},
+                'orientation': {'x': orient.x, 'y': orient.y, 'z': orient.z, 'w': orient.w},
+                'velocity': {'x': vel.x, 'y': vel.y, 'z': vel.z},
+                'timestamp': msg.header.stamp,
+                'frame_id': msg.header.frame_id
+            }
+            
+            # Drift detection (from Recorder)
+            if self.is_localization_running and self.map_bounds:
+                self._check_drift_detection(pos.x, pos.y, pos.z, msg.header.frame_id, current_time)
             
             # Update UI (must be done in main thread)
             self.after(0, lambda: self._update_ui_data(
@@ -1578,6 +1709,8 @@ class Localization2Tab(ttk.Frame):
         except Exception as e:
             if ROS2_AVAILABLE and self.ros_node:
                 self.ros_node.get_logger().error(f'Error updating localization data: {e}')
+            else:
+                self.log_message(f"Error updating localization data: {e}")
     
     def _update_ui_data(self, px, py, pz, ox, oy, oz, ow, vx, vy, vz, stamp):
         """Update UI with localization data (called from main thread)"""
@@ -1594,4 +1727,303 @@ class Localization2Tab(ttk.Frame):
                 self.timestamp_var.set("N/A")
         except Exception as e:
             self.log_message(f"Error updating UI: {e}")
+    
+    def _extract_map_bounds(self, map_path):
+        """Extract map bounds from PCD file(s) (from Recorder)"""
+        try:
+            if not HAS_OPEN3D:
+                self.log_message("⚠️ open3d không có sẵn, không thể trích xuất bounds")
+                return None
+            
+            import numpy as np
+            map_path_obj = Path(map_path)
+            self.log_message(f"📏 Đang trích xuất bounds từ: {map_path}")
+            
+            # Handle FAST-Localization map directory (with pcd/ subfolder)
+            if map_path_obj.is_dir():
+                pcd_dir = map_path_obj / "pcd"
+                if pcd_dir.exists() and pcd_dir.is_dir():
+                    # Get all PCD files in the directory
+                    pcd_files = list(pcd_dir.glob("*.pcd"))
+                    self.log_message(f"   Tìm thấy {len(pcd_files)} file PCD trong thư mục pcd/")
+                    
+                    if not pcd_files:
+                        self.log_message("⚠️ Không tìm thấy file PCD trong thư mục map")
+                        return None
+                    
+                    # Calculate bounds from all PCD files
+                    all_min_x = []
+                    all_max_x = []
+                    all_min_y = []
+                    all_max_y = []
+                    all_min_z = []
+                    all_max_z = []
+                    
+                    successful_reads = 0
+                    for pcd_file in pcd_files[:10]:  # Limit to first 10 files for speed
+                        try:
+                            pcd = o3d.io.read_point_cloud(str(pcd_file))
+                            if len(pcd.points) > 0:
+                                points = np.asarray(pcd.points)
+                                all_min_x.append(float(np.min(points[:, 0])))
+                                all_max_x.append(float(np.max(points[:, 0])))
+                                all_min_y.append(float(np.min(points[:, 1])))
+                                all_max_y.append(float(np.max(points[:, 1])))
+                                all_min_z.append(float(np.min(points[:, 2])))
+                                all_max_z.append(float(np.max(points[:, 2])))
+                                successful_reads += 1
+                        except:
+                            continue
+                    
+                    self.log_message(f"   Đọc thành công {successful_reads}/{min(len(pcd_files), 10)} file PCD")
+                    
+                    if all_min_x:
+                        result = {
+                            'x': {'min': min(all_min_x), 'max': max(all_max_x)},
+                            'y': {'min': min(all_min_y), 'max': max(all_max_y)},
+                            'z': {'min': min(all_min_z), 'max': max(all_max_z)}
+                        }
+                        self.log_message(f"✅ Tổng hợp bounds từ {successful_reads} file: X=[{result['x']['min']:.2f}, {result['x']['max']:.2f}], Y=[{result['y']['min']:.2f}, {result['y']['max']:.2f}]")
+                        return result
+                    else:
+                        self.log_message("⚠️ Không đọc được bounds từ bất kỳ file PCD nào")
+                        return None
+                else:
+                    self.log_message("⚠️ Không tìm thấy thư mục pcd/")
+                    return None
+            
+            self.log_message(f"⚠️ Đường dẫn không hợp lệ: {map_path}")
+            return None
+            
+        except Exception as e:
+            self.log_message(f"❌ Lỗi khi trích xuất bounds từ map: {e}")
+            import traceback
+            self.log_message(f"   Traceback: {traceback.format_exc()}")
+            return None
+    
+    def _check_drift_detection(self, pos_x, pos_y, pos_z, frame_id, current_time):
+        """Check for drift detection (from Recorder)"""
+        try:
+            # Check if we're past initialization grace period
+            if current_time - self.localization_start_time < self.initialization_grace_period:
+                return  # Still in grace period
+            
+            # Check if position is outside bounds
+            is_outside = False
+            if self.map_bounds_original:
+                bounds_to_check = self.map_bounds_original
+            else:
+                bounds_to_check = self.map_bounds
+            
+            if bounds_to_check:
+                if (pos_x < bounds_to_check['x']['min'] or pos_x > bounds_to_check['x']['max'] or
+                    pos_y < bounds_to_check['y']['min'] or pos_y > bounds_to_check['y']['max']):
+                    is_outside = True
+            
+            # Calculate how far outside bounds
+            x_outside = 0
+            y_outside = 0
+            if is_outside and bounds_to_check:
+                if pos_x < bounds_to_check['x']['min']:
+                    x_outside = bounds_to_check['x']['min'] - pos_x
+                elif pos_x > bounds_to_check['x']['max']:
+                    x_outside = pos_x - bounds_to_check['x']['max']
+                if pos_y < bounds_to_check['y']['min']:
+                    y_outside = bounds_to_check['y']['min'] - pos_y
+                elif pos_y > bounds_to_check['y']['max']:
+                    y_outside = pos_y - bounds_to_check['y']['max']
+            
+            max_outside = max(x_outside, y_outside) if is_outside else 0
+            
+            # Detect drift within bounds: check for position jumps or abnormal speed
+            position_jump_detected = False
+            abnormal_speed_detected = False
+            if not is_outside and self.last_position is not None:
+                time_diff = current_time - self.last_position['timestamp']
+                if time_diff > 0:
+                    dx = pos_x - self.last_position['x']
+                    dy = pos_y - self.last_position['y']
+                    dz = pos_z - self.last_position['z']
+                    distance_moved = (dx**2 + dy**2 + dz**2)**0.5
+                    speed_calculated = distance_moved / time_diff
+                    
+                    # Update speed history for adaptive threshold
+                    if self.adaptive_speed_threshold_enabled:
+                        self.speed_history.append(speed_calculated)
+                        if len(self.speed_history) > self.speed_history_max_size:
+                            self.speed_history.pop(0)
+                        
+                        if len(self.speed_history) >= self.min_speed_samples:
+                            import numpy as np
+                            speeds_array = np.array(self.speed_history)
+                            mean_speed = np.mean(speeds_array)
+                            std_speed = np.std(speeds_array)
+                            adaptive_threshold = mean_speed + self.speed_threshold_multiplier * std_speed
+                            self.max_reasonable_speed = max(adaptive_threshold, 2.0)
+                    
+                    # Detect position jump
+                    if distance_moved > self.position_jump_threshold:
+                        position_jump_detected = True
+                        self.position_jump_count += 1
+                        self.log_message(f"⚠️ Phát hiện position jump: di chuyển {distance_moved:.2f}m trong {time_diff:.2f}s")
+                    
+                    # Detect abnormal speed
+                    elif speed_calculated > self.max_reasonable_speed:
+                        abnormal_speed_detected = True
+                        self.position_jump_count += 1
+                        self.log_message(f"⚠️ Phát hiện tốc độ bất thường: {speed_calculated:.2f}m/s")
+                    else:
+                        if self.position_jump_count > 0:
+                            self.position_jump_count = 0
+            
+            # Update last position
+            self.last_position = {
+                'x': pos_x,
+                'y': pos_y,
+                'z': pos_z,
+                'timestamp': current_time
+            }
+            
+            # Check drift if actually outside bounds OR position jump detected OR global localization fail nhiều lần
+            # Thêm check global localization fail như một dấu hiệu drift
+            global_loc_fail_drift = self.global_localization_fail_count >= self.global_localization_fail_threshold
+            
+            if is_outside or position_jump_detected or (abnormal_speed_detected and self.position_jump_count >= self.position_jump_threshold_count) or global_loc_fail_drift:
+                self.out_of_bounds_count += 1
+                
+                if is_outside:
+                    self.log_message(f"⚠️ CẢNH BÁO: Thiết bị đã trôi ra ngoài bản đồ! (Lần {self.out_of_bounds_count}/{self.out_of_bounds_threshold})")
+                    self.log_message(f"   📍 Vị trí: ({pos_x:.2f}, {pos_y:.2f}, {pos_z:.2f})")
+                    self.log_message(f"   🚨 Trôi ra ngoài: X={x_outside:.2f}m, Y={y_outside:.2f}m (tối đa: {max_outside:.2f}m)")
+                elif global_loc_fail_drift:
+                    self.log_message(f"⚠️ CẢNH BÁO: Global localization fail {self.global_localization_fail_count} lần liên tục - dấu hiệu drift!")
+                    self.log_message(f"   📍 Vị trí: ({pos_x:.2f}, {pos_y:.2f}, {pos_z:.2f})")
+                
+                # Determine restart condition
+                should_restart = False
+                
+                # Check if we're in grace period after global localization
+                time_since_global_loc = current_time - self.last_global_localization_time if self.last_global_localization_time > 0 else float('inf')
+                in_global_loc_grace = time_since_global_loc < self.global_localization_grace_period
+                
+                # Check if we recently restarted due to drift
+                time_since_drift_restart = current_time - self.last_drift_restart_time if self.last_drift_restart_time > 0 else float('inf')
+                in_drift_restart_window = self.restart_due_to_drift and time_since_drift_restart < self.drift_restart_window
+                
+                # Use adaptive threshold
+                if in_drift_restart_window:
+                    drift_threshold = 0.5
+                elif in_global_loc_grace:
+                    drift_threshold = self.drift_threshold_after_global_loc
+                else:
+                    drift_threshold = 1.0
+                
+                # Check if should restart
+                # Priority 1: Global localization fail nhiều lần (dấu hiệu drift rõ ràng)
+                if global_loc_fail_drift:
+                    should_restart = True
+                    self.log_message(f"   🚨 PHÁT HIỆN DRIFT: Global localization fail {self.global_localization_fail_count} lần liên tục, khởi động lại...")
+                # Priority 2: Outside bounds với drift lớn
+                elif is_outside and max_outside > drift_threshold:
+                    if not in_global_loc_grace:
+                        should_restart = True
+                        self.log_message(f"   🚨 PHÁT HIỆN DRIFT: {max_outside:.2f}m ngoài bounds, khởi động lại...")
+                # Priority 3: Position jump hoặc abnormal speed
+                elif (position_jump_detected or abnormal_speed_detected) and self.position_jump_count >= self.position_jump_threshold_count:
+                    if not in_global_loc_grace:
+                        should_restart = True
+                        self.log_message(f"   🚨 PHÁT HIỆN DRIFT TRONG BOUNDS: {self.position_jump_count} lần liên tục, khởi động lại...")
+                # Priority 4: Outside bounds nhiều lần liên tục
+                elif is_outside and not in_global_loc_grace and self.out_of_bounds_count >= self.out_of_bounds_threshold:
+                    should_restart = True
+                    self.log_message(f"   ⚠️ Đã phát hiện {self.out_of_bounds_count} lần liên tục, khởi động lại...")
+                
+                if should_restart:
+                    with self.restart_lock:
+                        if not self.is_restarting:
+                            self.out_of_bounds_detected = True
+                            self.log_message(f"   🚨 KÍCH HOẠT KHỞI ĐỘNG LẠI LOCALIZATION...")
+                            self.after(0, self._check_and_restart_localization)
+            elif not is_outside and not position_jump_detected and not abnormal_speed_detected:
+                # Reset counter when back in bounds
+                if self.out_of_bounds_count > 0:
+                    self.out_of_bounds_count = 0
+                if self.position_jump_count > 0:
+                    self.position_jump_count = 0
+                
+                # Reset drift restart flag if stable
+                if self.restart_due_to_drift:
+                    time_since_drift_restart = current_time - self.last_drift_restart_time if self.last_drift_restart_time > 0 else float('inf')
+                    if time_since_drift_restart > self.drift_restart_window:
+                        self.restart_due_to_drift = False
+                
+                if self.out_of_bounds_detected:
+                    self.out_of_bounds_detected = False
+                    
+        except Exception as e:
+            self.log_message(f"Error in drift detection: {e}")
+    
+    def _check_and_restart_localization(self):
+        """Check and restart localization if needed (from Recorder)"""
+        try:
+            with self.restart_lock:
+                if self.is_restarting:
+                    return
+                self.is_restarting = True
+            
+            self.log_message("🔄 Đang khởi động lại localization do drift detection...")
+            
+            # Stop current localization
+            self.stop_localization2()
+            time.sleep(2)
+            
+            # Reset flags
+            self.restart_due_to_drift = True
+            self.last_drift_restart_time = time.time()
+            self.out_of_bounds_count = 0
+            self.position_jump_count = 0
+            
+            # Restart
+            self.start_localization2()
+            
+        except Exception as e:
+            self.log_message(f"Error restarting localization: {e}")
+        finally:
+            with self.restart_lock:
+                self.is_restarting = False
+    
+    def _restart_on_global_loc_fail(self):
+        """Restart localization when global localization fails repeatedly (from Recorder)"""
+        try:
+            with self.restart_lock:
+                if self.is_restarting:
+                    self.log_message("⏳ Đang trong quá trình khởi động lại, bỏ qua yêu cầu restart do global localization fail...")
+                    return
+                self.is_restarting = True
+            
+            self.log_message("=" * 60)
+            self.log_message("🔄 Đang khởi động lại localization do global localization fail nhiều lần...")
+            self.log_message(f"   Global localization fail count: {self.global_localization_fail_count}/{self.global_localization_fail_threshold}")
+            self.log_message("=" * 60)
+            
+            # Reset fail counter và flags
+            self.global_localization_fail_count = 0
+            self.restart_due_to_drift = True
+            self.last_drift_restart_time = time.time()
+            self.out_of_bounds_count = 0
+            self.position_jump_count = 0
+            
+            # Stop current localization
+            self.stop_localization2()
+            time.sleep(2)
+            
+            # Restart
+            self.user_stopped = False  # Reset flag for restart
+            self.start_localization2()
+            
+        except Exception as e:
+            self.log_message(f"❌ Lỗi khi khởi động lại localization do global localization fail: {e}")
+        finally:
+            with self.restart_lock:
+                self.is_restarting = False
 
