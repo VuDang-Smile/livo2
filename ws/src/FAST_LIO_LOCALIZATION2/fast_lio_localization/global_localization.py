@@ -34,7 +34,7 @@ class FastLIOLocalization(Node):
                 ("scan_voxel_size", 0.1),
                 ("freq_localization", 0.5),
                 ("freq_global_map", 0.25),
-                ("localization_threshold", 0.8),
+                ("localization_threshold", 0.3),  # Giảm từ 0.8 xuống 0.3 để dễ match hơn với PCD maps từ livo2
                 ("fov", 6.28319),
                 ("fov_far", 300),
                 ("pcd_map_topic", "/map"),
@@ -153,15 +153,28 @@ class FastLIOLocalization(Node):
         scan_tobe_mapped = copy.copy(self.cur_scan)
         global_map_in_FOV = self.crop_global_map_in_FOV(pose_estimation)
         
+        # Kiểm tra xem có đủ điểm trong map FOV không
+        if len(global_map_in_FOV.points) < 100:
+            self.get_logger().warn(f"Insufficient map points in FOV: {len(global_map_in_FOV.points)} < 100")
+            return
+        
+        # Coarse alignment trước
         transformation, _ = self.registration_at_scale(scan_tobe_mapped, global_map_in_FOV, initial=pose_estimation, scale=5)
         
-        transformation, fitness = self.registration_at_scale(scan_tobe_mapped, global_map_in_FOV, initial=pose_estimation, scale=1)
+        # Fine alignment
+        transformation, fitness = self.registration_at_scale(scan_tobe_mapped, global_map_in_FOV, initial=transformation, scale=1)
         
-        if fitness > self.get_parameter("localization_threshold").value:
+        threshold = self.get_parameter("localization_threshold").value
+        self.get_logger().info(f"Global localization fitness: {fitness:.4f} (threshold: {threshold:.4f})")
+        
+        # Giảm threshold để dễ match hơn với PCD maps từ livo2
+        # Fitness càng thấp càng tốt (ICP fitness là distance error)
+        if fitness <= threshold:
             self.T_map_to_odom = transformation
             self.publish_odom(transformation)
+            self.get_logger().info(f"✅ Global localization successful! Fitness: {fitness:.4f} <= {threshold:.4f}")
         else:
-            self.get_logger().warn(f"Fitness score {fitness} less than localization threshold {self.get_parameter('localization_threshold').value}")
+            self.get_logger().warn(f"❌ Fitness score {fitness:.4f} exceeds threshold {threshold:.4f} - localization failed")
 
     def voxel_down_sample(self, pcd, voxel_size):
         # print(pcd)
@@ -197,6 +210,14 @@ class FastLIOLocalization(Node):
         self.initialized = True
         self.get_logger().info("Initial pose received.")
         
+        # Khi replay bag file, publish /map_to_odom ngay lập tức để hệ thống có thể di chuyển
+        # mà không cần đợi global localization hoàn thành (giống recorder)
+        # Set T_map_to_odom = initial_pose để hệ thống bắt đầu từ pose này
+        self.T_map_to_odom = initial_pose
+        self.publish_odom(initial_pose)
+        self.get_logger().info("Published initial pose to /map_to_odom for immediate localization (replay mode).")
+        
+        # Sau đó mới thực hiện global localization để refine pose (nếu có cur_scan)
         if self.cur_scan is not None:
             self.global_localization(initial_pose)
             

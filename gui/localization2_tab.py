@@ -857,6 +857,11 @@ class Localization2Tab(ttk.Frame):
     
     def start_localization2(self):
         """Start Localization2"""
+        # Kiểm tra nếu đang chạy hoặc đang restart
+        if self.is_localization_running:
+            self.log_message("⚠️ Localization2 đang chạy, không thể start lại")
+            return
+        
         if not self.selected_map_dir:
             messagebox.showerror("Error", "Please select a map directory first!")
             return
@@ -887,7 +892,7 @@ class Localization2Tab(ttk.Frame):
         self.log_message("Starting Localization2...")
         self.log_message(f"Map directory: {self.selected_map_dir}")
         
-        # Reset drift detection state
+        # Reset drift detection state (quan trọng để relocalization hoạt động đúng)
         self.localization_start_time = time.time()
         self.out_of_bounds_count = 0
         self.position_jump_count = 0
@@ -898,6 +903,10 @@ class Localization2Tab(ttk.Frame):
         self.restart_due_to_drift = False
         self.last_drift_restart_time = 0
         self.user_stopped = False
+        # Reset speed history để adaptive threshold được tính lại từ đầu
+        self.speed_history = []
+        # Reset position jump và speed detection để bắt đầu lại từ đầu
+        self.max_reasonable_speed = 5.0  # Reset về giá trị ban đầu
         
         # Update UI
         self.start_button.config(state=tk.DISABLED)
@@ -1488,6 +1497,10 @@ class Localization2Tab(ttk.Frame):
                 cwd=str(self.project_root)
             )
             
+            # Đảm bảo UI state được cập nhật khi process start thành công
+            # (đặc biệt quan trọng khi restart tự động)
+            self.after(0, lambda: self._update_ui_after_process_start())
+            
             # Start ROS listener
             self.start_ros_listener()
             
@@ -1567,19 +1580,33 @@ class Localization2Tab(ttk.Frame):
             if total_warnings > 10:
                 self.log_message(f"ℹ️ Suppressed {total_warnings} PCD field warnings (normal for PointXYZRGB format)")
             
-            # Process finished
-            return_code = self.localization_process.wait()
-            self.localization_process = None
-            
-            if return_code == 0:
-                self.log_message("✅ Localization2 finished successfully")
+            # Process finished - kiểm tra process trước khi wait
+            if self.localization_process:
+                try:
+                    return_code = self.localization_process.wait()
+                    if return_code == 0:
+                        self.log_message("✅ Localization2 finished successfully")
+                    else:
+                        self.log_message(f"⚠️ Localization2 finished with return code: {return_code}")
+                except Exception as e:
+                    self.log_message(f"⚠️ Error waiting for process: {e}")
+                finally:
+                    self.localization_process = None
             else:
-                self.log_message(f"⚠️ Localization2 finished with return code: {return_code}")
+                self.log_message("⚠️ Localization2 process was None")
             
         except Exception as e:
             self.log_message(f"❌ Error starting Localization2: {e}")
+            import traceback
+            self.log_message(f"   Traceback: {traceback.format_exc()}")
         finally:
-            self._reset_ui_state()
+            # Chỉ reset UI nếu không đang restart (để giữ UI state khi restart)
+            if not self.is_restarting:
+                self._reset_ui_state()
+            else:
+                # Khi restart, chỉ reset internal state, giữ UI state
+                self.is_localization_running = False
+                self.localization_process = None
     
     def stop_localization2(self):
         """Stop Localization2"""
@@ -1601,15 +1628,21 @@ class Localization2Tab(ttk.Frame):
                 time.sleep(2)
                 
                 # Force kill if still running
-                if self.localization_process.poll() is None:
+                if self.localization_process and self.localization_process.poll() is None:
                     if platform.system() == "Windows":
                         self.localization_process.kill()
                     else:
-                        os.kill(self.localization_process.pid, signal.SIGKILL)
+                        try:
+                            os.kill(self.localization_process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass  # Process already dead
                 
                 self.log_message("✅ Localization2 stopped")
             except Exception as e:
                 self.log_message(f"⚠️ Error stopping process: {e}")
+            finally:
+                # Đảm bảo reset process reference
+                self.localization_process = None
         
         # Kill any remaining localization processes
         try:
@@ -1619,7 +1652,27 @@ class Localization2Tab(ttk.Frame):
         except:
             pass
         
+        # Reset các state liên quan đến drift detection và global localization
+        # (quan trọng để khi start lại, relocalization hoạt động đúng)
+        self.out_of_bounds_count = 0
+        self.position_jump_count = 0
+        self.last_position = None
+        self.out_of_bounds_detected = False
+        self.last_global_localization_time = 0
+        self.global_localization_fail_count = 0
+        self.speed_history = []
+        self.max_reasonable_speed = 5.0
+        
         self._reset_ui_state()
+    
+    def _update_ui_after_process_start(self):
+        """Update UI state sau khi process start thành công"""
+        if self.localization_process and self.localization_process.poll() is None:
+            # Process đang chạy, cập nhật UI
+            self.start_button.config(state=tk.DISABLED)
+            self.stop_button.config(state=tk.NORMAL)
+            self.status_var.set("Running")
+            self.is_localization_running = True
     
     def _reset_ui_state(self):
         """Reset UI state"""
@@ -1964,36 +2017,85 @@ class Localization2Tab(ttk.Frame):
             self.log_message(f"Error in drift detection: {e}")
     
     def _check_and_restart_localization(self):
-        """Check and restart localization if needed (from Recorder)"""
+        """Check and restart localization if needed (from Recorder)
+        Thực hiện giống như thao tác thủ công: Stop -> đợi -> Start
+        """
         try:
+            # Thread-safe check: prevent multiple simultaneous restarts
             with self.restart_lock:
+                # Check if already restarting
                 if self.is_restarting:
+                    self.log_message("⏳ Đang trong quá trình khởi động lại, bỏ qua yêu cầu mới...")
                     return
+                
+                # Check if localization is running
+                if not self.localization_process or self.localization_process.poll() is not None:
+                    self.log_message("⚠️ Localization không đang chạy, không thể khởi động lại")
+                    return
+                
+                # Set restart flag
                 self.is_restarting = True
             
-            self.log_message("🔄 Đang khởi động lại localization do drift detection...")
-            
-            # Stop current localization
-            self.stop_localization2()
-            time.sleep(2)
-            
-            # Reset flags
+            # Mark that this restart is due to drift
             self.restart_due_to_drift = True
             self.last_drift_restart_time = time.time()
-            self.out_of_bounds_count = 0
-            self.position_jump_count = 0
             
-            # Restart
-            self.start_localization2()
+            # Restart localization in a separate thread to avoid blocking
+            # Thực hiện giống như bấm nút Stop rồi Start
+            def restart_thread():
+                try:
+                    self.log_message("🔄 Phát hiện thiết bị trôi ra ngoài bản đồ!")
+                    self.log_message("   → Thực hiện khởi động lại localization (giống như bấm Stop → Start)...")
+                    
+                    # Bước 1: Stop localization (giống như bấm nút "⏹️ Stop Localization2")
+                    self.log_message("   [1/2] Đang dừng localization (tương đương bấm nút Stop)...")
+                    
+                    # Call stop directly - it's blocking and will wait for completion
+                    self.stop_localization2()
+                    
+                    # Đợi thêm một chút để đảm bảo cleanup hoàn tất hoàn toàn
+                    # (ROS2 nodes, RViz2 có thể cần thời gian để cleanup)
+                    self.log_message("   ⏳ Đang đợi cleanup hoàn tất (5 giây)...")
+                    time.sleep(5)
+                    
+                    # Bước 2: Start localization lại (giống như bấm nút "🚀 Start Localization2")
+                    self.log_message("   [2/2] Đang khởi động lại localization (tương đương bấm nút Start)...")
+                    
+                    # Call start directly - it creates its own thread internally
+                    self.user_stopped = False  # Reset flag for restart
+                    self.start_localization2()
+                    
+                    # Reset restart flag and counters after a delay to allow start to begin
+                    time.sleep(2)
+                    with self.restart_lock:
+                        self.is_restarting = False
+                        # Reset out-of-bounds counter after successful restart
+                        self.out_of_bounds_count = 0
+                        self.out_of_bounds_detected = False
+                        self.position_jump_count = 0
+                    
+                    self.log_message("   ✅ Hoàn tất khởi động lại localization")
+                    self.log_message("   📊 Đã reset counter phát hiện drift, tiếp tục theo dõi...")
+                    
+                except Exception as e:
+                    self.log_message(f"❌ Lỗi khi khởi động lại localization: {e}")
+                    import traceback
+                    self.log_message(f"Traceback: {traceback.format_exc()}")
+                    # Reset flag on error
+                    with self.restart_lock:
+                        self.is_restarting = False
+            
+            threading.Thread(target=restart_thread, daemon=True).start()
             
         except Exception as e:
-            self.log_message(f"Error restarting localization: {e}")
-        finally:
+            self.log_message(f"❌ Lỗi khi kiểm tra khởi động lại localization: {e}")
             with self.restart_lock:
                 self.is_restarting = False
     
     def _restart_on_global_loc_fail(self):
-        """Restart localization when global localization fails repeatedly (from Recorder)"""
+        """Restart localization when global localization fails repeatedly (from Recorder)
+        Thực hiện giống như thao tác thủ công: Stop -> đợi -> Start
+        """
         try:
             with self.restart_lock:
                 if self.is_restarting:
@@ -2006,24 +2108,52 @@ class Localization2Tab(ttk.Frame):
             self.log_message(f"   Global localization fail count: {self.global_localization_fail_count}/{self.global_localization_fail_threshold}")
             self.log_message("=" * 60)
             
-            # Reset fail counter và flags
-            self.global_localization_fail_count = 0
-            self.restart_due_to_drift = True
-            self.last_drift_restart_time = time.time()
-            self.out_of_bounds_count = 0
-            self.position_jump_count = 0
+            # Restart localization in a separate thread to avoid blocking
+            # Thực hiện giống như bấm nút Stop rồi Start
+            def restart_thread():
+                try:
+                    # Reset fail counter và flags
+                    self.global_localization_fail_count = 0
+                    self.restart_due_to_drift = True
+                    self.last_drift_restart_time = time.time()
+                    self.out_of_bounds_count = 0
+                    self.position_jump_count = 0
+                    
+                    # Bước 1: Stop localization (giống như bấm nút "⏹️ Stop Localization2")
+                    self.log_message("   [1/2] Đang dừng localization (tương đương bấm nút Stop)...")
+                    self.stop_localization2()
+                    
+                    # Đợi thêm một chút để đảm bảo cleanup hoàn tất hoàn toàn
+                    # (ROS2 nodes, RViz2 có thể cần thời gian để cleanup)
+                    self.log_message("   ⏳ Đang đợi cleanup hoàn tất (5 giây)...")
+                    time.sleep(5)
+                    
+                    # Bước 2: Start localization lại (giống như bấm nút "🚀 Start Localization2")
+                    self.log_message("   [2/2] Đang khởi động lại localization (tương đương bấm nút Start)...")
+                    
+                    # Call start directly - it creates its own thread internally
+                    self.user_stopped = False  # Reset flag for restart
+                    self.start_localization2()
+                    
+                    # Reset restart flag after a delay to allow start to begin
+                    time.sleep(2)
+                    with self.restart_lock:
+                        self.is_restarting = False
+                    
+                    self.log_message("   ✅ Hoàn tất khởi động lại localization")
+                    
+                except Exception as e:
+                    self.log_message(f"❌ Lỗi khi khởi động lại localization do global localization fail: {e}")
+                    import traceback
+                    self.log_message(f"Traceback: {traceback.format_exc()}")
+                    # Reset flag on error
+                    with self.restart_lock:
+                        self.is_restarting = False
             
-            # Stop current localization
-            self.stop_localization2()
-            time.sleep(2)
-            
-            # Restart
-            self.user_stopped = False  # Reset flag for restart
-            self.start_localization2()
+            threading.Thread(target=restart_thread, daemon=True).start()
             
         except Exception as e:
             self.log_message(f"❌ Lỗi khi khởi động lại localization do global localization fail: {e}")
-        finally:
             with self.restart_lock:
                 self.is_restarting = False
 

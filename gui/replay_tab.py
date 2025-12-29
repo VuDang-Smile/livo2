@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 import os
+import time
 from functools import partial
 
 try:
@@ -313,20 +314,86 @@ class ReplayTab(ttk.Frame):
         self.log(f"⚡ Rate: {rate}x")
         self.log(f"⚙️  Loop: {'Có' if loop else 'Không'}")
         
+        # Extract và publish initial pose từ bag file để tránh global localization
+        # (giống như bên recorder - publish initial pose để hệ thống di chuyển đúng với dữ liệu bag)
+        def extract_and_publish_initial_pose():
+            """Extract và publish initial pose từ bag file để hệ thống bắt đầu ngay"""
+            try:
+                self.log("🔍 Đang extract initial pose từ bag file...")
+                self.log("   (Giống recorder: publish initial pose để hệ thống di chuyển đúng với dữ liệu bag)")
+                ws_setup = self.workspace_path / "install" / "setup.sh"
+                ros2_setup = "/opt/ros/jazzy/setup.bash"
+                
+                # Đợi một chút để ROS2 sẵn sàng (quan trọng để đảm bảo topic /initialpose có subscriber)
+                time.sleep(3.0)
+                
+                # Extract và publish initial pose
+                # Sử dụng đường dẫn trực tiếp đến script hoặc command name sau khi source
+                extract_script_path = self.workspace_path / "src" / "FAST_LIO_LOCALIZATION2" / "fast_lio_localization" / "extract_and_publish_initial_pose.py"
+                
+                # Thử dùng command name trước (nếu đã được install)
+                # Nếu không có, dùng đường dẫn trực tiếp
+                if extract_script_path.exists():
+                    extract_cmd = (
+                        f"source {ros2_setup} && "
+                        f"source {ws_setup} && "
+                        f"python3 {extract_script_path} {bag_path} --topic /Odometry --wait-time 1.0"
+                    )
+                else:
+                    # Fallback: dùng command name (nếu đã được install)
+                    extract_cmd = (
+                        f"source {ros2_setup} && "
+                        f"source {ws_setup} && "
+                        f"extract_and_publish_initial_pose {bag_path} --topic /Odometry --wait-time 1.0"
+                    )
+                
+                result = subprocess.run(
+                    extract_cmd,
+                    shell=True,
+                    executable="/bin/bash",
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    env=env
+                )
+                
+                if result.returncode == 0:
+                    self.log("✅ Đã publish initial pose từ bag file")
+                    self.log("   → Hệ thống sẽ bắt đầu ngay và di chuyển đúng với dữ liệu bag (giống recorder)")
+                    if result.stdout:
+                        for line in result.stdout.strip().split('\n'):
+                            if line.strip():
+                                self.log(f"   {line.strip()}")
+                else:
+                    self.log(f"⚠️  Không thể extract initial pose từ bag")
+                    if result.stderr:
+                        self.log(f"   Error: {result.stderr.strip()}")
+                    self.log("   → Hệ thống sẽ cần global localization hoặc sử dụng pose từ bag khi replay")
+                    
+            except subprocess.TimeoutExpired:
+                self.log("⚠️  Timeout khi extract initial pose từ bag")
+                self.log("   → Hệ thống sẽ cần global localization hoặc sử dụng pose từ bag khi replay")
+            except Exception as e:
+                self.log(f"⚠️  Lỗi khi extract initial pose: {e}")
+                self.log("   → Hệ thống sẽ cần global localization hoặc sử dụng pose từ bag khi replay")
+        
         try:
             # Sử dụng env để đảm bảo clean environment
             env = os.environ.copy()
             if 'ROS_DOMAIN_ID' not in env:
                 env['ROS_DOMAIN_ID'] = '0'
             
+            # Start thread để extract và publish initial pose
+            threading.Thread(target=extract_and_publish_initial_pose, daemon=True).start()
+            
+            # Sử dụng DEVNULL để tránh buffer đầy và block UI
+            # Hoặc có thể redirect ra file nếu cần log
             self.replay_process = subprocess.Popen(
                 cmd,
                 shell=True,
                 executable="/bin/bash",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                bufsize=1,
+                stdout=subprocess.DEVNULL,  # Redirect ra DEVNULL để tránh buffer đầy
+                stderr=subprocess.DEVNULL,   # Redirect ra DEVNULL để tránh buffer đầy
                 env=env
             )
             
@@ -342,7 +409,7 @@ class ReplayTab(ttk.Frame):
                 text=f"Đang replay: {bag_path_obj.name}\nRate: {rate}x | Loop: {'Có' if loop else 'Không'}"
             )
             
-            # Start thread để đọc output
+            # Start thread để monitor process (không cần đọc output nữa)
             threading.Thread(target=self.monitor_replay_process, daemon=True).start()
             
             self.log("✅ Replay đã được khởi động")
@@ -393,36 +460,31 @@ class ReplayTab(ttk.Frame):
             self.log("✅ Replay đã dừng")
     
     def monitor_replay_process(self):
-        """Monitor replay process output"""
+        """Monitor replay process - đơn giản hóa để tránh block UI"""
         if not self.replay_process:
             return
         
         try:
-            for line in iter(self.replay_process.stdout.readline, ''):
-                if not line:
-                    break
-                line = line.strip()
-                if line:
-                    # Log output
-                    if any(keyword in line.lower() for keyword in ['error', 'fatal', 'exception', 'failed']):
-                        self.log(f"❌ ERROR: {line}")
-                    elif any(keyword in line.lower() for keyword in ['warning', 'warn']):
-                        self.log(f"⚠️  WARNING: {line}")
+            # Chỉ monitor process status, không đọc output để tránh block
+            # Điều này giúp UI không bị freeze
+            while self.is_replaying and self.replay_process:
+                # Kiểm tra xem process còn chạy không (non-blocking)
+                exit_code = self.replay_process.poll()
+                if exit_code is not None:
+                    # Process đã kết thúc
+                    if exit_code != 0:
+                        self.log(f"✗ Replay đã dừng với exit code: {exit_code}")
                     else:
-                        # Log các dòng quan trọng
-                        if any(keyword in line.lower() for keyword in ['playing', 'paused', 'finished', 'topic', 'message']):
-                            self.log(line)
+                        self.log(f"✓ Replay đã hoàn thành")
+                    
+                    self.is_replaying = False
+                    self.after(0, partial(self._update_replay_stopped))
+                    break
+                
+                # Đợi một chút trước khi kiểm tra lại (non-blocking)
+                time.sleep(0.5)
         except Exception as e:
-            self.log(f"Lỗi khi đọc output: {e}")
-        
-        # Kiểm tra exit code
-        if self.replay_process.poll() is not None:
-            exit_code = self.replay_process.poll()
-            if exit_code != 0:
-                self.log(f"✗ Replay đã dừng với exit code: {exit_code}")
-            else:
-                self.log(f"✓ Replay đã hoàn thành")
-            
+            self.log(f"Lỗi khi monitor process: {e}")
             self.is_replaying = False
             self.after(0, partial(self._update_replay_stopped))
     

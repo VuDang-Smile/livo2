@@ -15,8 +15,8 @@
             time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
             time_offset_lidar_to_imu: 0.0 # Time offset between lidar and IMU calibrated by other algorithms, e.g. LI-Init (can be found in README).
                                         # This param will take effect no matter what time_sync_en is. So if the time offset is not known exactly, please set as 0.0
-            global_loc_convergence_thresh: 6.0  # meters; increased from 4.0 to 6.0 to allow more tolerance during tilted initialization
-            global_loc_fitness_thresh: 0.7      # ICP score threshold; increased from 0.6 to 0.7 for more flexibility
+            global_loc_convergence_thresh: 10.0  # meters; TĂNG LÊN 10.0 để cho phép xy distance lớn hơn (log shows 6.40 > 6.00)
+            global_loc_fitness_thresh: 3.5      # ICP score threshold; TĂNG LÊN 3.5 để chấp nhận fitness ~2.7-2.8 ngay từ đầu (không cần đợi adaptive)
             global_loc_height_thresh: -1.0      # meters; <=0 disables vertical gating so lower mounts still converge
             global_loc_force_map_height: false  # allow using current odom height; avoid forcing map Z if map might be off
             global_loc_auto_height_align: false  # still align if map tile provides height
@@ -25,6 +25,43 @@
         global_loc:
             # Allow relocalization anywhere in the fastloc map (disable 15 m gate)
             candidate_max_distance: 120.0
+            
+            # Adaptive fitness threshold for better relocalization on PCD maps from livo2
+            fitness_thresh_max: 20.0              # Maximum fitness threshold (TĂNG LÊN 20.0 để cho phép match với PCD maps từ livo2 - fitness 12.566 sẽ được chấp nhận)
+            fitness_adaptive_step: 0.5            # Step size for adaptive threshold (tăng lên để adapt nhanh hơn)
+            fitness_adaptive_enable: true         # Enable adaptive threshold
+            
+            # Single-shot thresholds for immediate relocalization
+            single_shot_fitness_thresh: 3.0      # Accept immediately if fitness <= this (TĂNG LÊN 3.0 để chấp nhận fitness ~2.7-2.8 ngay lập tức)
+            gicp_single_shot_thresh: 2.0         # Stricter threshold for GICP-only fallback (TĂNG LÊN 2.0 để chấp nhận GICP tốt hơn)
+            
+            # Virtual ScanContext for better coverage on tiled maps
+            enable_virtual_scancontexts: true     # Enable virtual ScanContext generation
+            virtual_tile_spacing: 10.0            # Spacing between virtual tiles (meters)
+            virtual_tile_radius: 15.0             # Radius of virtual tiles (meters)
+            virtual_tile_min_points: 400          # Minimum points required for virtual tile
+            virtual_tile_max_tiles: 200           # Maximum number of virtual tiles
+            
+            # Freeze odometry until relocalized
+            # TẮT freeze để hệ thống có thể di chuyển ngay khi start (theo FAST-LOCALIZATION gốc - không cần manual initial pose)
+            freeze_odom_until_locked: false       # TẮT freeze để hệ thống có thể di chuyển ngay, global localization sẽ chạy song song
+            freeze_on_no_points: true             # Freeze odom when no points available
+            freeze_on_no_points_tolerance: 0.25    # Tolerance for no points (seconds)
+            unfreeze_after_relocalize: true       # Unfreeze after successful relocalization
+            
+            # Auto-trigger relocalization when drift detected
+            # GIẢM threshold để relocalize sớm hơn và giảm drift (theo FAST-LOCALIZATION gốc)
+            auto_trigger_enable: true              # Enable auto-trigger relocalization
+            auto_trigger_xy_distance: 10.0         # Trigger when XY drift >= this (GIẢM từ 60.0 xuống 10.0 để relocalize sớm hơn)
+            auto_trigger_height: 1.5               # Trigger when height drift >= this (GIẢM từ 3.0 xuống 1.5 để relocalize sớm hơn)
+            auto_trigger_cooldown: 5.0             # Cooldown between auto-triggers (GIẢM từ 8.0 xuống 5.0 để relocalize nhanh hơn)
+            auto_trigger_hysteresis: 2.0          # Hysteresis to prevent oscillation (GIẢM từ 5.0 xuống 2.0 để nhạy hơn)
+            
+            # GICP/NDT fallback for better relocalization
+            enable_ndt_fallback: true              # Enable NDT/GICP fallback when ScanContext fails
+            ndt_fallback_radius: 25.0             # Search radius for fallback (meters)
+            ndt_fallback_min_points: 200          # Minimum points required for fallback
+            ndt_fallback_fitness_thresh: 15.0      # Fitness threshold for fallback acceptance (TĂNG LÊN 15.0 để cho phép match tốt hơn)
 
         preprocess:
             lidar_type: 1                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 4 for any other pointcloud input

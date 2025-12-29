@@ -1454,11 +1454,11 @@ void global_localization()
             Eigen::Matrix4d T_corr = Eigen::Matrix4d::Identity();
             pcl::IterativeClosestPoint<PointType, PointType> icp;
             
-            // Coarse alignment first
-            icp.setMaxCorrespondenceDistance(5.0);
-            icp.setMaximumIterations(50);
-            icp.setTransformationEpsilon(1e-3);
-            icp.setEuclideanFitnessEpsilon(1e-3);
+            // Coarse alignment first - tăng tolerance cho PCD maps từ livo2
+            icp.setMaxCorrespondenceDistance(10.0);  // Tăng từ 5.0 lên 10.0 để cho phép match tốt hơn
+            icp.setMaximumIterations(100);  // Tăng từ 50 lên 100 để refine tốt hơn
+            icp.setTransformationEpsilon(1e-4);  // Giảm epsilon để chính xác hơn
+            icp.setEuclideanFitnessEpsilon(1e-4);  // Giảm epsilon để chính xác hơn
             icp.setInputSource(current_init_pc);
             icp.setInputTarget(current_loop_pc);
             auto unused = std::make_shared<pcl::PointCloud<PointType>>();
@@ -1467,8 +1467,8 @@ void global_localization()
             pcl::transformPointCloud(*current_init_pc, *current_init_pc, T_corr_current);
             T_corr = T_corr_current * T_init_sc;
 
-            // Fine alignment with tighter correspondence
-            icp.setMaxCorrespondenceDistance(1.0);
+            // Fine alignment with tighter correspondence - tăng tolerance cho PCD maps
+            icp.setMaxCorrespondenceDistance(2.0);  // Tăng từ 1.0 lên 2.0 để cho phép match tốt hơn
             icp.setInputSource(current_init_pc);
             icp.setInputTarget(current_loop_pc);
             icp.align(*unused);
@@ -1910,6 +1910,46 @@ public:
             sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, 20000, standard_pcl_cbk);
         }
         sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, imu_cbk);
+        // Subscribe to /map_to_odom để nhận initial pose từ bag file khi replay
+        // Khi nhận được, set global_localization_finish = true ngay để hệ thống có thể di chuyển
+        // Khi replay: Python global localization publish /map_to_odom ngay từ initial pose trong bag
+        // Khi không replay: C++ global localization sẽ tự xử lý, Python chỉ refine
+        sub_map_to_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            "/map_to_odom", 10,
+            [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
+                // Khi nhận /map_to_odom từ global_localization.py
+                // Nếu chưa có global localization, set ngay để hệ thống có thể di chuyển (đặc biệt khi replay)
+                std::unique_lock<std::mutex> lock_state(global_localization_finish_state_mutex);
+                if (!global_localization_finish)
+                {
+                    // Convert odom pose to transformation matrix
+                    Eigen::Vector3d pos(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
+                    Eigen::Quaterniond quat(msg->pose.pose.orientation.w, msg->pose.pose.orientation.x, 
+                                            msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
+                    Eigen::Matrix4d T_map_to_odom = Eigen::Matrix4d::Identity();
+                    T_map_to_odom.block<3, 3>(0, 0) = quat.toRotationMatrix();
+                    T_map_to_odom.block<3, 1>(0, 3) = pos;
+                    
+                    // Khi replay: Python global localization publish /map_to_odom ngay từ initial pose trong bag
+                    // → Set global_localization_finish = true ngay để hệ thống có thể di chuyển mà không cần đợi C++ global localization
+                    // Khi không replay: C++ global localization sẽ tự xử lý, nhưng nếu Python publish trước thì cũng OK
+                    global_localization_finish = true;
+                    
+                    // Set init_result để hệ thống có thể sử dụng pose từ Python global localization
+                    if (!position_init.empty())
+                    {
+                        init_result.first = 0; // Use first position in history
+                    }
+                    else
+                    {
+                        init_result.first = -1; // Mark as not from C++ global localization (replay mode)
+                    }
+                    init_result.second = T_map_to_odom;
+                    
+                    RCLCPP_INFO(this->get_logger(), 
+                               "Received /map_to_odom from Python global localization - enabling immediate localization (bypassing C++ global localization wait)");
+                }
+            });
         pubLaserCloudFull_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
         pubLaserCloudFull_body_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
         pubLaserCloudEffect_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_effected", 20);
@@ -2502,6 +2542,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc_;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr sub_pcl_livox_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_map_to_odom_;
 
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;

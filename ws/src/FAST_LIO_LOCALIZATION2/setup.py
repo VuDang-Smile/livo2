@@ -17,6 +17,7 @@ setup(
         "console_scripts": [
             "global_localization = fast_lio_localization.global_localization:main",
             "publish_initial_pose = fast_lio_localization.publish_initial_pose:main",
+            "extract_and_publish_initial_pose = fast_lio_localization.extract_and_publish_initial_pose:main",
             "transform_fusion = fast_lio_localization.transform_fusion:main",
             "invert_livox_scan = fast_lio_localization.invert_livox_scan:main",
         ],
