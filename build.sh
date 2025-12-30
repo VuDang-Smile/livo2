@@ -239,7 +239,7 @@ build_packages() {
     echo ""
     
     # Chuyển đến thư mục ws
-    cd "$WS_DIR"
+    cd "$WS_DIR" || return 1
     
     # Build với colcon
     local packages_arg="--packages-select"
@@ -250,11 +250,11 @@ build_packages() {
     echo -e "${BLUE}Chạy lệnh: colcon build $packages_arg --symlink-install${NC}"
     echo ""
     
-    # Tắt set -e tạm thời để bắt lỗi build
+    # Tắt set -e tạm thời để bắt lỗi build và hiển thị đầy đủ error messages
     set +e
-    colcon build $packages_arg --symlink-install
+    colcon build $packages_arg --symlink-install 2>&1
     local build_status=$?
-    set -e
+    # Không bật lại set -e ở đây để tránh exit sớm
     
     echo ""
     if [ $build_status -eq 0 ]; then
@@ -264,6 +264,7 @@ build_packages() {
     else
         echo -e "${RED}========================================${NC}"
         echo -e "${RED}Build thất bại!${NC}"
+        echo -e "${RED}Vui lòng kiểm tra các thông báo lỗi ở trên.${NC}"
         echo -e "${RED}========================================${NC}"
     fi
     
@@ -287,11 +288,11 @@ main() {
     
     # Build packages
     echo -e "${YELLOW}Build packages${NC}"
-    # Tắt set -e tạm thời để không thoát ngay khi build fail
+    # Tắt set -e để không thoát ngay khi build fail và có thể hiển thị đầy đủ errors
     set +e
     build_packages
     local build_result=$?
-    set -e
+    # Giữ set +e để đảm bảo phần "press enter to exit" luôn được thực thi
     
     # Tạm dừng trước khi thoát (luôn hiển thị dù build thành công hay thất bại)
     echo ""
@@ -299,9 +300,12 @@ main() {
     if [ $build_result -eq 0 ]; then
         echo -e "${GREEN}Nhấn Enter để thoát...${NC}"
     else
-        echo -e "${YELLOW}Nhấn Enter để thoát...${NC}"
+        echo -e "${RED}Nhấn Enter để thoát...${NC}"
     fi
-    read
+    read -r
+    
+    # Trả về exit code tương ứng với kết quả build
+    exit $build_result
 }
 
 # Chạy main function
