@@ -64,7 +64,7 @@
       dept_err: 0.02
       beam_err: 0.05
       min_eigen_value: 0.002
-      voxel_size: 0.50  # Balanced size - not too small to avoid memory explosion
+      voxel_size: 0.15  # Balanced size - not too small to avoid memory explosion
       max_layer: 2  # Keep at 2 to avoid excessive memory usage
       max_points_num: 50  # Reduced from default to save memory
       layer_init_num: [5, 5, 5, 5, 5]
@@ -102,7 +102,7 @@
       pcd_save_en: true
       colmap_output_en: false
       filter_size_pcd: 0.10  # Balanced filter size for PCD output
-      interval: -1
+      interval: 1000
 
     camera:
       model: Equirectangular

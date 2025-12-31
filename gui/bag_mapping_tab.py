@@ -199,6 +199,14 @@ class BagMappingTab(ttk.Frame):
         )
         self.stop_btn.pack(side=tk.LEFT, padx=5)
         
+        # Merge PCD button
+        self.merge_pcd_btn = ttk.Button(
+            control_frame,
+            text="🔗 Merge PCD",
+            command=self.merge_pcd_files
+        )
+        self.merge_pcd_btn.pack(side=tk.LEFT, padx=5)
+        
         # Status label
         self.status_label = ttk.Label(
             control_frame,
@@ -225,6 +233,105 @@ class BagMappingTab(ttk.Frame):
         # Initial log
         self.log("✅ Bag Mapping Tab đã sẵn sàng")
         self.log("📝 Vui lòng chọn bag file và config file để bắt đầu mapping")
+    
+    def merge_pcd_files(self):
+        """Gộp tất cả các file PCD trong thư mục Log/PCD thành một file lớn"""
+        pcd_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "PCD"
+        
+        if not pcd_dir.exists():
+            messagebox.showerror("Lỗi", f"Thư mục PCD không tồn tại: {pcd_dir}")
+            self.log(f"❌ Thư mục PCD không tồn tại: {pcd_dir}")
+            return
+        
+        # Tìm tất cả file PCD (bỏ qua file merged nếu có)
+        pcd_files = sorted([f for f in pcd_dir.glob("*.pcd") if f.name != "merged_all.pcd"])
+        
+        if not pcd_files:
+            messagebox.showwarning("Cảnh báo", f"Không tìm thấy file PCD nào trong thư mục: {pcd_dir}")
+            self.log(f"⚠️ Không tìm thấy file PCD nào trong: {pcd_dir}")
+            return
+        
+        self.log("=" * 60)
+        self.log(f"🔗 Bắt đầu merge {len(pcd_files)} file PCD...")
+        self.log(f"📁 Thư mục: {pcd_dir}")
+        
+        # Disable button during merge
+        self.merge_pcd_btn.config(state=tk.DISABLED)
+        
+        try:
+            # Kiểm tra open3d
+            try:
+                import open3d as o3d
+            except ImportError:
+                error_msg = (
+                    "Thư viện open3d chưa được cài đặt.\n\n"
+                    "Vui lòng cài đặt bằng lệnh:\n"
+                    "pip install open3d\n\n"
+                    "Hoặc thêm vào requirements.txt và cài đặt lại."
+                )
+                messagebox.showerror("Thiếu thư viện", error_msg)
+                self.log("❌ open3d chưa được cài đặt. Vui lòng cài đặt: pip install open3d")
+                return
+            
+            merged_cloud = None
+            total_points = 0
+            
+            # Sử dụng open3d để merge
+            for i, pcd_file in enumerate(pcd_files, 1):
+                try:
+                    self.log(f"📖 Đang đọc file {i}/{len(pcd_files)}: {pcd_file.name}")
+                    cloud = o3d.io.read_point_cloud(str(pcd_file))
+                    
+                    if len(cloud.points) == 0:
+                        self.log(f"⚠️ File {pcd_file.name} rỗng, bỏ qua")
+                        continue
+                    
+                    if merged_cloud is None:
+                        merged_cloud = cloud
+                    else:
+                        merged_cloud += cloud
+                    
+                    total_points += len(cloud.points)
+                    self.log(f"   ✓ Đã thêm {len(cloud.points):,} điểm từ {pcd_file.name}")
+                    
+                except Exception as e:
+                    self.log(f"❌ Lỗi khi đọc {pcd_file.name}: {e}")
+                    continue
+            
+            if merged_cloud is None or len(merged_cloud.points) == 0:
+                messagebox.showerror("Lỗi", "Không thể merge PCD files. Không có điểm nào hợp lệ.")
+                self.log("❌ Không có điểm nào để merge")
+                return
+            
+            # Lưu file merged
+            output_file = pcd_dir / "merged_all.pcd"
+            self.log(f"💾 Đang lưu file merged: {output_file.name}")
+            o3d.io.write_point_cloud(str(output_file), merged_cloud)
+            
+            # Kiểm tra kết quả
+            if output_file.exists():
+                size_mb = output_file.stat().st_size / (1024 * 1024)
+                self.log("=" * 60)
+                self.log(f"✅ Merge PCD thành công!")
+                self.log(f"📁 File output: {output_file.name}")
+                self.log(f"📊 Tổng số điểm: {total_points:,}")
+                self.log(f"💾 Kích thước file: {size_mb:.2f} MB")
+                self.log("=" * 60)
+                messagebox.showinfo("Thành công", 
+                    f"Đã merge {len(pcd_files)} file PCD thành công!\n\n"
+                    f"File output: {output_file.name}\n"
+                    f"Tổng số điểm: {total_points:,}\n"
+                    f"Kích thước: {size_mb:.2f} MB")
+            else:
+                raise Exception("File output không được tạo")
+                
+        except Exception as e:
+            error_msg = f"Lỗi khi merge PCD files: {e}"
+            self.log(f"❌ {error_msg}")
+            messagebox.showerror("Lỗi", error_msg)
+        finally:
+            # Re-enable button
+            self.merge_pcd_btn.config(state=tk.NORMAL)
     
     def set_default_config(self):
         """Set default config file"""
