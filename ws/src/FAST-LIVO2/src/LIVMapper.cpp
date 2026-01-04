@@ -1956,21 +1956,37 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
               pcl_wait_save->width = pcl_wait_save->points.size();
               pcl_wait_save->height = 1;
             }
-            // Save with binary format to preserve RGB color information
-            int result = pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);
+            
+            // Transform to local frame before saving (giống recorder project)
+            // Recorder project: transform về local frame trước khi save để khi load có thể transform về global
+            Eigen::Quaterniond q(_state.rot_end);
+            Eigen::Vector3d p(_state.pos_end[0], _state.pos_end[1], _state.pos_end[2]);
+            
+            // Create transformation matrix T (global to local)
+            Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+            T.block<3, 3>(0, 0) = q.toRotationMatrix();
+            T.block<3, 1>(0, 3) = p;
+            Eigen::Matrix4f T_inv = T.inverse().cast<float>();
+            
+            // Transform point cloud to local frame
+            PointCloudXYZRGB::Ptr local_cloud(new PointCloudXYZRGB());
+            pcl::transformPointCloud(*pcl_wait_save, *local_cloud, T_inv);
+            
+            // Save with binary format to preserve RGB color information (in local frame)
+            int result = pcd_writer.writeBinary(all_points_dir, *local_cloud);
             if (result == 0) {
-              cout << GREEN << "✓ PCD file saved with RGB colors: " << all_points_dir 
-                   << " (" << pcl_wait_save->points.size() << " points)" << RESET << endl;
+              cout << GREEN << "✓ PCD file saved with RGB colors (local frame): " << all_points_dir 
+                   << " (" << local_cloud->points.size() << " points)" << RESET << endl;
             } else {
               cout << RED << "✗ Failed to save PCD file: " << all_points_dir << RESET << endl;
             }
-          }
-          
-          // Generate ScanContext for RGB point cloud
-          if (pcl_wait_save->points.size() > 0) {
+            
+            // Generate ScanContext for RGB point cloud (từ local frame - giống recorder)
+            // ScanContext được generate từ local_cloud (đã transform về local frame)
+            // Convert local_cloud (PointXYZRGB) to PointXYZINormal for ScanContext
             pcl::PointCloud<pcl::PointXYZINormal>::Ptr sc_cloud(new pcl::PointCloud<pcl::PointXYZINormal>);
-            sc_cloud->points.reserve(pcl_wait_save->points.size());
-            for (const auto& pt : pcl_wait_save->points) {
+            sc_cloud->points.reserve(local_cloud->points.size());
+            for (const auto& pt : local_cloud->points) {
               pcl::PointXYZINormal sc_pt;
               sc_pt.x = pt.x;
               sc_pt.y = pt.y;
@@ -1985,7 +2001,7 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
             sc_cloud->height = 1;
             sc_cloud->is_dense = false;
             
-            // Generate scancontext
+            // Generate scancontext từ local frame (giống recorder)
             Eigen::MatrixXd sc = scManager.makeScancontext(*sc_cloud);
             Eigen::MatrixXd ringkey = scManager.makeRingkeyFromScancontext(sc);
             Eigen::MatrixXd sectorkey = scManager.makeSectorkeyFromScancontext(sc);
@@ -1996,7 +2012,7 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
             // Save scancontext to file
             std::string sc_file_path = map_dir + "scancontext/" + std::to_string(pcd_index) + ".sc";
             if (scManager.saveScancontextToFile(sc_file_path, sc, ringkey, sectorkey)) {
-              std::cout << GREEN << "ScanContext saved to file: " << sc_file_path << RESET << std::endl;
+              std::cout << GREEN << "ScanContext saved to file (local frame): " << sc_file_path << RESET << std::endl;
             }
           }
           
@@ -2033,13 +2049,28 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
         }
         else
         {
-          pcd_writer.writeBinary(all_points_dir, *pcl_wait_save_intensity);
+          // Transform to local frame before saving (giống recorder project)
+          Eigen::Quaterniond q(_state.rot_end);
+          Eigen::Vector3d p(_state.pos_end[0], _state.pos_end[1], _state.pos_end[2]);
           
-          // Generate ScanContext for intensity point cloud
+          // Create transformation matrix T (global to local)
+          Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+          T.block<3, 3>(0, 0) = q.toRotationMatrix();
+          T.block<3, 1>(0, 3) = p;
+          Eigen::Matrix4f T_inv = T.inverse().cast<float>();
+          
+          // Transform point cloud to local frame
+          PointCloudXYZI::Ptr local_cloud_intensity(new PointCloudXYZI());
+          pcl::transformPointCloud(*pcl_wait_save_intensity, *local_cloud_intensity, T_inv);
+          
+          pcd_writer.writeBinary(all_points_dir, *local_cloud_intensity);
+          
+          // Generate ScanContext for intensity point cloud (từ local frame - giống recorder)
+          // ScanContext được generate từ local_cloud_intensity (đã transform về local frame)
           if (pcl_wait_save_intensity->points.size() > 0) {
             pcl::PointCloud<pcl::PointXYZINormal>::Ptr sc_cloud(new pcl::PointCloud<pcl::PointXYZINormal>);
-            sc_cloud->points.reserve(pcl_wait_save_intensity->points.size());
-            for (const auto& pt : pcl_wait_save_intensity->points) {
+            sc_cloud->points.reserve(local_cloud_intensity->points.size());
+            for (const auto& pt : local_cloud_intensity->points) {
               pcl::PointXYZINormal sc_pt;
               sc_pt.x = pt.x;
               sc_pt.y = pt.y;
@@ -2054,7 +2085,7 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
             sc_cloud->height = 1;
             sc_cloud->is_dense = false;
             
-            // Generate scancontext
+            // Generate scancontext từ local frame (giống recorder)
             Eigen::MatrixXd sc = scManager.makeScancontext(*sc_cloud);
             Eigen::MatrixXd ringkey = scManager.makeRingkeyFromScancontext(sc);
             Eigen::MatrixXd sectorkey = scManager.makeSectorkeyFromScancontext(sc);
@@ -2065,7 +2096,7 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
             // Save scancontext to file
             std::string sc_file_path = map_dir + "scancontext/" + std::to_string(pcd_index) + ".sc";
             if (scManager.saveScancontextToFile(sc_file_path, sc, ringkey, sectorkey)) {
-              std::cout << GREEN << "ScanContext saved to file: " << sc_file_path << RESET << std::endl;
+              std::cout << GREEN << "ScanContext saved to file (local frame): " << sc_file_path << RESET << std::endl;
             }
           }
           

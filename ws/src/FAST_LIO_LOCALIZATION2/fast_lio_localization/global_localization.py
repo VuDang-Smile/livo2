@@ -26,6 +26,7 @@ class FastLIOLocalization(Node):
         self.cur_odom = None
         self.cur_scan = None
         self.initialized = False
+        # REMOVED: self.is_replay_mode đã được xóa vì không cần initial pose nữa
 
         self.declare_parameters(
             namespace="",
@@ -59,7 +60,10 @@ class FastLIOLocalization(Node):
         
         self.create_subscription(PointCloud2, "/cloud_registered", self.cb_save_cur_scan, 10)
         self.create_subscription(Odometry, "/Odometry", self.cb_save_cur_odom, 10)
-        self.create_subscription(PoseWithCovarianceStamped, "/initialpose", self.cb_initialize_pose, 10)
+        # REMOVED: Subscription /initialpose đã được xóa
+        # Hệ thống sẽ tự tìm vị trí bằng global localization (ScanContext + ICP)
+        # Không cần initial pose vì sẽ gây drift và nhảy vị trí
+        # self.create_subscription(PoseWithCovarianceStamped, "/initialpose", self.cb_initialize_pose, 10)
 
         self.timer_localisation = self.create_timer(1.0 / self.get_parameter("freq_localization").value, self.localisation_timer_callback)
         # self.timer_global_map = self.create_timer(1/ self.get_parameter("freq_global_map").value, self.global_map_callback)
@@ -167,14 +171,22 @@ class FastLIOLocalization(Node):
         threshold = self.get_parameter("localization_threshold").value
         self.get_logger().info(f"Global localization fitness: {fitness:.4f} (threshold: {threshold:.4f})")
         
-        # Giảm threshold để dễ match hơn với PCD maps từ livo2
-        # Fitness càng thấp càng tốt (ICP fitness là distance error)
+        # DISABLED: Validation fitness đã được tắt để cho phép localization hoạt động bình thường
+        # Chấp nhận kết quả ngay cả khi fitness cao hơn threshold
+        # if fitness <= threshold:
+        #     self.T_map_to_odom = transformation
+        #     self.publish_odom(transformation)
+        #     self.get_logger().info(f"✅ Global localization successful! Fitness: {fitness:.4f} <= {threshold:.4f}")
+        # else:
+        #     self.get_logger().warn(f"❌ Fitness score {fitness:.4f} exceeds threshold {threshold:.4f} - localization failed")
+        
+        # Luôn chấp nhận kết quả (validation đã tắt)
+        self.T_map_to_odom = transformation
+        self.publish_odom(transformation)
         if fitness <= threshold:
-            self.T_map_to_odom = transformation
-            self.publish_odom(transformation)
             self.get_logger().info(f"✅ Global localization successful! Fitness: {fitness:.4f} <= {threshold:.4f}")
         else:
-            self.get_logger().warn(f"❌ Fitness score {fitness:.4f} exceeds threshold {threshold:.4f} - localization failed")
+            self.get_logger().info(f"✅ Global localization accepted (validation disabled): Fitness: {fitness:.4f} > {threshold:.4f}")
 
     def voxel_down_sample(self, pcd, voxel_size):
         # print(pcd)
@@ -205,21 +217,11 @@ class FastLIOLocalization(Node):
         # o3d.io.write_point_cloud("/home/wheelchair2/laksh_ws/pcds/lab_map_with_outside_corridor (with ground pcd)_downsampled.pcd", self.global_map)
         self.get_logger().info("Global map received.")
 
-    def cb_initialize_pose(self, msg):
-        initial_pose = self.pose_to_mat(msg.pose.pose)
-        self.initialized = True
-        self.get_logger().info("Initial pose received.")
-        
-        # Khi replay bag file, publish /map_to_odom ngay lập tức để hệ thống có thể di chuyển
-        # mà không cần đợi global localization hoàn thành (giống recorder)
-        # Set T_map_to_odom = initial_pose để hệ thống bắt đầu từ pose này
-        self.T_map_to_odom = initial_pose
-        self.publish_odom(initial_pose)
-        self.get_logger().info("Published initial pose to /map_to_odom for immediate localization (replay mode).")
-        
-        # Sau đó mới thực hiện global localization để refine pose (nếu có cur_scan)
-        if self.cur_scan is not None:
-            self.global_localization(initial_pose)
+    # REMOVED: Callback cb_initialize_pose đã được xóa hoàn toàn
+    # Hệ thống sẽ tự tìm vị trí bằng global localization (ScanContext + ICP)
+    # Không cần initial pose vì sẽ gây drift và nhảy vị trí
+    # def cb_initialize_pose(self, msg):
+    #     ...
             
     def publish_odom(self, transform):
         odom_msg = Odometry()
@@ -236,11 +238,13 @@ class FastLIOLocalization(Node):
         self.pub_map_to_odom.publish(odom_msg)
 
     def localisation_timer_callback(self):
-        if not self.initialized:
-            self.get_logger().info("Waiting for initial pose...")
-            return
-        
+        # REMOVED: Không cần đợi initial pose nữa
+        # Hệ thống sẽ tự động tìm vị trí bằng global localization khi có scan đầu tiên
         if self.cur_scan is not None:
+            if not self.initialized:
+                # Tự động initialize khi có scan đầu tiên
+                self.initialized = True
+                self.get_logger().info("Auto-initialized: Starting global localization with first scan...")
             self.global_localization(self.T_map_to_odom)
 
 

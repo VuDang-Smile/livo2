@@ -30,61 +30,76 @@ class ExtractAndPublishInitialPose(Node):
         self.initial_pose_published = False
 
     def extract_first_pose_from_bag(self, bag_path, topic_name="/Odometry"):
-        """Extract first pose from bag file"""
-        if not HAS_ROSBAG2:
-            self.get_logger().warn("rosbag2_py not available, cannot extract pose from bag")
-            return None
-            
-        try:
-            reader = rosbag2_py.SequentialReader()
-            storage_options = rosbag2_py.StorageOptions(uri=bag_path, storage_id='sqlite3')
-            converter_options = rosbag2_py.ConverterOptions(
-                input_serialization_format='cdr',
-                output_serialization_format='cdr'
-            )
-            reader.open(storage_options, converter_options)
-            
-            # Get topic types
-            topic_types = reader.get_all_topics_and_types()
-            topic_type_map = {topic.name: topic.type for topic in topic_types}
-            
-            # Find the topic
-            if topic_name not in topic_type_map:
-                self.get_logger().warn(f"Topic {topic_name} not found in bag. Available topics: {list(topic_type_map.keys())}")
-                # Try alternative topics
-                for alt_topic in ["/odom", "/Odometry", "/localization", "/pose"]:
-                    if alt_topic in topic_type_map:
-                        topic_name = alt_topic
-                        self.get_logger().info(f"Using alternative topic: {topic_name}")
-                        break
-                else:
-                    return None
-            
-            msg_type = get_message(topic_type_map[topic_name])
-            
-            # Read first message
-            while reader.has_next():
-                (topic, data, timestamp) = reader.read_next()
-                if topic == topic_name:
-                    msg = deserialize_message(data, msg_type)
-                    if isinstance(msg, Odometry):
-                        return msg.pose.pose
-                    else:
-                        # Try to extract pose from message
-                        if hasattr(msg, 'pose') and hasattr(msg.pose, 'pose'):
-                            return msg.pose.pose
-                        elif hasattr(msg, 'position') and hasattr(msg, 'orientation'):
-                            # Create a Pose from position and orientation
-                            pose = Pose()
-                            pose.position = msg.position
-                            pose.orientation = msg.orientation
-                            return pose
-            
-            return None
-            
-        except Exception as e:
-            self.get_logger().error(f"Error extracting pose from bag: {e}")
-            return None
+        """Extract first pose from bag file
+        
+        LƯU Ý: Pose trong /Odometry là pose trong frame camera_init (odometry frame), 
+        KHÔNG PHẢI pose trong map frame. Khi publish lên /initialpose, hệ thống cần 
+        pose trong map frame để biết vị trí trong map.
+        
+        Vì vậy, KHÔNG extract từ /Odometry khi replay. Hệ thống sẽ tự tìm vị trí 
+        bằng global localization (ScanContext + ICP).
+        """
+        # DISABLED: Không extract pose từ /Odometry vì nó là pose trong odometry frame, 
+        # không phải map frame. Hệ thống sẽ tự tìm vị trí bằng global localization.
+        self.get_logger().warn("⚠️ Không extract pose từ bag file vì pose trong /Odometry là odometry frame, không phải map frame")
+        self.get_logger().info("   Hệ thống sẽ tự tìm vị trí bằng global localization (ScanContext + ICP)")
+        return None
+        
+        # Code cũ (đã disable):
+        # if not HAS_ROSBAG2:
+        #     self.get_logger().warn("rosbag2_py not available, cannot extract pose from bag")
+        #     return None
+        #     
+        # try:
+        #     reader = rosbag2_py.SequentialReader()
+        #     storage_options = rosbag2_py.StorageOptions(uri=bag_path, storage_id='sqlite3')
+        #     converter_options = rosbag2_py.ConverterOptions(
+        #         input_serialization_format='cdr',
+        #         output_serialization_format='cdr'
+        #     )
+        #     reader.open(storage_options, converter_options)
+        #     
+        #     # Get topic types
+        #     topic_types = reader.get_all_topics_and_types()
+        #     topic_type_map = {topic.name: topic.type for topic in topic_types}
+        #     
+        #     # Find the topic
+        #     if topic_name not in topic_type_map:
+        #         self.get_logger().warn(f"Topic {topic_name} not found in bag. Available topics: {list(topic_type_map.keys())}")
+        #         # Try alternative topics
+        #         for alt_topic in ["/odom", "/Odometry", "/localization", "/pose"]:
+        #             if alt_topic in topic_type_map:
+        #                 topic_name = alt_topic
+        #                 self.get_logger().info(f"Using alternative topic: {topic_name}")
+        #                 break
+        #         else:
+        #             return None
+        #     
+        #     msg_type = get_message(topic_type_map[topic_name])
+        #     
+        #     # Read first message
+        #     while reader.has_next():
+        #         (topic, data, timestamp) = reader.read_next()
+        #         if topic == topic_name:
+        #             msg = deserialize_message(data, msg_type)
+        #             if isinstance(msg, Odometry):
+        #                 return msg.pose.pose
+        #             else:
+        #                 # Try to extract pose from message
+        #                 if hasattr(msg, 'pose') and hasattr(msg.pose, 'pose'):
+        #                     return msg.pose.pose
+        #                 elif hasattr(msg, 'position') and hasattr(msg, 'orientation'):
+        #                     # Create a Pose from position and orientation
+        #                     pose = Pose()
+        #                     pose.position = msg.position
+        #                     pose.orientation = msg.orientation
+        #                     return pose
+        #     
+        #     return None
+        #     
+        # except Exception as e:
+        #     self.get_logger().error(f"Error extracting pose from bag: {e}")
+        #     return None
 
     def publish_initial_pose(self, pose, frame_id="camera_init"):
         """Publish initial pose"""
@@ -160,19 +175,12 @@ def main(args=None):
             node.get_logger().error("❌ Failed to publish initial pose")
             sys.exit(1)
     else:
-        node.get_logger().warn("⚠️ Could not extract pose from bag. Using default pose (0, 0, 0)")
-        node.get_logger().info("   Hệ thống sẽ cần global localization hoặc có thể sử dụng pose từ bag khi replay")
-        # Publish default pose (0, 0, 0) - hệ thống có thể sử dụng pose từ bag khi replay
-        default_pose = Pose()
-        default_pose.position.x = 0.0
-        default_pose.position.y = 0.0
-        default_pose.position.z = 0.0
-        default_pose.orientation.x = 0.0
-        default_pose.orientation.y = 0.0
-        default_pose.orientation.z = 0.0
-        default_pose.orientation.w = 1.0
-        node.publish_initial_pose(default_pose, parsed_args.frame_id)
-        time.sleep(1.0)
+        # DISABLED: Không publish default pose (0, 0, 0) vì sẽ gây drift
+        # Hệ thống sẽ tự tìm vị trí bằng global localization (ScanContext + ICP)
+        node.get_logger().info("ℹ️  Không publish initial pose - hệ thống sẽ tự tìm vị trí bằng global localization")
+        node.get_logger().info("   (Pose trong /Odometry là odometry frame, không phải map frame)")
+        # Không publish gì cả - để hệ thống tự tìm bằng global localization
+        time.sleep(0.5)
     
     rclpy.shutdown()
 

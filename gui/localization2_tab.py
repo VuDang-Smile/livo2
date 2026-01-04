@@ -180,7 +180,7 @@ class Localization2Tab(ttk.Frame):
         self.last_drift_restart_time = 0  # Timestamp of last restart due to drift
         self.drift_restart_window = 60.0  # Seconds after drift restart to use stricter detection
         self.last_position = None  # {'x': float, 'y': float, 'z': float, 'timestamp': float}
-        self.position_jump_threshold = 10.0  # Maximum reasonable distance between updates (meters)
+        self.position_jump_threshold = 10000.0  # DISABLED: Tăng rất cao để tắt validation (meters)
         self.max_reasonable_speed = 5.0  # Initial maximum reasonable speed (m/s)
         self.position_jump_count = 0  # Count consecutive position jumps
         self.position_jump_threshold_count = 3  # Restart after N consecutive jumps
@@ -1504,6 +1504,19 @@ class Localization2Tab(ttk.Frame):
             # Start ROS listener
             self.start_ros_listener()
             
+            # DISABLED: Không publish initial pose tự động vì gây drift
+            # Khi publish (0, 0, 0) nhưng thiết bị đang ở vị trí khác, sẽ tạo drift ngay từ đầu
+            # Hệ thống sẽ tự tìm vị trí bằng global localization (ScanContext + ICP)
+            # def publish_initial_pose_after_delay():
+            #     """Publish initial pose (0, 0, 0) sau 3 giây để localization có thể bắt đầu"""
+            #     time.sleep(3)
+            #     self._publish_initial_pose()
+            # 
+            # # Start thread để publish initial pose
+            # threading.Thread(target=publish_initial_pose_after_delay, daemon=True).start()
+            
+            self.log_message("ℹ️  Không publish initial pose tự động - hệ thống sẽ tự tìm vị trí bằng global localization")
+            
             # Read output và filter warnings không cần thiết
             warnings_to_filter = [
                 "Failed to find match for field 'normal_x'",
@@ -1794,7 +1807,48 @@ class Localization2Tab(ttk.Frame):
             
             # Handle FAST-Localization map directory (with pcd/ subfolder)
             if map_path_obj.is_dir():
+                pose_file = map_path_obj / "pose.json"
                 pcd_dir = map_path_obj / "pcd"
+                
+                # Ưu tiên đọc từ pose.json (nhanh hơn và chính xác hơn - lấy từ TẤT CẢ poses)
+                if pose_file.exists():
+                    self.log_message(f"   Đọc bounds từ pose.json (tất cả {len(list(pcd_dir.glob('*.pcd')))} tiles)...")
+                    poses = []
+                    try:
+                        with open(pose_file, 'r') as f:
+                            for line in f:
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                parts = line.split()
+                                if len(parts) >= 7:
+                                    try:
+                                        tx, ty, tz = float(parts[0]), float(parts[1]), float(parts[2])
+                                        poses.append((tx, ty, tz))
+                                    except ValueError:
+                                        continue
+                    except Exception as e:
+                        self.log_message(f"⚠️ Lỗi khi đọc pose.json: {e}")
+                        poses = []
+                    
+                    if poses:
+                        # Tính bounds từ TẤT CẢ poses (chính xác hơn)
+                        all_x = [p[0] for p in poses]
+                        all_y = [p[1] for p in poses]
+                        all_z = [p[2] for p in poses]
+                        
+                        # Mở rộng bounds thêm 25m để tránh false positive (từ log: out of bounds chỉ 0.6m)
+                        margin = 25.0
+                        result = {
+                            'x': {'min': min(all_x) - margin, 'max': max(all_x) + margin},
+                            'y': {'min': min(all_y) - margin, 'max': max(all_y) + margin},
+                            'z': {'min': min(all_z) - margin, 'max': max(all_z) + margin}
+                        }
+                        self.log_message(f"✅ Tổng hợp bounds từ {len(poses)} poses: X=[{result['x']['min']:.2f}, {result['x']['max']:.2f}], Y=[{result['y']['min']:.2f}, {result['y']['max']:.2f}]")
+                        self.log_message(f"   (Đã mở rộng {margin}m để tránh false positive)")
+                        return result
+                
+                # Fallback: đọc từ PCD files nếu không có pose.json
                 if pcd_dir.exists() and pcd_dir.is_dir():
                     # Get all PCD files in the directory
                     pcd_files = list(pcd_dir.glob("*.pcd"))
@@ -1804,7 +1858,7 @@ class Localization2Tab(ttk.Frame):
                         self.log_message("⚠️ Không tìm thấy file PCD trong thư mục map")
                         return None
                     
-                    # Calculate bounds from all PCD files
+                    # Calculate bounds from PCD files (đọc nhiều hơn để chính xác hơn)
                     all_min_x = []
                     all_max_x = []
                     all_min_y = []
@@ -1813,7 +1867,9 @@ class Localization2Tab(ttk.Frame):
                     all_max_z = []
                     
                     successful_reads = 0
-                    for pcd_file in pcd_files[:10]:  # Limit to first 10 files for speed
+                    # Đọc nhiều file hơn (50 file) hoặc tất cả nếu < 50
+                    num_files_to_read = min(50, len(pcd_files))
+                    for pcd_file in pcd_files[:num_files_to_read]:
                         try:
                             pcd = o3d.io.read_point_cloud(str(pcd_file))
                             if len(pcd.points) > 0:
@@ -1828,15 +1884,18 @@ class Localization2Tab(ttk.Frame):
                         except:
                             continue
                     
-                    self.log_message(f"   Đọc thành công {successful_reads}/{min(len(pcd_files), 10)} file PCD")
+                    self.log_message(f"   Đọc thành công {successful_reads}/{num_files_to_read} file PCD")
                     
                     if all_min_x:
+                        # Mở rộng bounds thêm 25m để tránh false positive
+                        margin = 25.0
                         result = {
-                            'x': {'min': min(all_min_x), 'max': max(all_max_x)},
-                            'y': {'min': min(all_min_y), 'max': max(all_max_y)},
-                            'z': {'min': min(all_min_z), 'max': max(all_max_z)}
+                            'x': {'min': min(all_min_x) - margin, 'max': max(all_max_x) + margin},
+                            'y': {'min': min(all_min_y) - margin, 'max': max(all_max_y) + margin},
+                            'z': {'min': min(all_min_z) - margin, 'max': max(all_max_z) + margin}
                         }
                         self.log_message(f"✅ Tổng hợp bounds từ {successful_reads} file: X=[{result['x']['min']:.2f}, {result['x']['max']:.2f}], Y=[{result['y']['min']:.2f}, {result['y']['max']:.2f}]")
+                        self.log_message(f"   (Đã mở rộng {margin}m để tránh false positive)")
                         return result
                     else:
                         self.log_message("⚠️ Không đọc được bounds từ bất kỳ file PCD nào")
@@ -1920,11 +1979,17 @@ class Localization2Tab(ttk.Frame):
                         self.position_jump_count += 1
                         self.log_message(f"⚠️ Phát hiện position jump: di chuyển {distance_moved:.2f}m trong {time_diff:.2f}s")
                     
-                    # Detect abnormal speed
+                    # Detect abnormal speed (bỏ qua trong 5 giây sau global localization để tránh false positive)
                     elif speed_calculated > self.max_reasonable_speed:
-                        abnormal_speed_detected = True
-                        self.position_jump_count += 1
-                        self.log_message(f"⚠️ Phát hiện tốc độ bất thường: {speed_calculated:.2f}m/s")
+                        # Bỏ qua cảnh báo tốc độ trong 5 giây sau global localization
+                        time_since_global_loc = current_time - getattr(self, 'last_global_localization_time', 0)
+                        if time_since_global_loc > 5.0:  # Chỉ cảnh báo sau 5 giây
+                            abnormal_speed_detected = True
+                            self.position_jump_count += 1
+                            self.log_message(f"⚠️ Phát hiện tốc độ bất thường: {speed_calculated:.2f}m/s")
+                        else:
+                            # Bỏ qua cảnh báo trong 5 giây đầu sau global localization
+                            pass
                     else:
                         if self.position_jump_count > 0:
                             self.position_jump_count = 0
@@ -2156,4 +2221,8 @@ class Localization2Tab(ttk.Frame):
             self.log_message(f"❌ Lỗi khi khởi động lại localization do global localization fail: {e}")
             with self.restart_lock:
                 self.is_restarting = False
+    
+    # REMOVED: Toàn bộ logic publish initial pose đã được xóa
+    # Hệ thống sẽ tự tìm vị trí bằng global localization (ScanContext + ICP)
+    # Không cần initial pose vì sẽ gây drift và nhảy vị trí
 

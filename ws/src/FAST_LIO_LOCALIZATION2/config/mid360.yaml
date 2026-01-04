@@ -15,8 +15,8 @@
             time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
             time_offset_lidar_to_imu: 0.0 # Time offset between lidar and IMU calibrated by other algorithms, e.g. LI-Init (can be found in README).
                                         # This param will take effect no matter what time_sync_en is. So if the time offset is not known exactly, please set as 0.0
-            global_loc_convergence_thresh: 10.0  # meters; TĂNG LÊN 10.0 để cho phép xy distance lớn hơn (log shows 6.40 > 6.00)
-            global_loc_fitness_thresh: 3.5      # ICP score threshold; TĂNG LÊN 3.5 để chấp nhận fitness ~2.7-2.8 ngay từ đầu (không cần đợi adaptive)
+            global_loc_convergence_thresh: 6.0  # meters; Tích hợp từ recorder: 6.0 để cho phép xy distance hợp lý
+            global_loc_fitness_thresh: 0.7      # ICP score threshold; Tích hợp từ recorder: 0.7 để dễ match hơn với PCD maps
             global_loc_height_thresh: -1.0      # meters; <=0 disables vertical gating so lower mounts still converge
             global_loc_force_map_height: false  # allow using current odom height; avoid forcing map Z if map might be off
             global_loc_auto_height_align: false  # still align if map tile provides height
@@ -26,14 +26,19 @@
             # Allow relocalization anywhere in the fastloc map (disable 15 m gate)
             candidate_max_distance: 120.0
             
-            # Adaptive fitness threshold for better relocalization on PCD maps from livo2
-            fitness_thresh_max: 20.0              # Maximum fitness threshold (TĂNG LÊN 20.0 để cho phép match với PCD maps từ livo2 - fitness 12.566 sẽ được chấp nhận)
-            fitness_adaptive_step: 0.5            # Step size for adaptive threshold (tăng lên để adapt nhanh hơn)
-            fitness_adaptive_enable: true         # Enable adaptive threshold
+            # Adaptive fitness threshold - Tích hợp từ recorder: đơn giản hơn, không dùng adaptive
+            # fitness_thresh_max: 20.0              # DISABLED: Không dùng adaptive threshold như recorder
+            # fitness_adaptive_step: 0.5            # DISABLED
+            fitness_adaptive_enable: false         # Tắt adaptive threshold như recorder (đơn giản hơn)
             
             # Single-shot thresholds for immediate relocalization
-            single_shot_fitness_thresh: 3.0      # Accept immediately if fitness <= this (TĂNG LÊN 3.0 để chấp nhận fitness ~2.7-2.8 ngay lập tức)
-            gicp_single_shot_thresh: 2.0         # Stricter threshold for GICP-only fallback (TĂNG LÊN 2.0 để chấp nhận GICP tốt hơn)
+            single_shot_fitness_thresh: 0.25    # Accept immediately if fitness <= this (STRICTER: 0.25 để chỉ chấp nhận kết quả rất tốt)
+            gicp_single_shot_thresh: 0.20        # Stricter threshold for GICP-only fallback (STRICTER: 0.20)
+            
+            # Validation to prevent wrong relocalization (jump detection)
+            # GIẢM để tránh jump lớn gây giật (từ log: position_jump=4.96m gây giật)
+            max_jump_distance: 3.0               # Reject if new position is more than this distance from current (GIẢM: 3.0m để tránh jump lớn)
+            max_jump_rotation: 0.52              # Reject if rotation change is more than this (GIẢM: 0.52 rad = 30 degrees để tránh rotation jump lớn)
             
             # Virtual ScanContext for better coverage on tiled maps
             enable_virtual_scancontexts: true     # Enable virtual ScanContext generation
@@ -50,12 +55,12 @@
             unfreeze_after_relocalize: true       # Unfreeze after successful relocalization
             
             # Auto-trigger relocalization when drift detected
-            # GIẢM threshold để relocalize sớm hơn và giảm drift (theo FAST-LOCALIZATION gốc)
+            # Cân bằng giữa relocalize sớm và tránh false triggers
             auto_trigger_enable: true              # Enable auto-trigger relocalization
-            auto_trigger_xy_distance: 10.0         # Trigger when XY drift >= this (GIẢM từ 60.0 xuống 10.0 để relocalize sớm hơn)
-            auto_trigger_height: 1.5               # Trigger when height drift >= this (GIẢM từ 3.0 xuống 1.5 để relocalize sớm hơn)
-            auto_trigger_cooldown: 5.0             # Cooldown between auto-triggers (GIẢM từ 8.0 xuống 5.0 để relocalize nhanh hơn)
-            auto_trigger_hysteresis: 2.0          # Hysteresis to prevent oscillation (GIẢM từ 5.0 xuống 2.0 để nhạy hơn)
+            auto_trigger_xy_distance: 30.0         # Trigger when XY drift >= this (CÂN BẰNG: 30.0m - không quá nhạy, không quá chậm)
+            auto_trigger_height: 2.0               # Trigger when height drift >= this (CÂN BẰNG: 2.0m)
+            auto_trigger_cooldown: 10.0            # Cooldown between auto-triggers (TĂNG: 10.0s để giảm false triggers)
+            auto_trigger_hysteresis: 8.0          # Hysteresis to prevent oscillation (TĂNG: 8.0m để giảm false triggers)
             
             # GICP/NDT fallback for better relocalization
             enable_ndt_fallback: true              # Enable NDT/GICP fallback when ScanContext fails

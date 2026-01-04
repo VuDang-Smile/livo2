@@ -314,68 +314,9 @@ class ReplayTab(ttk.Frame):
         self.log(f"⚡ Rate: {rate}x")
         self.log(f"⚙️  Loop: {'Có' if loop else 'Không'}")
         
-        # Extract và publish initial pose từ bag file để tránh global localization
-        # (giống như bên recorder - publish initial pose để hệ thống di chuyển đúng với dữ liệu bag)
-        def extract_and_publish_initial_pose():
-            """Extract và publish initial pose từ bag file để hệ thống bắt đầu ngay"""
-            try:
-                self.log("🔍 Đang extract initial pose từ bag file...")
-                self.log("   (Giống recorder: publish initial pose để hệ thống di chuyển đúng với dữ liệu bag)")
-                ws_setup = self.workspace_path / "install" / "setup.sh"
-                ros2_setup = "/opt/ros/jazzy/setup.bash"
-                
-                # Đợi một chút để ROS2 sẵn sàng (quan trọng để đảm bảo topic /initialpose có subscriber)
-                time.sleep(3.0)
-                
-                # Extract và publish initial pose
-                # Sử dụng đường dẫn trực tiếp đến script hoặc command name sau khi source
-                extract_script_path = self.workspace_path / "src" / "FAST_LIO_LOCALIZATION2" / "fast_lio_localization" / "extract_and_publish_initial_pose.py"
-                
-                # Thử dùng command name trước (nếu đã được install)
-                # Nếu không có, dùng đường dẫn trực tiếp
-                if extract_script_path.exists():
-                    extract_cmd = (
-                        f"source {ros2_setup} && "
-                        f"source {ws_setup} && "
-                        f"python3 {extract_script_path} {bag_path} --topic /Odometry --wait-time 1.0"
-                    )
-                else:
-                    # Fallback: dùng command name (nếu đã được install)
-                    extract_cmd = (
-                        f"source {ros2_setup} && "
-                        f"source {ws_setup} && "
-                        f"extract_and_publish_initial_pose {bag_path} --topic /Odometry --wait-time 1.0"
-                    )
-                
-                result = subprocess.run(
-                    extract_cmd,
-                    shell=True,
-                    executable="/bin/bash",
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                    env=env
-                )
-                
-                if result.returncode == 0:
-                    self.log("✅ Đã publish initial pose từ bag file")
-                    self.log("   → Hệ thống sẽ bắt đầu ngay và di chuyển đúng với dữ liệu bag (giống recorder)")
-                    if result.stdout:
-                        for line in result.stdout.strip().split('\n'):
-                            if line.strip():
-                                self.log(f"   {line.strip()}")
-                else:
-                    self.log(f"⚠️  Không thể extract initial pose từ bag")
-                    if result.stderr:
-                        self.log(f"   Error: {result.stderr.strip()}")
-                    self.log("   → Hệ thống sẽ cần global localization hoặc sử dụng pose từ bag khi replay")
-                    
-            except subprocess.TimeoutExpired:
-                self.log("⚠️  Timeout khi extract initial pose từ bag")
-                self.log("   → Hệ thống sẽ cần global localization hoặc sử dụng pose từ bag khi replay")
-            except Exception as e:
-                self.log(f"⚠️  Lỗi khi extract initial pose: {e}")
-                self.log("   → Hệ thống sẽ cần global localization hoặc sử dụng pose từ bag khi replay")
+        # REMOVED: Toàn bộ logic extract và publish initial pose đã được xóa
+        # Hệ thống sẽ tự tìm vị trí bằng global localization (ScanContext + ICP)
+        # Không cần initial pose vì sẽ gây drift và nhảy vị trí
         
         try:
             # Sử dụng env để đảm bảo clean environment
@@ -383,8 +324,17 @@ class ReplayTab(ttk.Frame):
             if 'ROS_DOMAIN_ID' not in env:
                 env['ROS_DOMAIN_ID'] = '0'
             
-            # Start thread để extract và publish initial pose
-            threading.Thread(target=extract_and_publish_initial_pose, daemon=True).start()
+            # DISABLED: Không extract initial pose từ bag vì pose trong /Odometry là odometry frame, không phải map frame
+            # Hệ thống sẽ tự tìm vị trí bằng global localization (ScanContext + ICP)
+            # self.log("⏳ Đang extract và publish initial pose từ bag file (trước khi replay)...")
+            # extract_thread = threading.Thread(target=extract_and_publish_initial_pose, daemon=False)
+            # extract_thread.start()
+            # extract_thread.join(timeout=25)
+            
+            # REMOVED: Không cần đợi global localization nữa
+            # Hệ thống sẽ tự tìm vị trí bằng global localization khi có scan đầu tiên
+            # Không cần đợi trước khi replay vì global localization sẽ chạy tự động
+            self.log("ℹ️  Bắt đầu replay - hệ thống sẽ tự tìm vị trí bằng global localization khi có scan đầu tiên")
             
             # Sử dụng DEVNULL để tránh buffer đầy và block UI
             # Hoặc có thể redirect ra file nếu cần log
