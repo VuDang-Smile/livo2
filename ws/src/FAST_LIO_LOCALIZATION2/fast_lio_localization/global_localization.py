@@ -181,8 +181,11 @@ class FastLIOLocalization(Node):
         #     self.get_logger().warn(f"❌ Fitness score {fitness:.4f} exceeds threshold {threshold:.4f} - localization failed")
         
         # Luôn chấp nhận kết quả (validation đã tắt)
-        self.T_map_to_odom = transformation
-        self.publish_odom(transformation)
+        # QUAN TRỌNG: transformation từ ICP là transform từ odom (scan) đến map
+        # Nhưng T_map_to_odom cần là transform từ map đến odom
+        # Vậy cần invert: T_map_to_odom = inverse(transformation)
+        self.T_map_to_odom = self.inverse_se3(transformation)
+        self.publish_odom(self.T_map_to_odom)
         if fitness <= threshold:
             self.get_logger().info(f"✅ Global localization successful! Fitness: {fitness:.4f} <= {threshold:.4f}")
         else:

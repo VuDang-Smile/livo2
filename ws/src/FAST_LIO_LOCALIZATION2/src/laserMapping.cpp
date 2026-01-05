@@ -736,9 +736,10 @@ void publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath)
     msg_body_pose.header.frame_id = "camera_init";
 
     /*** if path is too large, the rvis will crash ***/
+    // Giảm downsampling từ 10 xuống 5 để path hiển thị nhanh hơn
     static int jjj = 0;
     jjj++;
-    if (jjj % 10 == 0)
+    if (jjj % 5 == 0)
     {
         path.poses.push_back(msg_body_pose);
         pubPath->publish(path);
@@ -2359,8 +2360,12 @@ private:
                 if (global_localization_finish && !global_update)
                 {
                     int init_id = init_result.first;
+                    Eigen::Matrix4d T_map_current;
+                    bool transform_valid = false;
+                    
                     if (init_id >= 0 && init_id < static_cast<int>(position_init.size()))
                     {
+                        // Case 1: Re-localization từ C++ global localization (có history)
                         Eigen::Vector3d init_time_p = position_init[init_id];
                         Eigen::Quaterniond init_time_q = pose_init[init_id];
 
@@ -2374,8 +2379,12 @@ private:
 
                         Eigen::Matrix4d T_map_init_time = init_result.second;
 
+                        // Tính transform từ map frame đến odom frame hiện tại
+                        // T_map_current = T_map_init_time * T_odom_init_time^(-1) * T_odom_current
+                        // Điều này chuyển từ odom frame hiện tại sang map frame
                         double current_odom_height_before = state_point.pos(2);
-                        Eigen::Matrix4d T_map_current = T_map_init_time * T_odom_init_time.inverse() * T_odom_current;
+                        T_map_current = T_map_init_time * T_odom_init_time.inverse() * T_odom_current;
+                        transform_valid = true;
                         
                         // Validate the global localization result before applying
                         // Check if the new position is too far from current position (jump detection)
@@ -2528,6 +2537,13 @@ private:
                             record_auto_trigger_baseline(state_point.pos(2));
                             ikdtree = std::move(ikdtree_global);
                             global_update = true;
+                            
+                            // Publish path ngay sau khi global localization hoàn thành để hiển thị ngay
+                            if (path_en && pubPath_ != nullptr)
+                            {
+                                publish_path(pubPath_);
+                            }
+                            
                             if (unfreeze_after_global_loc && freeze_odom_on_no_points)
                             {
                                 freeze_odom_on_no_points = false;
@@ -2540,6 +2556,149 @@ private:
                             last_auto_trigger_request_time_ = Measures.lidar_beg_time;
                         }
                         } // End else block (fitness valid)
+                    }
+                    else if (init_id == -1)
+                    {
+                        // Case 2: Re-localization từ Python global localization (không có history)
+                        // T_map_to_odom đã được set trực tiếp từ Python (đã được invert đúng)
+                        Eigen::Matrix4d T_map_to_odom = init_result.second;
+                        
+                        // T_map_to_odom là transform từ map frame đến odom frame
+                        // Để có pose trong map frame từ pose trong odom frame:
+                        // T_map_body = T_map_to_odom * T_odom_body
+                        // Nhưng T_map_to_odom là transform từ map đến odom, nên để có pose trong map frame:
+                        // T_map_body = T_map_to_odom.inverse() * T_odom_body
+                        // Hoặc: T_odom_body = T_map_to_odom * T_map_body
+                        // Vậy: T_map_body = T_map_to_odom.inverse() * T_odom_body
+                        
+                        Eigen::Matrix4d T_odom_current = Eigen::Matrix4d::Identity();
+                        T_odom_current.block<3, 3>(0, 0) = state_point.rot.toRotationMatrix();
+                        T_odom_current.block<3, 1>(0, 3) = state_point.pos;
+                        
+                        // T_map_current = T_map_to_odom.inverse() * T_odom_current
+                        // Điều này chuyển pose từ odom frame sang map frame
+                        // Hoặc: T_map_current = T_odom_to_map * T_odom_current
+                        // Với T_odom_to_map = T_map_to_odom.inverse()
+                        double current_odom_height_before = state_point.pos(2);
+                        T_map_current = T_map_to_odom.inverse() * T_odom_current;
+                        transform_valid = true;
+                        
+                        RCLCPP_INFO(this->get_logger(), 
+                                   "Applying re-localization from Python global localization (init_id=-1)");
+                        RCLCPP_INFO(this->get_logger(), 
+                                   "T_map_to_odom: pos=[%.3f, %.3f, %.3f], current_odom: pos=[%.3f, %.3f, %.3f]",
+                                   T_map_to_odom(0, 3), T_map_to_odom(1, 3), T_map_to_odom(2, 3),
+                                   state_point.pos(0), state_point.pos(1), state_point.pos(2));
+                        
+                        // Tiếp tục với logic apply transform (giống như case 1)
+                        // Validate the global localization result before applying
+                        Eigen::Vector3d new_pos = T_map_current.block<3, 1>(0, 3);
+                        Eigen::Vector3d current_pos = state_point.pos;
+                        double position_jump = (new_pos - current_pos).norm();
+                        
+                        // Check rotation change
+                        Eigen::Matrix3d new_rot = T_map_current.block<3, 3>(0, 0);
+                        Eigen::Matrix3d current_rot = state_point.rot.toRotationMatrix();
+                        Eigen::Matrix3d rot_diff = new_rot * current_rot.transpose();
+                        Eigen::AngleAxisd angle_axis(rot_diff);
+                        double rotation_jump = std::abs(angle_axis.angle());
+                        
+                        bool validation_passed = true;
+                        bool fitness_valid = (init_result_fitness < 0.0) || (init_result_fitness <= 2.0);
+                        
+                        if (!fitness_valid)
+                        {
+                            RCLCPP_WARN(this->get_logger(),
+                                        "❌ Rejecting localization result: fitness too high (%.3f > %.3f). "
+                                        "This likely indicates a wrong match. Keeping odometry from bag to avoid drift.",
+                                        init_result_fitness, 2.0);
+                            global_update = true;
+                            lock_state.unlock();
+                        }
+                        else if (validation_passed)
+                        {
+                            RCLCPP_INFO(this->get_logger(),
+                                        "✅ Global localization validation passed: position_jump=%.2f m, rotation_jump=%.2f deg, fitness=%.3f",
+                                        position_jump, rotation_jump * 180.0 / M_PI, init_result_fitness);
+                            
+                            if (global_loc_auto_height_align)
+                            {
+                                double desired_height = current_odom_height_before + global_loc_z_bias;
+                                double height_delta = T_map_current(2, 3) - desired_height;
+                                T_map_current(2, 3) -= height_delta;
+                                RCLCPP_INFO(this->get_logger(), "Auto aligned global map height by %.3f m (target %.3f)", height_delta, desired_height);
+                            }
+                            else if (global_loc_force_map_height)
+                            {
+                                double map_init_height = T_map_to_odom(2, 3);
+                                double forced_height = map_init_height + (current_odom_height_before - 0.0);
+                                T_map_current(2, 3) = forced_height + global_loc_z_bias;
+                            }
+
+                            state_ikfom global_state = state_point;
+                            Eigen::Vector3d new_pos_final = T_map_current.block<3, 1>(0, 3);
+                            Eigen::Matrix3d new_rot_final = T_map_current.block<3, 3>(0, 0);
+                            
+                            // Smooth transition for small jumps
+                            double position_jump_for_smooth = (new_pos_final - state_point.pos).norm();
+                            const double smooth_threshold = 1.0;
+                            
+                            if (position_jump_for_smooth > 0.1 && position_jump_for_smooth < smooth_threshold)
+                            {
+                                const double blend_factor = 0.8;
+                                global_state.pos = blend_factor * new_pos_final + (1.0 - blend_factor) * state_point.pos;
+                                
+                                Eigen::Quaterniond old_quat(state_point.rot);
+                                Eigen::Quaterniond new_quat(new_rot_final);
+                                global_state.rot = old_quat.slerp(blend_factor, new_quat).toRotationMatrix();
+                                
+                                RCLCPP_INFO(this->get_logger(), 
+                                            "Smooth transition applied: position_jump=%.2f m, blend_factor=%.2f",
+                                            position_jump_for_smooth, blend_factor);
+                            }
+                            else
+                            {
+                                global_state.pos = new_pos_final;
+                                global_state.rot = new_rot_final;
+                            }
+                            
+                            global_state.grav = S2(Eigen::Vector3d(0, 0, -G_m_s2));
+                            global_state.vel = state_point.vel;
+                            
+                            kf.change_x(global_state);
+                            state_point = kf.get_x();
+                            
+                            RCLCPP_INFO(this->get_logger(), "Applied global localization alignment from Python.");
+                            RCLCPP_INFO(this->get_logger(), "Position before: [%.3f, %.3f, %.3f], after: [%.3f, %.3f, %.3f]", 
+                                       current_pos(0), current_pos(1), current_pos(2),
+                                       state_point.pos(0), state_point.pos(1), state_point.pos(2));
+                            RCLCPP_INFO(this->get_logger(), "Rotation jump: %.2f deg, Position jump: %.2f m",
+                                       rotation_jump * 180.0 / M_PI, position_jump);
+                            
+                            last_stable_state = state_point;
+                            last_stable_state_valid = true;
+                            last_stable_state_time = Measures.lidar_beg_time;
+                            record_auto_trigger_baseline(state_point.pos(2));
+                            ikdtree = std::move(ikdtree_global);
+                            global_update = true;
+                            
+                            // Publish path ngay sau khi global localization hoàn thành để hiển thị ngay
+                            if (path_en && pubPath_ != nullptr)
+                            {
+                                publish_path(pubPath_);
+                            }
+                            
+                            if (unfreeze_after_global_loc && freeze_odom_on_no_points)
+                            {
+                                freeze_odom_on_no_points = false;
+                                RCLCPP_WARN(this->get_logger(),
+                                            "Unfreezing odom_on_no_points after relocalization (param global_loc.unfreeze_after_relocalize=true).");
+                            }
+                            position_init.clear();
+                            pose_init.clear();
+                            last_auto_trigger_planar_distance_ = std::hypot(state_point.pos(0), state_point.pos(1));
+                            last_auto_trigger_request_time_ = Measures.lidar_beg_time;
+                        }
                     }
                     else
                     {
@@ -2749,7 +2908,9 @@ private:
             }
 
             /******* Publish points *******/
-            if (!should_freeze_output && path_en && (!use_global_localization_ || global_localization_finish))
+            // Publish path ngay cả khi chưa có global localization để hiển thị quãng đường đã đi
+            // Chỉ skip khi output bị freeze (để tránh hiển thị path sai trong quá trình chờ localization)
+            if (!should_freeze_output && path_en)
             {
                 publish_path(pubPath_);
             }
