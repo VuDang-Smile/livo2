@@ -1,10 +1,13 @@
 """Upload API endpoints."""
 import logging
+from pathlib import Path
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse, JSONResponse
 from app.models.upload import UploadResponse, CurrentMapResponse, MapMetadata
 from app.services.map_processor import MapProcessor
 from app.services.database_service import database_service
+from app.services.storage_service import storage_service
 from app.services.mqtt_service import mqtt_service
 from app.config import settings
 
@@ -125,10 +128,18 @@ async def delete_current_map():
         
         # Delete file
         if map_doc.get("file_path"):
-            from pathlib import Path
             file_path = Path(map_doc["file_path"])
-            from app.services.storage_service import storage_service
             storage_service.delete_file(file_path)
+        
+        # Delete processed files (images and metadata)
+        if map_doc.get("metadata", {}).get("image_paths"):
+            for view_id, rel_path in map_doc["metadata"]["image_paths"].items():
+                image_path = storage_service.get_processed_path(rel_path)
+                storage_service.delete_file(image_path)
+        
+        if map_doc.get("metadata", {}).get("metadata_path"):
+            metadata_path = storage_service.get_processed_path(map_doc["metadata"]["metadata_path"])
+            storage_service.delete_file(metadata_path)
         
         # Delete from database
         success = await database_service.delete_current_map()
@@ -140,5 +151,67 @@ async def delete_current_map():
         raise
     except Exception as e:
         logger.error(f"Error deleting current map: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{upload_id}/metadata")
+async def get_map_metadata(upload_id: UUID):
+    """Get map metadata JSON for a specific upload."""
+    try:
+        map_doc = await database_service.get_map_by_upload_id(str(upload_id))
+        if not map_doc:
+            raise HTTPException(status_code=404, detail="Map not found")
+        
+        metadata_path = map_doc.get("metadata", {}).get("metadata_path")
+        if not metadata_path:
+            raise HTTPException(status_code=404, detail="Metadata not found")
+        
+        full_path = storage_service.get_processed_path(metadata_path)
+        if not full_path.exists():
+            raise HTTPException(status_code=404, detail="Metadata file not found")
+        
+        # Read and return JSON
+        import json
+        with open(full_path, 'r') as f:
+            metadata = json.load(f)
+        
+        return JSONResponse(content=metadata)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting map metadata: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{upload_id}/images/{view}")
+async def get_map_image(upload_id: UUID, view: str):
+    """Get map image for a specific view (top, side_x, side_y)."""
+    try:
+        if view not in ['top', 'side_x', 'side_y']:
+            raise HTTPException(status_code=400, detail=f"Invalid view: {view}. Must be 'top', 'side_x', or 'side_y'")
+        
+        map_doc = await database_service.get_map_by_upload_id(str(upload_id))
+        if not map_doc:
+            raise HTTPException(status_code=404, detail="Map not found")
+        
+        image_paths = map_doc.get("metadata", {}).get("image_paths", {})
+        if view not in image_paths:
+            raise HTTPException(status_code=404, detail=f"Image for view '{view}' not found")
+        
+        rel_path = image_paths[view]
+        full_path = storage_service.get_processed_path(rel_path)
+        
+        if not full_path.exists():
+            raise HTTPException(status_code=404, detail="Image file not found")
+        
+        return FileResponse(
+            path=str(full_path),
+            media_type="image/png",
+            filename=f"{upload_id}_{view}.png"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting map image: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

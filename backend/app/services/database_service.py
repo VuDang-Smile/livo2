@@ -80,6 +80,15 @@ class DatabaseService:
             logger.error(f"Error getting current map: {e}")
             return None
     
+    async def get_map_by_upload_id(self, upload_id: str) -> Optional[Dict[str, Any]]:
+        """Get map by upload_id."""
+        try:
+            doc = await self.maps_collection.find_one({"upload_id": upload_id})
+            return doc
+        except Exception as e:
+            logger.error(f"Error getting map by upload_id: {e}")
+            return None
+    
     async def create_map(self, map_data: Dict[str, Any]) -> Optional[str]:
         """Create new map."""
         try:
