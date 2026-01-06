@@ -164,7 +164,7 @@ target_link_libraries(pre ${COMMON_DEPENDENCIES})
 target_link_libraries(imu_proc ${COMMON_DEPENDENCIES})
 
 # Add the main executable
-add_executable(fastlivo_mapping src/main.cpp)
+add_executable(fastlivo_mapping src/main.cpp src/crash_handler.cpp)
 
 ament_target_dependencies(fastlivo_mapping ${dependencies})
 

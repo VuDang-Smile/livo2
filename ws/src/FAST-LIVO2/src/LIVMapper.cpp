@@ -348,7 +348,7 @@ void LIVMapper::initializeFiles()
     
     // Create directories using mkdir
     std::string mkdir_cmd = "mkdir -p " + map_dir + "pcd " + map_dir + "scancontext";
-    system(mkdir_cmd.c_str());
+    (void)system(mkdir_cmd.c_str());
     
     std::string pose_file_path = map_dir + "pose.json";
     fout_pcd_pos.open(pose_file_path, std::ios::out);
@@ -803,7 +803,7 @@ void LIVMapper::savePCD(bool force_save)
   // Save aggregated point clouds to Log/PCD/ (for backward compatibility)
   std::string pcd_dir = std::string(ROOT_DIR) + "Log/PCD/";
   std::string mkdir_cmd = "mkdir -p " + pcd_dir;
-  system(mkdir_cmd.c_str());
+  (void)system(mkdir_cmd.c_str());
   
   // Save aggregated maps (both raw and downsampled)
   if (pcd_index > 0)
