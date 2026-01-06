@@ -37,6 +37,7 @@ DEPENDENCIES=(
 
 # Python packages to install via pip
 PYTHON_PACKAGES=(
+    "open3d>=0.17.0"
 )
 
 # Print functions
@@ -191,19 +192,64 @@ install_python_packages() {
         echo -e "${BLUE}----------------------------------------${NC}"
         print_info "Processing Python package: ${package}"
         
-        # Check if package is already installed
-        if $PIP_CMD show "${package}" &> /dev/null; then
+        # Extract package name without version constraints
+        local package_name="${package%%[>=<]*}"
+        package_name="${package_name// /}"
+        
+        # Check if package is already installed (try both pip show and Python import)
+        local already_installed=false
+        
+        # Method 1: Check with pip show
+        if $PIP_CMD show "${package_name}" &> /dev/null; then
+            already_installed=true
+        fi
+        
+        # Method 2: Try importing in Python (more reliable for --user installs)
+        if [ "$already_installed" = false ]; then
+            local import_name="${package_name}"
+            case "${package_name}" in
+                "opencv-python") import_name="cv2" ;;
+                "Pillow") import_name="PIL" ;;
+                "PyYAML") import_name="yaml" ;;
+            esac
+            
+            if python3 -c "import ${import_name}" 2>/dev/null; then
+                already_installed=true
+            fi
+        fi
+        
+        if [ "$already_installed" = true ]; then
             print_success "${package} is already installed. Skipping..."
             skipped_count=$((skipped_count + 1))
         else
             print_info "Installing ${package}..."
-            if $PIP_CMD install --user "${package}"; then
-                print_success "${package} installed successfully."
+            
+            # Try installing with --user flag first
+            local install_output
+            install_output=$($PIP_CMD install --user "${package}" 2>&1)
+            local install_status=$?
+            
+            if [ $install_status -eq 0 ]; then
+                print_success "${package} installed successfully with --user flag."
                 installed_count=$((installed_count + 1))
             else
-                print_error "Failed to install ${package}."
-                failed_packages+=("${package}")
-                INSTALL_FAILED=true
+                # Check if it's an externally-managed-environment error
+                if echo "$install_output" | grep -q "externally-managed-environment"; then
+                    print_warning "Externally-managed-environment detected. Trying with --break-system-packages..."
+                    if $PIP_CMD install --break-system-packages "${package}"; then
+                        print_success "${package} installed successfully with --break-system-packages flag."
+                        installed_count=$((installed_count + 1))
+                    else
+                        print_error "Failed to install ${package} even with --break-system-packages."
+                        failed_packages+=("${package}")
+                        INSTALL_FAILED=true
+                    fi
+                else
+                    print_error "Failed to install ${package}."
+                    echo "$install_output" | head -5  # Show first few lines of error
+                    failed_packages+=("${package}")
+                    INSTALL_FAILED=true
+                fi
             fi
         fi
         echo ""
@@ -267,7 +313,34 @@ verify_installation() {
         fi
         
         for package in "${PYTHON_PACKAGES[@]}"; do
-            if $PIP_CMD show "${package}" &> /dev/null; then
+            # Extract package name without version constraints (e.g., "open3d>=0.17.0" -> "open3d")
+            local package_name="${package%%[>=<]*}"
+            package_name="${package_name// /}"
+            
+            # Try multiple verification methods
+            local verified=false
+            
+            # Method 1: Check with pip show
+            if $PIP_CMD show "${package_name}" &> /dev/null; then
+                verified=true
+            fi
+            
+            # Method 2: Try importing in Python (more reliable for --user installs)
+            if [ "$verified" = false ]; then
+                # Convert package name to import name (e.g., "open3d" -> "open3d", "opencv-python" -> "cv2")
+                local import_name="${package_name}"
+                case "${package_name}" in
+                    "opencv-python") import_name="cv2" ;;
+                    "Pillow") import_name="PIL" ;;
+                    "PyYAML") import_name="yaml" ;;
+                esac
+                
+                if python3 -c "import ${import_name}" 2>/dev/null; then
+                    verified=true
+                fi
+            fi
+            
+            if [ "$verified" = true ]; then
                 print_success "${package} ✓"
             else
                 print_error "${package} ✗"

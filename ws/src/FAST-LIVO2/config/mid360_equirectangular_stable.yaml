@@ -31,17 +31,17 @@
 
     preprocess:
       point_filter_num: 1  # Keep all points for better accuracy
-      filter_size_surf: 0.12  # Balanced filter size
+      filter_size_surf: 0.10  # Slightly reduced from 0.12 for better quality, but not too small to avoid memory issues
       lidar_type: 8 # Livox MID360 LiDAR
       scan_line: 6  # MID360 has 6 scan lines
       blind: 0.8
 
     vio:
-      max_iterations: 3  # Reduced for better performance
-      outlier_threshold: 1000
+      max_iterations: 4  # Increased from 3 for better accuracy, but not too high to avoid long processing
+      outlier_threshold: 800  # Balanced threshold
       img_point_cov: 100
       patch_size: 7  # Balanced patch size
-      patch_pyrimid_level: 3  # Reduced from 4 to 3 for better performance
+      patch_pyrimid_level: 3  # Balanced pyramid level
       normal_en: true
       raycast_en: false
       inverse_composition_en: false
@@ -60,49 +60,49 @@
       b_gyr_cov: 0.0002  # Increased from 0.0001 for better stability
 
     lio:
-      max_iterations: 3  # Reduced for better performance
+      max_iterations: 4  # Increased from 3 for better accuracy, but not too high
       dept_err: 0.02
       beam_err: 0.05
-      min_eigen_value: 0.0025
-      voxel_size: 0.55  # Increased from 0.45 to reduce point density
-      max_layer: 2
-      max_points_num: 45  # Reduced from 55 to reduce memory usage
+      min_eigen_value: 0.002
+      voxel_size: 0.15  # Balanced size - not too small to avoid memory explosion
+      max_layer: 2  # Keep at 2 to avoid excessive memory usage
+      max_points_num: 50  # Reduced from default to save memory
       layer_init_num: [5, 5, 5, 5, 5]
 
     local_map:  
-      map_sliding_en: true
-      half_map_size: 90  # Balanced map size
-      sliding_thresh: 8.0
+      map_sliding_en: true  # CRITICAL: Must be enabled for memory management
+      half_map_size: 60  # REDUCED from 90 to significantly reduce memory usage (40% reduction)
+      sliding_thresh: 5.0  # REDUCED from 8.0 to slide more frequently and free memory sooner
 
     memory:
-      # Buffer size limits to prevent memory leaks (optimized for performance)
-      max_lidar_buffer_size: 5    # Maximum LiDAR frames in buffer
-      max_imu_buffer_size: 100    # Maximum IMU messages in buffer (increased for sync stability)
-      max_img_buffer_size: 2      # Maximum image frames in buffer
-      forced_sliding_interval: 5  # Force map sliding every N frames (reduced from 10 for more frequent cleanup)
-      vio_feat_map_cleanup_interval: 20  # Cleanup VIO feat_map every N frames (reduced from 30)
-      vio_feat_map_cleanup_radius: 15.0  # Cleanup radius for VIO feat_map (meters)
+      # AGGRESSIVE memory management to prevent crashes
+      max_lidar_buffer_size: 3    # REDUCED from 5 to prevent buffer overflow
+      max_imu_buffer_size: 80     # REDUCED from 100 to prevent IMU buffer overflow
+      max_img_buffer_size: 2      # Keep at 2
+      forced_sliding_interval: 3  # REDUCED from 5 - force cleanup every 3 frames (very aggressive)
+      vio_feat_map_cleanup_interval: 10  # REDUCED from 20 - cleanup VIO feat_map every 10 frames (very frequent)
+      vio_feat_map_cleanup_radius: 12.0  # REDUCED from 15.0 - smaller cleanup radius to free memory faster
 
     uav:
       imu_rate_odom: false
       gravity_align_en: false
 
     publish:
-      dense_map_en: true
+      dense_map_en: false  # CRITICAL: Set to false to reduce memory usage when publishing
       pub_effect_point_en: false 
       pub_plane_en: false
-      pub_scan_num: 3  # Increased from 2 to reduce publish rate
+      pub_scan_num: 5  # INCREASED from 3 to reduce publish rate and save memory
       blind_rgb_points: 0.0
 
     evo:
-      seq_name: "MID360_Equirectangular"
+      seq_name: "MID360_Equirectangular_Stable"
       pose_output_en: false
 
     pcd_save:
       pcd_save_en: true
       colmap_output_en: false
-      filter_size_pcd: 0.12  # Balanced filter size
-      interval: 100
+      filter_size_pcd: 0.10  # Balanced filter size for PCD output
+      interval: 1000
 
     camera:
       model: Equirectangular
@@ -111,3 +111,5 @@
       width: 2880
       height: 1440
       scale: 1.0  # Full resolution
+
+
