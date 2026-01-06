@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Info, Map, Car, Upload, QrCode } from 'lucide-react';
+import { Info, Map, Car, Upload, QrCode, Heart } from 'lucide-react';
 
 const SideMenu: React.FC = () => {
   const location = useLocation();
@@ -13,6 +13,7 @@ const SideMenu: React.FC = () => {
     { name: t('vehicles'), href: '/vehicles', icon: Car },
     { name: t('upload_menu_label'), href: '/map-upload', icon: Upload },
     { name: t('qr_generator_menu_label'), href: '/qr-generator', icon: QrCode },
+    { name: t('health_menu_label'), href: '/health', icon: Heart },
   ];
 
   return (

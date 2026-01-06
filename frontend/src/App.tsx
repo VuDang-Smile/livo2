@@ -12,6 +12,7 @@ import EditVehicle from './pages/EditVehicle';
 import VehicleMap from './pages/VehicleMap';
 import Upload from './pages/Upload';
 import QRGenerator from './pages/QRGenerator';
+import Health from './pages/Health';
 
 function App() {
   return (
@@ -28,6 +29,7 @@ function App() {
             <Route path="/vehicle-map" element={<MainLayout><VehicleMap /></MainLayout>} />
             <Route path="/map-upload" element={<MainLayout><ProtectedRoute><Upload /></ProtectedRoute></MainLayout>} />
             <Route path="/qr-generator" element={<MainLayout><ProtectedRoute><QRGenerator /></ProtectedRoute></MainLayout>} />
+            <Route path="/health" element={<MainLayout><Health /></MainLayout>} />
           </Routes>
         </Router>
       </AuthProvider>

@@ -23,6 +23,7 @@ LIVOX_SCRIPT="${SCRIPT_DIR}/drive_ws/build.sh"
 THETA_SCRIPT="${PROJECT_ROOT}/ws/src/theta_driver/3rd/build.sh"
 CALIBRATION_SCRIPT="${SCRIPT_DIR}/calibration/build.sh"
 SOPHUS_SCRIPT="${SCRIPT_DIR}/livo/Sophus/build.sh"
+FIND_BACKEND_SCRIPT="${SCRIPT_DIR}/find_backend_lan.sh"
 
 # Track overall status
 OVERALL_SUCCESS=true
@@ -210,6 +211,7 @@ main() {
     echo -e "  ${BLUE}6.${NC} Theta Driver"
     echo -e "  ${BLUE}7.${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
     echo -e "  ${BLUE}8.${NC} Sophus Library"
+    echo -e "  ${BLUE}9.${NC} Setup LAN Backend Discovery (find_backend_lan.sh)"
     echo ""
     
     # Request sudo password at the beginning
@@ -297,6 +299,44 @@ main() {
         exit 1
     fi
     
+    # Step 9: Setup LAN Backend Discovery
+    echo ""
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}Step 9: Setup LAN Backend Discovery${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    echo ""
+    print_info "This step will help you find and configure the backend server in your LAN."
+    print_info "It will scan the network and update /etc/hosts with frontend.lidar.tm and backend.lidar.tm"
+    echo ""
+    read -p "Do you want to run LAN Backend Discovery now? (y/N): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if [ ! -f "${FIND_BACKEND_SCRIPT}" ]; then
+            print_error "Script not found: ${FIND_BACKEND_SCRIPT}"
+            OVERALL_SUCCESS=false
+            FAILED_STEPS+=("LAN Backend Discovery (script not found)")
+        else
+            chmod +x "${FIND_BACKEND_SCRIPT}"
+            print_info "Running: ${FIND_BACKEND_SCRIPT}"
+            echo ""
+            # Run find_backend_lan.sh - it will request sudo itself
+            # Use yes to provide Enter input for "Press Enter to exit" prompts
+            if yes "" | bash "${FIND_BACKEND_SCRIPT}" 2>&1; then
+                print_success "LAN Backend Discovery completed successfully!"
+                echo ""
+            else
+                local exit_code=${PIPESTATUS[1]}
+                print_warning "LAN Backend Discovery completed with exit code: ${exit_code}"
+                print_info "You can run this manually later with: sudo ./dependencies/find_backend_lan.sh"
+                echo ""
+            fi
+        fi
+    else
+        print_info "Skipping LAN Backend Discovery setup."
+        print_info "You can run it manually later with: sudo ./dependencies/find_backend_lan.sh"
+        echo ""
+    fi
+    
     # Final summary
     echo ""
     echo -e "${BLUE}========================================${NC}"
@@ -315,6 +355,7 @@ main() {
         echo -e "  ${GREEN}✓${NC} Theta Driver"
         echo -e "  ${GREEN}✓${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
         echo -e "  ${GREEN}✓${NC} Sophus Library"
+        echo -e "  ${GREEN}✓${NC} LAN Backend Discovery (optional)"
         echo ""
         print_info "You can now use ROS2 and the installed drivers."
         echo ""
