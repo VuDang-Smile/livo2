@@ -206,6 +206,22 @@ class BagMappingTab(ttk.Frame):
             command=self.merge_pcd_files
         )
         self.merge_pcd_btn.pack(side=tk.LEFT, padx=5)
+
+        # HBA Optimize button
+        self.hba_btn = ttk.Button(
+            control_frame,
+            text="🪄 HBA Optimize",
+            command=self.run_hba_optimization
+        )
+        self.hba_btn.pack(side=tk.LEFT, padx=5)
+
+        # ScanContext button
+        self.sc_btn = ttk.Button(
+            control_frame,
+            text="🗺️ SC Tile",
+            command=self.run_scancontext_tiling
+        )
+        self.sc_btn.pack(side=tk.LEFT, padx=5)
         
         # Status label
         self.status_label = ttk.Label(
@@ -332,6 +348,114 @@ class BagMappingTab(ttk.Frame):
         finally:
             # Re-enable button
             self.merge_pcd_btn.config(state=tk.NORMAL)
+
+    def run_hba_optimization(self):
+        """Chạy tối ưu hóa bản đồ bằng HBA standalone"""
+        pcd_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "PCD"
+        hba_script = Path(__file__).parent.parent / "scripts" / "normalize_map_hba.py"
+        
+        if not pcd_dir.exists():
+            messagebox.showerror("Lỗi", f"Thư mục PCD không tồn tại: {pcd_dir}")
+            return
+        
+        if not hba_script.exists():
+            messagebox.showerror("Lỗi", f"Không tìm thấy script HBA tại: {hba_script}")
+            return
+
+        # Kiểm tra file pose.json
+        pose_file = pcd_dir / "scans_pos.json"
+        if not pose_file.exists():
+            messagebox.showerror("Lỗi", f"Thiếu file scans_pos.json trong {pcd_dir}")
+            return
+
+        self.log("=" * 60)
+        self.log("🪄 Đang bắt đầu tối ưu hóa bản đồ bằng HBA Standalone...")
+        self.hba_btn.config(state=tk.DISABLED)
+
+        def run_thread():
+            try:
+                cmd = f"python3 {hba_script} --input_dir {pcd_dir}"
+                process = subprocess.Popen(
+                    cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                )
+                
+                for line in iter(process.stdout.readline, ''):
+                    if line:
+                        self.log(f"[HBA] {line.strip()}")
+                
+                process.wait()
+                
+                if process.returncode == 0:
+                    # Kiểm tra xem output thực sự có được tạo ra không (trong trường hợp fallback)
+                    output_file = pcd_dir / "merge_all_hba.pcd"
+                    if output_file.exists():
+                        self.log("✅ HBA Optimization hoàn tất!")
+                        messagebox.showinfo("Thành công", "Đã tối ưu hóa bản đồ!\nFile output: merge_all_hba.pcd")
+                    else:
+                        self.log("⚠️ HBA hoàn tất nhưng không tìm thấy file output.")
+                else:
+                    self.log(f"❌ HBA failed với code {process.returncode}")
+                    messagebox.showerror("Lỗi", "HBA Optimization thất bại.")
+            except Exception as e:
+                self.log(f"❌ Lỗi HBA: {e}")
+                messagebox.showerror("Lỗi", str(e))
+            finally:
+                self.after(0, lambda: self.hba_btn.config(state=tk.NORMAL))
+
+        threading.Thread(target=run_thread, daemon=True).start()
+
+    def run_scancontext_tiling(self):
+        """Chia tile bản đồ PCD theo kiểu ScanContext (bỏ màu)"""
+        pcd_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "PCD"
+        input_pcd = pcd_dir / "merge_all_hba.pcd"
+        sc_script = Path(__file__).parent.parent / "scripts" / "generate_fast_localization_map.py"
+        # Đổi địa chỉ lưu map từ maps/ sang Log/fastloc_map theo yêu cầu
+        output_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "fastloc_map"
+
+        if not input_pcd.exists():
+            messagebox.showwarning("Cảnh báo", f"Không tìm thấy bản đồ đã HBA: {input_pcd.name}\nBạn nên chạy HBA Optimize trước.")
+            # Fallback to merged_all.pcd if user really wants to
+            input_pcd = pcd_dir / "merged_all.pcd"
+            if not input_pcd.exists():
+                messagebox.showerror("Lỗi", "Không tìm thấy bất kỳ file PCD tổng nào (merged_all.pcd hoặc merge_all_hba.pcd)")
+                return
+
+        self.log("=" * 60)
+        self.log(f"🗺️ Đang chuẩn bị bản đồ ScanContext từ {input_pcd.name}...")
+        self.sc_btn.config(state=tk.DISABLED)
+
+        def run_thread():
+            try:
+                cmd = (
+                    f"python3 {sc_script} "
+                    f"--input_pcd {input_pcd} "
+                    f"--output_dir {output_dir} "
+                    f"--strip_color --voxel_size 0.2"
+                )
+                process = subprocess.Popen(
+                    cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                )
+                
+                for line in iter(process.stdout.readline, ''):
+                    if line:
+                        self.log(f"[ScanContext] {line.strip()}")
+                
+                process.wait()
+                
+                if process.returncode == 0:
+                    self.log("✅ ScanContext Tiling thành công!")
+                    self.log(f"📁 Output: {output_dir}")
+                    messagebox.showinfo("Thành công", f"Đã sinh bản đồ ScanContext thành công!\nLưu tại: {output_dir}")
+                else:
+                    self.log(f"❌ Tiling failed với code {process.returncode}")
+                    messagebox.showerror("Lỗi", "ScanContext Tiling thất bại.")
+            except Exception as e:
+                self.log(f"❌ Lỗi ScanContext: {e}")
+                messagebox.showerror("Lỗi", str(e))
+            finally:
+                self.after(0, lambda: self.sc_btn.config(state=tk.NORMAL))
+
+        threading.Thread(target=run_thread, daemon=True).start()
     
     def set_default_config(self):
         """Set default config file"""
