@@ -1,0 +1,60 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: livo-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DB_NAME=livo_backend
+      - MQTT_BROKER_HOST=mqtt
+      - MQTT_BROKER_PORT=1883
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - ./uploads:/app/uploads
+      - ./processed:/app/processed
+      - ./.env:/app/.env
+    depends_on:
+      - mongodb
+      - mqtt
+    networks:
+      - livo-network
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7
+    container_name: livo-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - livo-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mqtt:
+    image: eclipse-mosquitto:latest
+    container_name: livo-mqtt
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - livo-network
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+
+networks:
+  livo-network:
+    driver: bridge
+

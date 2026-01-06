@@ -293,6 +293,26 @@ void VIOManager::getWarpMatrixAffine(const vk::AbstractCamera &cam, const Vector
 void VIOManager::warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, const Vector2d &px_ref, const int level_ref, const int search_level,
                                const int pyramid_level, const int halfpatch_size, float *patch)
 {
+  // Safety checks
+  if (patch == nullptr)
+  {
+    printf("[ VIO ] Error: warpAffine called with null patch pointer\n");
+    return;
+  }
+  
+  if (img_ref.empty())
+  {
+    printf("[ VIO ] Error: warpAffine called with empty image reference\n");
+    return;
+  }
+  
+  if (patch_size_total <= 0 || patch_pyrimid_level <= 0)
+  {
+    printf("[ VIO ] Error: warpAffine called with uninitialized patch_size_total (%d) or patch_pyrimid_level (%d)\n", 
+           patch_size_total, patch_pyrimid_level);
+    return;
+  }
+  
   const int patch_size = halfpatch_size * 2;
   const Matrix2f A_ref_cur = A_cur_ref.inverse().cast<float>();
   if (isnan(A_ref_cur(0, 0)))
@@ -301,6 +321,9 @@ void VIOManager::warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, c
     return;
   }
 
+  // Calculate maximum valid index to prevent out-of-bounds access
+  const int max_valid_index = patch_size_total * patch_pyrimid_level - 1;
+  
   float *patch_ptr = patch;
   for (int y = 0; y < patch_size; ++y)
   {
@@ -310,10 +333,20 @@ void VIOManager::warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, c
       px_patch *= (1 << search_level);
       px_patch *= (1 << pyramid_level);
       const Vector2f px(A_ref_cur * px_patch + px_ref.cast<float>());
+      
+      // Calculate index with bounds checking
+      const int index = patch_size_total * pyramid_level + y * patch_size + x;
+      if (index < 0 || index > max_valid_index)
+      {
+        printf("[ VIO ] Error: warpAffine index out of bounds: %d (max: %d), pyramid_level: %d, y: %d, x: %d\n",
+               index, max_valid_index, pyramid_level, y, x);
+        continue;
+      }
+      
       if (px[0] < 0 || px[1] < 0 || px[0] >= img_ref.cols - 1 || px[1] >= img_ref.rows - 1)
-        patch_ptr[patch_size_total * pyramid_level + y * patch_size + x] = 0;
+        patch_ptr[index] = 0;
       else
-        patch_ptr[patch_size_total * pyramid_level + y * patch_size + x] = (float)vk::interpolateMat_8u(img_ref, px[0], px[1]);
+        patch_ptr[index] = (float)vk::interpolateMat_8u(img_ref, px[0], px[1]);
     }
   }
 }
@@ -736,6 +769,26 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       // t_4 += omp_get_wtime() - t_1;
 
       // t_1 = omp_get_wtime();
+
+      // Safety checks before calling warpAffine
+      if (ref_ftr == nullptr)
+      {
+        printf("[ VIO ] Error: ref_ftr is null, skipping warpAffine\n");
+        continue;
+      }
+      
+      if (ref_ftr->img_.empty())
+      {
+        printf("[ VIO ] Error: ref_ftr->img_ is empty, skipping warpAffine\n");
+        continue;
+      }
+      
+      if (warp_len <= 0 || patch_wrap.size() != static_cast<size_t>(warp_len))
+      {
+        printf("[ VIO ] Error: patch_wrap size mismatch (warp_len: %d, patch_wrap.size(): %zu), skipping warpAffine\n",
+               warp_len, patch_wrap.size());
+        continue;
+      }
 
       for (int pyramid_level = 0; pyramid_level <= patch_pyrimid_level - 1; pyramid_level++)
       {

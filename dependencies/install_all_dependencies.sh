@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Master installation script for all dependencies
-# Installs ROS2, common dependencies, Livox driver, Theta driver, and Calibration libraries in sequence
+# Installs Docker, ROS2, common dependencies, Livox driver, Theta driver, and Calibration libraries in sequence
 
 # Colors for output
 RED='\033[0;31m'
@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Script paths
+DOCKER_SCRIPT="${SCRIPT_DIR}/install_docker.sh"
 ROS2_SCRIPT="${SCRIPT_DIR}/install_ros2_jazzy.sh"
 COMMON_SCRIPT="${SCRIPT_DIR}/install_common_dependencies.sh"
 LIVOX_SDK_SCRIPT="${SCRIPT_DIR}/Livox-SDK2/build.sh"
@@ -201,13 +202,14 @@ main() {
     echo -e "${BLUE}========================================${NC}"
     echo ""
     echo -e "${BLUE}This script will install:${NC}"
-    echo -e "  ${BLUE}1.${NC} ROS2 Jazzy"
-    echo -e "  ${BLUE}2.${NC} Common ROS2 Dependencies"
-    echo -e "  ${BLUE}3.${NC} Livox SDK2"
-    echo -e "  ${BLUE}4.${NC} Livox ROS2 Driver"
-    echo -e "  ${BLUE}5.${NC} Theta Driver"
-    echo -e "  ${BLUE}6.${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
-    echo -e "  ${BLUE}7.${NC} Sophus Library"
+    echo -e "  ${BLUE}1.${NC} Docker Engine and Docker Compose"
+    echo -e "  ${BLUE}2.${NC} ROS2 Jazzy"
+    echo -e "  ${BLUE}3.${NC} Common ROS2 Dependencies"
+    echo -e "  ${BLUE}4.${NC} Livox SDK2"
+    echo -e "  ${BLUE}5.${NC} Livox ROS2 Driver"
+    echo -e "  ${BLUE}6.${NC} Theta Driver"
+    echo -e "  ${BLUE}7.${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
+    echo -e "  ${BLUE}8.${NC} Sophus Library"
     echo ""
     
     # Request sudo password at the beginning
@@ -215,9 +217,9 @@ main() {
         exit 1
     fi
     
-    # Step 1: Install ROS2 Jazzy
-    if ! run_step_with_auto_continue "Installing ROS2 Jazzy" "${ROS2_SCRIPT}" "1"; then
-        print_error "Failed at Step 1: ROS2 Jazzy installation"
+    # Step 1: Install Docker
+    if ! run_step_with_auto_continue "Installing Docker" "${DOCKER_SCRIPT}" "1"; then
+        print_error "Failed at Step 1: Docker installation"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -225,9 +227,9 @@ main() {
         exit 1
     fi
     
-    # Step 2: Install Common Dependencies
-    if ! run_step_with_auto_continue "Installing Common Dependencies" "${COMMON_SCRIPT}" "2"; then
-        print_error "Failed at Step 2: Common Dependencies installation"
+    # Step 2: Install ROS2 Jazzy
+    if ! run_step_with_auto_continue "Installing ROS2 Jazzy" "${ROS2_SCRIPT}" "2"; then
+        print_error "Failed at Step 2: ROS2 Jazzy installation"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -235,9 +237,9 @@ main() {
         exit 1
     fi
     
-    # Step 3: Build Livox SDK2
-    if ! run_step_with_auto_continue "Building Livox SDK2" "${LIVOX_SDK_SCRIPT}" "3"; then
-        print_error "Failed at Step 3: Livox SDK2 build"
+    # Step 3: Install Common Dependencies
+    if ! run_step_with_auto_continue "Installing Common Dependencies" "${COMMON_SCRIPT}" "3"; then
+        print_error "Failed at Step 3: Common Dependencies installation"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -245,9 +247,9 @@ main() {
         exit 1
     fi
     
-    # Step 4: Build Livox Driver
-    if ! run_step_with_auto_continue "Building Livox Driver" "${LIVOX_SCRIPT}" "4"; then
-        print_error "Failed at Step 4: Livox Driver build"
+    # Step 4: Build Livox SDK2
+    if ! run_step_with_auto_continue "Building Livox SDK2" "${LIVOX_SDK_SCRIPT}" "4"; then
+        print_error "Failed at Step 4: Livox SDK2 build"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -255,9 +257,9 @@ main() {
         exit 1
     fi
     
-    # Step 5: Build Theta Driver
-    if ! run_step_with_auto_continue "Building Theta Driver" "${THETA_SCRIPT}" "5"; then
-        print_error "Failed at Step 5: Theta Driver build"
+    # Step 5: Build Livox Driver
+    if ! run_step_with_auto_continue "Building Livox Driver" "${LIVOX_SCRIPT}" "5"; then
+        print_error "Failed at Step 5: Livox Driver build"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -265,9 +267,9 @@ main() {
         exit 1
     fi
     
-    # Step 6: Build Calibration Libraries
-    if ! run_step_with_auto_continue "Building Calibration Libraries" "${CALIBRATION_SCRIPT}" "6"; then
-        print_error "Failed at Step 6: Calibration Libraries build"
+    # Step 6: Build Theta Driver
+    if ! run_step_with_auto_continue "Building Theta Driver" "${THETA_SCRIPT}" "6"; then
+        print_error "Failed at Step 6: Theta Driver build"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -275,9 +277,19 @@ main() {
         exit 1
     fi
     
-    # Step 7: Build Sophus Library
-    if ! run_step_with_auto_continue "Building Sophus Library" "${SOPHUS_SCRIPT}" "7"; then
-        print_error "Failed at Step 7: Sophus Library build"
+    # Step 7: Build Calibration Libraries
+    if ! run_step_with_auto_continue "Building Calibration Libraries" "${CALIBRATION_SCRIPT}" "7"; then
+        print_error "Failed at Step 7: Calibration Libraries build"
+        print_info "Please check the error messages above and fix the issues before continuing."
+        echo ""
+        echo -e "${YELLOW}Press Enter to exit...${NC}"
+        read -r
+        exit 1
+    fi
+    
+    # Step 8: Build Sophus Library
+    if ! run_step_with_auto_continue "Building Sophus Library" "${SOPHUS_SCRIPT}" "8"; then
+        print_error "Failed at Step 8: Sophus Library build"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -295,6 +307,7 @@ main() {
         print_success "All dependencies have been installed successfully!"
         echo ""
         print_info "Installed components:"
+        echo -e "  ${GREEN}✓${NC} Docker Engine and Docker Compose"
         echo -e "  ${GREEN}✓${NC} ROS2 Jazzy"
         echo -e "  ${GREEN}✓${NC} Common ROS2 Dependencies"
         echo -e "  ${GREEN}✓${NC} Livox SDK2"
