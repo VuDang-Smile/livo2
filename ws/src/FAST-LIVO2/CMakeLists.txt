@@ -87,6 +87,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(tf2_ros REQUIRED)
@@ -119,6 +120,7 @@ set(dependencies
   nav_msgs
   sensor_msgs
   visualization_msgs
+  std_srvs
   cv_bridge
   vikit_common
   vikit_ros
@@ -184,9 +186,17 @@ if(mimalloc_FOUND)
   target_link_libraries(fastlivo_mapping mimalloc)
 endif()
 
-# Install the executable
+# Add PCD viewer executable
+add_executable(pcd_viewer_node src/pcd_viewer_node.cpp)
+ament_target_dependencies(pcd_viewer_node ${dependencies})
+target_link_libraries(pcd_viewer_node
+  ${PCL_LIBRARIES}
+)
+
+# Install the executables
 install(TARGETS
   fastlivo_mapping
+  pcd_viewer_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

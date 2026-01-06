@@ -293,6 +293,26 @@ void VIOManager::getWarpMatrixAffine(const vk::AbstractCamera &cam, const Vector
 void VIOManager::warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, const Vector2d &px_ref, const int level_ref, const int search_level,
                                const int pyramid_level, const int halfpatch_size, float *patch)
 {
+  // Safety checks
+  if (patch == nullptr)
+  {
+    printf("[ VIO ] Error: warpAffine called with null patch pointer\n");
+    return;
+  }
+  
+  if (img_ref.empty())
+  {
+    printf("[ VIO ] Error: warpAffine called with empty image reference\n");
+    return;
+  }
+  
+  if (patch_size_total <= 0 || patch_pyrimid_level <= 0)
+  {
+    printf("[ VIO ] Error: warpAffine called with uninitialized patch_size_total (%d) or patch_pyrimid_level (%d)\n", 
+           patch_size_total, patch_pyrimid_level);
+    return;
+  }
+  
   const int patch_size = halfpatch_size * 2;
   const Matrix2f A_ref_cur = A_cur_ref.inverse().cast<float>();
   if (isnan(A_ref_cur(0, 0)))
@@ -301,6 +321,9 @@ void VIOManager::warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, c
     return;
   }
 
+  // Calculate maximum valid index to prevent out-of-bounds access
+  const int max_valid_index = patch_size_total * patch_pyrimid_level - 1;
+  
   float *patch_ptr = patch;
   for (int y = 0; y < patch_size; ++y)
   {
@@ -310,10 +333,20 @@ void VIOManager::warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, c
       px_patch *= (1 << search_level);
       px_patch *= (1 << pyramid_level);
       const Vector2f px(A_ref_cur * px_patch + px_ref.cast<float>());
+      
+      // Calculate index with bounds checking
+      const int index = patch_size_total * pyramid_level + y * patch_size + x;
+      if (index < 0 || index > max_valid_index)
+      {
+        printf("[ VIO ] Error: warpAffine index out of bounds: %d (max: %d), pyramid_level: %d, y: %d, x: %d\n",
+               index, max_valid_index, pyramid_level, y, x);
+        continue;
+      }
+      
       if (px[0] < 0 || px[1] < 0 || px[0] >= img_ref.cols - 1 || px[1] >= img_ref.rows - 1)
-        patch_ptr[patch_size_total * pyramid_level + y * patch_size + x] = 0;
+        patch_ptr[index] = 0;
       else
-        patch_ptr[patch_size_total * pyramid_level + y * patch_size + x] = (float)vk::interpolateMat_8u(img_ref, px[0], px[1]);
+        patch_ptr[index] = (float)vk::interpolateMat_8u(img_ref, px[0], px[1]);
     }
   }
 }
@@ -737,6 +770,26 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
       // t_1 = omp_get_wtime();
 
+      // Safety checks before calling warpAffine
+      if (ref_ftr == nullptr)
+      {
+        printf("[ VIO ] Error: ref_ftr is null, skipping warpAffine\n");
+        continue;
+      }
+      
+      if (ref_ftr->img_.empty())
+      {
+        printf("[ VIO ] Error: ref_ftr->img_ is empty, skipping warpAffine\n");
+        continue;
+      }
+      
+      if (warp_len <= 0 || patch_wrap.size() != static_cast<size_t>(warp_len))
+      {
+        printf("[ VIO ] Error: patch_wrap size mismatch (warp_len: %d, patch_wrap.size(): %zu), skipping warpAffine\n",
+               warp_len, patch_wrap.size());
+        continue;
+      }
+
       for (int pyramid_level = 0; pyramid_level <= patch_pyrimid_level - 1; pyramid_level++)
       {
         warpAffine(A_cur_ref_zero, ref_ftr->img_, ref_ftr->px_, ref_ftr->level_, search_level, pyramid_level, patch_size_half, patch_wrap.data());
@@ -962,6 +1015,12 @@ void VIOManager::updateVisualMapPoints(cv::Mat img)
       ftr_new->id_ = new_frame_->id_;
       ftr_new->inv_expo_time_ = state->inv_expo_time;
       pt->addFrameRef(ftr_new);
+      // patch_temp ownership transferred to Feature, will be deleted in Feature destructor
+    }
+    else
+    {
+      // Memory leak fix: delete patch_temp if not used
+      delete[] patch_temp;
     }
   }
   printf("[ VIO ] Update %d points in visual submap\n", update_num);
@@ -1874,4 +1933,54 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
   // origin.y = 20;
   // cv::putText(img_cp, text, origin, cv::FONT_HERSHEY_COMPLEX, 0.6, cv::Scalar(255, 255, 255), 1, 8, 0);
   // cv::imwrite("/home/chunran/Desktop/raycasting/" + std::to_string(new_frame_->id_) + ".png", img_cp);
+}
+
+void VIOManager::cleanupFeatMap(const V3D &current_position, double cleanup_radius)
+{
+  if (feat_map.empty()) return;
+  
+  int deleted_count = 0;
+  float voxel_size = 0.5;
+  
+  // Calculate current voxel position
+  int loc_xyz[3];
+  for (int j = 0; j < 3; j++)
+  {
+    loc_xyz[j] = floor(current_position[j] / voxel_size);
+    if (loc_xyz[j] < 0) { loc_xyz[j] -= 1.0; }
+  }
+  
+  // Calculate cleanup bounds in voxel coordinates
+  int radius_voxels = (int)(cleanup_radius / voxel_size);
+  int x_min = loc_xyz[0] - radius_voxels;
+  int x_max = loc_xyz[0] + radius_voxels;
+  int y_min = loc_xyz[1] - radius_voxels;
+  int y_max = loc_xyz[1] + radius_voxels;
+  int z_min = loc_xyz[2] - radius_voxels;
+  int z_max = loc_xyz[2] + radius_voxels;
+  
+  // Cleanup feat_map entries outside the cleanup radius
+  for (auto it = feat_map.begin(); it != feat_map.end(); )
+  {
+    const VOXEL_LOCATION& loc = it->first;
+    bool should_remove = loc.x > x_max || loc.x < x_min || 
+                         loc.y > y_max || loc.y < y_min || 
+                         loc.z > z_max || loc.z < z_min;
+    
+    if (should_remove)
+    {
+      delete it->second;
+      it = feat_map.erase(it);
+      deleted_count++;
+    }
+    else
+    {
+      ++it;
+    }
+  }
+  
+  if (deleted_count > 0)
+  {
+    printf("[ VIO ] Cleaned up %d feat_map entries (remaining: %zu)\n", deleted_count, feat_map.size());
+  }
 }

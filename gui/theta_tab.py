@@ -26,6 +26,7 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '0'
 import cv2
+import numpy as np
 try:
     cv2.setNumThreads(1)
 except:
@@ -66,21 +67,32 @@ class SingleImageSubscriber(Node):
         self.get_logger().info(f'Đã subscribe topic {topic_name}')
     
     def image_callback(self, msg):
-        """Callback khi nhận được ảnh"""
+        """Callback when receiving image"""
         try:
-            # Debug: log mỗi 30 frame
+            # Debug: log every 30 frames
             if not hasattr(self, '_callback_count'):
                 self._callback_count = 0
             self._callback_count += 1
             if self._callback_count % 30 == 0:
-                self.get_logger().info(f'Đã nhận {self._callback_count} frames từ {self.topic_name}')
-                print(f'[SingleImageSubscriber] Đã nhận {self._callback_count} frames từ {self.topic_name}')
+                self.get_logger().info(f'Received {self._callback_count} frames from {self.topic_name}')
+                print(f'[SingleImageSubscriber] Received {self._callback_count} frames from {self.topic_name}')
             
             # Debug: log encoding
             if self._callback_count == 1:
                 print(f'[SingleImageSubscriber] Encoding: {msg.encoding}, Size: {msg.width}x{msg.height}')
             
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
+            # Handle JPEG compressed images
+            if msg.encoding.lower() in ['jpeg', 'jpg']:
+                # Decode JPEG data directly from compressed format
+                jpeg_data = np.frombuffer(msg.data, dtype=np.uint8)
+                cv_image = cv2.imdecode(jpeg_data, cv2.IMREAD_COLOR)
+                if cv_image is None:
+                    raise ValueError("Failed to decode JPEG image")
+                # Convert BGR to RGB
+                cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+            else:
+                # Use cv_bridge for standard encodings
+                cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
             
             # Debug: log image shape
             if self._callback_count == 1:
@@ -88,7 +100,7 @@ class SingleImageSubscriber(Node):
             
             self.callback(cv_image)
         except Exception as e:
-            error_msg = f'Lỗi xử lý ảnh từ {self.topic_name}: {e}'
+            error_msg = f'Error processing image from {self.topic_name}: {e}'
             self.get_logger().error(error_msg)
             print(f'[SingleImageSubscriber] ERROR: {error_msg}')
             import traceback

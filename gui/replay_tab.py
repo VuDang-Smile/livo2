@@ -28,7 +28,7 @@ class ReplayTab(ttk.Frame):
         
         # Paths
         self.workspace_path = Path(__file__).parent.parent / "ws"
-        self.drive_ws_path = Path(__file__).parent.parent / "drive_ws"
+        self.drive_ws_path = Path(__file__).parent.parent / "dependencies" / "drive_ws"
         
         # Process
         self.replay_process = None

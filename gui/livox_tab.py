@@ -343,7 +343,7 @@ class LivoxTab(ttk.Frame):
     
     def start_livox_driver(self):
         """Start Livox MID 360 driver"""
-        workspace_path = Path(__file__).parent.parent / "drive_ws"
+        workspace_path = Path(__file__).parent.parent / "dependencies" / "drive_ws"
         launch_file = Path("src/livox_ros_driver2/launch_ROS2/msg_MID360_launch.py")
         
         if self._start_ros2_process(

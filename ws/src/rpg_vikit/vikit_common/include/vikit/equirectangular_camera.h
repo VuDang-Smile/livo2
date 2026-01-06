@@ -87,6 +87,3 @@ public:
 } // end namespace vk
 
 #endif /* EQUIRECTANGULAR_CAMERA_H_ */
-
-
-

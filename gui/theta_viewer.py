@@ -43,10 +43,10 @@ except ImportError as e:
 from theta_tab import ThetaTab
 from livox_tab import LivoxTab
 from calibration_tab import CalibrationTab
-from mapping_tab import MappingTab
 from recording_tab import RecordingTab
 from replay_tab import ReplayTab
 from bag_mapping_tab import BagMappingTab
+from pcd_viewer_tab import PCDViewerTab
 
 
 class MainGUI:
@@ -73,9 +73,7 @@ class MainGUI:
         self.calibration_tab = CalibrationTab(self.notebook)
         self.notebook.add(self.calibration_tab, text="Calibration")
         
-        # Tạo tab Mapping
-        self.mapping_tab = MappingTab(self.notebook)
-        self.notebook.add(self.mapping_tab, text="Mapping")
+        # Tab Mapping cũ đã được loại bỏ - sử dụng Bag Mapping thay thế
         
         # Tạo tab Recording
         self.recording_tab = RecordingTab(self.notebook)
@@ -88,6 +86,10 @@ class MainGUI:
         # Tạo tab Bag Mapping
         self.bag_mapping_tab = BagMappingTab(self.notebook)
         self.notebook.add(self.bag_mapping_tab, text="Bag Mapping")
+        
+        # Tạo tab PCD Viewer
+        self.pcd_viewer_tab = PCDViewerTab(self.notebook)
+        self.notebook.add(self.pcd_viewer_tab, text="PCD Viewer")
         
         # Bind events
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -108,13 +110,7 @@ class MainGUI:
             if self.calibration_tab.is_recording:
                 self.calibration_tab.stop_record()
         
-        # Dừng mapping nếu đang chạy
-        if hasattr(self.mapping_tab, 'stop_mapping'):
-            if self.mapping_tab.is_mapping_running:
-                self.mapping_tab.stop_mapping()
-        if hasattr(self.mapping_tab, 'stop_rviz'):
-            if self.mapping_tab.is_rviz_running:
-                self.mapping_tab.stop_rviz()
+        # Tab Mapping cũ đã được loại bỏ
         
         # Dừng recording nếu đang chạy
         if hasattr(self.recording_tab, 'stop_recording'):
@@ -130,6 +126,11 @@ class MainGUI:
         if hasattr(self.bag_mapping_tab, 'stop_mapping'):
             if self.bag_mapping_tab.is_mapping_running or self.bag_mapping_tab.is_bag_playing:
                 self.bag_mapping_tab.stop_mapping()
+        
+        # Dừng PCD viewer nếu đang chạy
+        if hasattr(self.pcd_viewer_tab, 'stop_viewer'):
+            if self.pcd_viewer_tab.is_viewer_running:
+                self.pcd_viewer_tab.stop_viewer()
         
         # Shutdown ROS nếu đã được khởi tạo
         if rclpy and rclpy.ok():
