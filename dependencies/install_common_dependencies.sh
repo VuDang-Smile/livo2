@@ -40,7 +40,7 @@ DEPENDENCIES=(
 # For Python 3.12, numpy < 1.24 may not have wheels, so we'll handle it specially
 PYTHON_PACKAGES=(
     "transforms3d"  # Alternative to tf_transformations (provides quaternion_from_euler)
-    "open3d"
+    "open3d>=0.17.0"
 )
 
 # Numpy will be handled separately based on Python version and ros2-numpy requirements
@@ -51,6 +51,7 @@ PYTHON_PACKAGES_SPECIAL=(
     "numpy"  # Will be handled with ros2-numpy to resolve version
     "ros2-numpy"  # May require numpy==1.24.2, will handle separately
     "tf_transformations"  # Try from PyPI, fallback to git if not available
+    "open3d>=0.17.0"
 )
 
 # Print functions
@@ -205,139 +206,19 @@ install_python_packages() {
         echo -e "${BLUE}----------------------------------------${NC}"
         print_info "Processing Python package: ${package}"
         
-        # Special handling for numpy with version constraint
-        if [[ "$package" == "numpy<1.24" ]]; then
-            # Check if numpy is installed and its version
-            if $PIP_CMD show numpy &> /dev/null; then
-                local numpy_version=$($PIP_CMD show numpy | grep "^Version:" | awk '{print $2}')
-                print_info "Current numpy version: ${numpy_version}"
-                
-                # Check if version is < 1.24 using Python
-                # Compare version strings: split by '.' and compare numerically
-                local version_check=$(python3 <<EOF
-import sys
-try:
-    current = tuple(map(int, "${numpy_version}".split('.')))
-    target = (1, 24)
-    if current < target:
-        sys.exit(0)
-    else:
-        sys.exit(1)
-except Exception as e:
-    # If parsing fails, assume needs upgrade
-    sys.exit(1)
-EOF
-)
-                
-                # Check if version_check has a valid value (handle empty or non-numeric)
-                if [ -z "$version_check" ] || ! [[ "$version_check" =~ ^[0-9]+$ ]]; then
-                    version_check=1  # Default to failure if empty or invalid
-                fi
-                
-                if [ "$version_check" -eq 0 ]; then
-                    print_success "numpy ${numpy_version} is already installed and compatible (< 1.24). Skipping..."
-                    skipped_count=$((skipped_count + 1))
-                else
-                    print_warning "numpy ${numpy_version} is installed but >= 1.24. Downgrading to < 1.24..."
-                    # Uninstall current numpy first to avoid build issues
-                    print_info "Uninstalling current numpy..."
-                    $PIP_CMD uninstall -y numpy 2>/dev/null || true
-                    
-                    # Install numpy<1.24 using only binary wheels (no build from source)
-                    print_info "Installing numpy<1.24 (using pre-built wheels only)..."
-                    local install_success=false
-                    
-                    # Try with --only-binary to avoid building from source
-                    if $PIP_CMD install --break-system-packages --only-binary :all: --no-cache-dir "numpy<1.24" 2>&1 | grep -q "Successfully installed"; then
-                        install_success=true
-                    elif $PIP_CMD install --break-system-packages --only-binary :all: "numpy<1.24" 2>&1 | grep -q "Successfully installed"; then
-                        install_success=true
-                    elif $PIP_CMD install --break-system-packages --prefer-binary "numpy<1.24" 2>&1 | grep -q "Successfully installed"; then
-                        install_success=true
-                    fi
-                    
-                    if [ "$install_success" = true ]; then
-                        print_success "numpy downgraded successfully (using pre-built wheels)."
-                        installed_count=$((installed_count + 1))
-                    else
-                        print_error "Failed to downgrade numpy. Trying alternative approach..."
-                        # Last resort: try installing specific version that has wheels
-                        if $PIP_CMD install --break-system-packages --only-binary :all: "numpy==1.23.5" 2>&1 | grep -q "Successfully installed"; then
-                            print_success "numpy downgraded to 1.23.5 (using pre-built wheels)."
-                            installed_count=$((installed_count + 1))
-                        else
-                            print_error "Failed to downgrade numpy. You may need to manually fix numpy version."
-                            failed_packages+=("${package}")
-                            INSTALL_FAILED=true
-                        fi
-                    fi
-                fi
-            else
-                print_info "Installing numpy<1.24..."
-                # Use only binary wheels to avoid build issues with Python 3.12
-                local install_success=false
-                
-                # Try with --only-binary to avoid building from source
-                if $PIP_CMD install --break-system-packages --only-binary :all: --no-cache-dir "numpy<1.24" 2>&1 | grep -q "Successfully installed"; then
-                    install_success=true
-                elif $PIP_CMD install --break-system-packages --only-binary :all: "numpy<1.24" 2>&1 | grep -q "Successfully installed"; then
-                    install_success=true
-                elif $PIP_CMD install --break-system-packages --prefer-binary "numpy<1.24" 2>&1 | grep -q "Successfully installed"; then
-                    install_success=true
-                fi
-                
-                if [ "$install_success" = true ]; then
-                    print_success "numpy<1.24 installed successfully (using pre-built wheels)."
-                    installed_count=$((installed_count + 1))
-                else
-                    print_error "Failed to install numpy<1.24. Trying specific version..."
-                    # Try installing specific version that has wheels
-                    if $PIP_CMD install --break-system-packages --only-binary :all: "numpy==1.23.5" 2>&1 | grep -q "Successfully installed"; then
-                        print_success "numpy 1.23.5 installed successfully (using pre-built wheels)."
-                        installed_count=$((installed_count + 1))
-                    else
-                        print_error "Failed to install numpy<1.24."
-                        failed_packages+=("${package}")
-                        INSTALL_FAILED=true
-                    fi
-                fi
-            fi
+        # Check if package is already installed
+        if $PIP_CMD show "${package}" &> /dev/null; then
+            print_success "${package} is already installed. Skipping..."
+            skipped_count=$((skipped_count + 1))
         else
-            # For other packages, extract package name without version constraint for checking
-            local package_name=$(echo "$package" | sed 's/[<>=!].*//')
-            
-            # Check if package is already installed
-            if $PIP_CMD show "${package_name}" &> /dev/null; then
-                print_success "${package_name} is already installed. Skipping..."
-                skipped_count=$((skipped_count + 1))
+            print_info "Installing ${package}..."
+            if $PIP_CMD install --user "${package}"; then
+                print_success "${package} installed successfully."
+                installed_count=$((installed_count + 1))
             else
-                print_info "Installing ${package}..."
-                # Try with --user first, then --break-system-packages if needed
-                if $PIP_CMD install --user "${package}" 2>&1 | grep -q "externally-managed-environment"; then
-                    print_warning "externally-managed-environment detected. Using --break-system-packages..."
-                    if $PIP_CMD install --break-system-packages "${package}"; then
-                        print_success "${package} installed successfully (with --break-system-packages)."
-                        installed_count=$((installed_count + 1))
-                    else
-                        print_error "Failed to install ${package} even with --break-system-packages."
-                        failed_packages+=("${package}")
-                        INSTALL_FAILED=true
-                    fi
-                elif ! $PIP_CMD install --user "${package}" 2>/dev/null; then
-                    # If --user failed, try --break-system-packages
-                    print_warning "Installation with --user failed. Trying with --break-system-packages..."
-                    if $PIP_CMD install --break-system-packages "${package}"; then
-                        print_success "${package} installed successfully (with --break-system-packages)."
-                        installed_count=$((installed_count + 1))
-                    else
-                        print_error "Failed to install ${package}."
-                        failed_packages+=("${package}")
-                        INSTALL_FAILED=true
-                    fi
-                else
-                    print_success "${package} installed successfully."
-                    installed_count=$((installed_count + 1))
-                fi
+                print_error "Failed to install ${package}."
+                failed_packages+=("${package}")
+                INSTALL_FAILED=true
             fi
         fi
         echo ""
@@ -582,10 +463,8 @@ verify_installation() {
         
         # Verify regular Python packages
         for package in "${PYTHON_PACKAGES[@]}"; do
-            # Extract package name without version constraint
-            local package_name=$(echo "$package" | sed 's/[<>=!].*//')
-            if $PIP_CMD show "${package_name}" &> /dev/null; then
-                print_success "${package_name} ✓"
+            if $PIP_CMD show "${package}" &> /dev/null; then
+                print_success "${package} ✓"
             else
                 print_error "${package_name} ✗"
                 missing_packages+=("${package}")

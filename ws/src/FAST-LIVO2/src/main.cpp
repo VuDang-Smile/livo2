@@ -33,12 +33,16 @@ void signalHandler(int signum) {
   rclcpp::shutdown();
   exit(signum);
 }
+#include "crash_handler.h"
 
 int main(int argc, char **argv)
 {
   // Register signal handler for graceful shutdown
   signal(SIGINT, signalHandler);
   signal(SIGTERM, signalHandler);
+  
+  // Install crash handlers early to catch any crashes
+  crash_handler::installCrashHandlers();
   
   rclcpp::init(argc, argv);
   rclcpp::NodeOptions options;

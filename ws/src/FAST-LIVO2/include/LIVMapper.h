@@ -21,8 +21,6 @@ which is included as part of this source code package.
 #else
 #include <cv_bridge/cv_bridge.hpp>
 #endif
-#include <opencv2/imgcodecs.hpp>
-#include <opencv2/imgproc.hpp>
 #include <image_transport/image_transport.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>

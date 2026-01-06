@@ -52,7 +52,7 @@ class BagMappingTab(ttk.Frame):
         self.latest_map_dir = None
         self.bag_path = None
         self.use_rviz = False
-        # Single unified config - no selection needed
+        self.config_path = None  # Path to config file
         self.bag_rate = 0.5  # Default: 0.5x for slower playback
         
         # Tạo UI
@@ -169,7 +169,48 @@ class BagMappingTab(ttk.Frame):
         )
         rviz_check.pack(side=tk.LEFT)
         
-        # Config selection removed - using single unified config
+        # Config file selection
+        config_frame = ttk.LabelFrame(main_frame, text="Chọn Config File", padding="10")
+        config_frame.pack(fill=tk.X, pady=5)
+        
+        config_select_frame = ttk.Frame(config_frame)
+        config_select_frame.pack(fill=tk.X)
+        
+        self.config_path_var = tk.StringVar()
+        config_entry = ttk.Entry(config_select_frame, textvariable=self.config_path_var, state="readonly")
+        config_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        
+        browse_config_btn = ttk.Button(
+            config_select_frame,
+            text="Browse...",
+            command=self.browse_config_file
+        )
+        browse_config_btn.pack(side=tk.RIGHT)
+        
+        # Quick select from common configs
+        quick_config_frame = ttk.Frame(config_frame)
+        quick_config_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(quick_config_frame, text="Hoặc chọn nhanh:").pack(side=tk.LEFT, padx=5)
+        
+        self.quick_config_var = tk.StringVar()
+        # Find all yaml files in config directory
+        config_dir = self.workspace_path / "src" / "FAST-LIVO2" / "config"
+        config_files = []
+        if config_dir.exists():
+            config_files = sorted([f.name for f in config_dir.glob("*.yaml") if f.is_file()])
+        
+        if not config_files:
+            config_files = ["mid360_equirectangular.yaml"]  # Fallback
+        
+        quick_config_combo = ttk.Combobox(
+            quick_config_frame,
+            textvariable=self.quick_config_var,
+            values=config_files,
+            state="readonly",
+            width=30
+        )
+        quick_config_combo.pack(side=tk.LEFT, padx=5)
+        quick_config_combo.bind("<<ComboboxSelected>>", self.on_quick_config_select)
         
         # Bag rate selection
         rate_frame = ttk.Frame(options_frame)
@@ -214,6 +255,14 @@ class BagMappingTab(ttk.Frame):
         )
         self.stop_btn.pack(side=tk.LEFT, padx=5)
         
+        # Merge PCD button
+        self.merge_pcd_btn = ttk.Button(
+            control_frame,
+            text="🔗 Merge PCD",
+            command=self.merge_pcd_files
+        )
+        self.merge_pcd_btn.pack(side=tk.LEFT, padx=5)
+        
         # Status label
         self.status_label = ttk.Label(
             control_frame,
@@ -234,9 +283,163 @@ class BagMappingTab(ttk.Frame):
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
         
+        # Set default config (after log_text is created)
+        self.set_default_config()
+        
         # Initial log
         self.log("✅ Bag Mapping Tab đã sẵn sàng")
-        self.log("📝 Vui lòng chọn bag file để bắt đầu mapping")
+        self.log("📝 Vui lòng chọn bag file và config file để bắt đầu mapping")
+    
+    def merge_pcd_files(self):
+        """Gộp tất cả các file PCD trong thư mục Log/PCD thành một file lớn"""
+        pcd_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "PCD"
+        
+        if not pcd_dir.exists():
+            messagebox.showerror("Lỗi", f"Thư mục PCD không tồn tại: {pcd_dir}")
+            self.log(f"❌ Thư mục PCD không tồn tại: {pcd_dir}")
+            return
+        
+        # Tìm tất cả file PCD (bỏ qua file merged nếu có)
+        pcd_files = sorted([f for f in pcd_dir.glob("*.pcd") if f.name != "merged_all.pcd"])
+        
+        if not pcd_files:
+            messagebox.showwarning("Cảnh báo", f"Không tìm thấy file PCD nào trong thư mục: {pcd_dir}")
+            self.log(f"⚠️ Không tìm thấy file PCD nào trong: {pcd_dir}")
+            return
+        
+        self.log("=" * 60)
+        self.log(f"🔗 Bắt đầu merge {len(pcd_files)} file PCD...")
+        self.log(f"📁 Thư mục: {pcd_dir}")
+        
+        # Disable button during merge
+        self.merge_pcd_btn.config(state=tk.DISABLED)
+        
+        try:
+            # Kiểm tra open3d
+            try:
+                import open3d as o3d
+            except ImportError:
+                error_msg = (
+                    "Thư viện open3d chưa được cài đặt.\n\n"
+                    "Vui lòng cài đặt bằng lệnh:\n"
+                    "pip install open3d\n\n"
+                    "Hoặc thêm vào requirements.txt và cài đặt lại."
+                )
+                messagebox.showerror("Thiếu thư viện", error_msg)
+                self.log("❌ open3d chưa được cài đặt. Vui lòng cài đặt: pip install open3d")
+                return
+            
+            merged_cloud = None
+            total_points = 0
+            
+            # Sử dụng open3d để merge
+            for i, pcd_file in enumerate(pcd_files, 1):
+                try:
+                    self.log(f"📖 Đang đọc file {i}/{len(pcd_files)}: {pcd_file.name}")
+                    cloud = o3d.io.read_point_cloud(str(pcd_file))
+                    
+                    if len(cloud.points) == 0:
+                        self.log(f"⚠️ File {pcd_file.name} rỗng, bỏ qua")
+                        continue
+                    
+                    if merged_cloud is None:
+                        merged_cloud = cloud
+                    else:
+                        merged_cloud += cloud
+                    
+                    total_points += len(cloud.points)
+                    self.log(f"   ✓ Đã thêm {len(cloud.points):,} điểm từ {pcd_file.name}")
+                    
+                except Exception as e:
+                    self.log(f"❌ Lỗi khi đọc {pcd_file.name}: {e}")
+                    continue
+            
+            if merged_cloud is None or len(merged_cloud.points) == 0:
+                messagebox.showerror("Lỗi", "Không thể merge PCD files. Không có điểm nào hợp lệ.")
+                self.log("❌ Không có điểm nào để merge")
+                return
+            
+            # Lưu file merged
+            output_file = pcd_dir / "merged_all.pcd"
+            self.log(f"💾 Đang lưu file merged: {output_file.name}")
+            o3d.io.write_point_cloud(str(output_file), merged_cloud)
+            
+            # Kiểm tra kết quả
+            if output_file.exists():
+                size_mb = output_file.stat().st_size / (1024 * 1024)
+                self.log("=" * 60)
+                self.log(f"✅ Merge PCD thành công!")
+                self.log(f"📁 File output: {output_file.name}")
+                self.log(f"📊 Tổng số điểm: {total_points:,}")
+                self.log(f"💾 Kích thước file: {size_mb:.2f} MB")
+                self.log("=" * 60)
+                messagebox.showinfo("Thành công", 
+                    f"Đã merge {len(pcd_files)} file PCD thành công!\n\n"
+                    f"File output: {output_file.name}\n"
+                    f"Tổng số điểm: {total_points:,}\n"
+                    f"Kích thước: {size_mb:.2f} MB")
+            else:
+                raise Exception("File output không được tạo")
+                
+        except Exception as e:
+            error_msg = f"Lỗi khi merge PCD files: {e}"
+            self.log(f"❌ {error_msg}")
+            messagebox.showerror("Lỗi", error_msg)
+        finally:
+            # Re-enable button
+            self.merge_pcd_btn.config(state=tk.NORMAL)
+    
+    def set_default_config(self):
+        """Set default config file"""
+        default_config = self.workspace_path / "src" / "FAST-LIVO2" / "config" / "mid360_equirectangular.yaml"
+        if default_config.exists():
+            self.config_path = str(default_config)
+            self.config_path_var.set(str(default_config))
+            self.quick_config_var.set("mid360_equirectangular.yaml")
+            self.log(f"✅ Đã chọn config mặc định: {default_config.name}")
+        else:
+            self.log("⚠️ Không tìm thấy config mặc định")
+    
+    def browse_config_file(self):
+        """Chọn config file"""
+        config_dir = self.workspace_path / "src" / "FAST-LIVO2" / "config"
+        if not config_dir.exists():
+            config_dir = Path.home()
+        
+        config_path = filedialog.askopenfilename(
+            title="Chọn Config File",
+            initialdir=str(config_dir),
+            filetypes=[("YAML files", "*.yaml"), ("All files", "*.*")]
+        )
+        
+        if config_path:
+            config_path_obj = Path(config_path)
+            if config_path_obj.exists() and config_path_obj.suffix in ['.yaml', '.yml']:
+                self.config_path = str(config_path_obj)
+                self.config_path_var.set(str(config_path_obj))
+                # Update quick select if it's in the config directory
+                config_dir = self.workspace_path / "src" / "FAST-LIVO2" / "config"
+                if config_dir.exists() and config_path_obj.parent.samefile(config_dir):
+                    self.quick_config_var.set(config_path_obj.name)
+                else:
+                    self.quick_config_var.set("")
+                self.log(f"✅ Đã chọn config: {config_path_obj.name}")
+            else:
+                messagebox.showerror("Lỗi", f"File không hợp lệ hoặc không tồn tại: {config_path}")
+    
+    def on_quick_config_select(self, event=None):
+        """Xử lý khi chọn config từ quick select"""
+        selected = self.quick_config_var.get()
+        if selected:
+            config_path = self.workspace_path / "src" / "FAST-LIVO2" / "config" / selected
+            if config_path.exists():
+                self.config_path = str(config_path)
+                self.config_path_var.set(str(config_path))
+                self.log(f"✅ Đã chọn config: {selected}")
+            else:
+                messagebox.showerror("Lỗi", f"Config file không tồn tại: {config_path}")
+                self.quick_config_var.set("")
+    
     
     def browse_bag_file(self):
         """Chọn bag file"""
@@ -326,8 +529,6 @@ class BagMappingTab(ttk.Frame):
         else:
             self.log("ℹ️ RViz2 sẽ không được hiển thị")
     
-    # Config selection removed - using single unified config
-    
     def on_rate_change(self, event=None):
         """Callback khi thay đổi bag rate"""
         try:
@@ -367,15 +568,32 @@ class BagMappingTab(ttk.Frame):
         drive_ws_setup = self.drive_ws_path / "install" / "setup.sh"
         use_drive_ws = drive_ws_setup.exists()
         
+        # Kiểm tra config file
+        if not self.config_path:
+            messagebox.showerror(
+                "Lỗi",
+                "Vui lòng chọn config file trước khi bắt đầu mapping."
+            )
+            return
+        
+        config_path_obj = Path(self.config_path)
+        if not config_path_obj.exists():
+            messagebox.showerror(
+                "Lỗi",
+                f"Config file không tồn tại: {self.config_path}\n"
+                "Vui lòng chọn lại config file."
+            )
+            return
+        
         try:
             ros2_setup = "/opt/ros/jazzy/setup.bash"
             
             # Build command cho mapping launch
             rviz_arg = "True" if self.use_rviz else "False"
             
-            # Single unified launch file
+            # Launch file
             launch_file = "mapping_mid360_equirectangular.launch.py"
-            config_name = "Unified Config"
+            config_name = config_path_obj.name
             
             # Source environment
             if use_drive_ws:
@@ -383,14 +601,18 @@ class BagMappingTab(ttk.Frame):
                     f"source {ros2_setup} && "
                     f"source {drive_ws_setup} && "
                     f"source {ws_setup} && "
-                    f"ros2 launch fast_livo {launch_file} use_rviz:={rviz_arg}"
+                    f"ros2 launch fast_livo {launch_file} "
+                    f"use_rviz:={rviz_arg} "
+                    f"params_file:={self.config_path}"
                 )
                 self.log("✅ Sẽ source: ROS2 base -> drive_ws -> ws")
             else:
                 mapping_cmd = (
                     f"source {ros2_setup} && "
                     f"source {ws_setup} && "
-                    f"ros2 launch fast_livo {launch_file} use_rviz:={rviz_arg}"
+                    f"ros2 launch fast_livo {launch_file} "
+                    f"use_rviz:={rviz_arg} "
+                    f"params_file:={self.config_path}"
                 )
                 self.log("⚠️ Sẽ source: ROS2 base -> ws (không có drive_ws)")
             
@@ -402,7 +624,8 @@ class BagMappingTab(ttk.Frame):
             
             self.log("=" * 60)
             self.log("🚀 Bắt đầu Mapping Node")
-            self.log(f"📋 Config: {config_name}")
+            self.log(f"📋 Config file: {config_name}")
+            self.log(f"📁 Config path: {self.config_path}")
             self.log(f"🎯 Launch file: {launch_file}")
             self.log(f"👁️ RViz2: {'Có' if self.use_rviz else 'Không'}")
             self.log("=" * 60)

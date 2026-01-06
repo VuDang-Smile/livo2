@@ -214,6 +214,49 @@ source_livox_driver() {
     fi
 }
 
+# Hàm chuẩn bị thư mục Log cho FAST-LIVO2
+prepare_log_directories() {
+    # Kiểm tra xem có build fast_livo không
+    local build_fast_livo=0
+    for i in "${!PACKAGES[@]}"; do
+        if [ "${SELECTED[$i]}" -eq 1 ] && [ "${PACKAGES[$i]}" = "fast_livo" ]; then
+            build_fast_livo=1
+            break
+        fi
+    done
+    
+    # Chỉ tạo thư mục Log nếu build fast_livo
+    if [ $build_fast_livo -eq 1 ]; then
+        echo -e "${BLUE}========================================${NC}"
+        echo -e "${BLUE}Chuẩn bị thư mục Log cho FAST-LIVO2...${NC}"
+        echo -e "${BLUE}========================================${NC}"
+        
+        # Đường dẫn đến thư mục Log
+        local log_dir="$WS_DIR/src/FAST-LIVO2/Log"
+        local pcd_dir="$log_dir/PCD"
+        local colmap_dir="$log_dir/Colmap/sparse/0"
+        
+        # Tạo các thư mục cần thiết
+        mkdir -p "$pcd_dir"
+        mkdir -p "$colmap_dir"
+        mkdir -p "$log_dir"
+        
+        # Set quyền (755 cho thư mục, 644 cho file nếu có)
+        chmod -R 755 "$log_dir" 2>/dev/null || true
+        
+        # Kiểm tra quyền ghi
+        if [ -w "$pcd_dir" ]; then
+            echo -e "${GREEN}✅ Đã tạo và cấp quyền cho thư mục Log${NC}"
+            echo -e "   - PCD directory: $pcd_dir"
+            echo -e "   - Colmap directory: $colmap_dir"
+        else
+            echo -e "${YELLOW}⚠️  Cảnh báo: Không thể ghi vào thư mục Log${NC}"
+            echo -e "   Thử chạy: chmod -R 755 $log_dir"
+        fi
+        echo ""
+    fi
+}
+
 # Hàm build packages
 build_packages() {
     echo -e "${BLUE}========================================${NC}"
@@ -230,7 +273,7 @@ build_packages() {
     
     if [ ${#packages_to_build[@]} -eq 0 ]; then
         echo -e "${RED}Không có package nào được chọn để build!${NC}"
-        exit 1
+        return 1
     fi
     
     echo -e "${GREEN}Packages sẽ được build:${NC}"
@@ -240,7 +283,7 @@ build_packages() {
     echo ""
     
     # Chuyển đến thư mục ws
-    cd "$WS_DIR"
+    cd "$WS_DIR" || return 1
     
     # Build với colcon
     local packages_arg="--packages-select"
@@ -251,12 +294,25 @@ build_packages() {
     echo -e "${BLUE}Chạy lệnh: colcon build $packages_arg --symlink-install${NC}"
     echo ""
     
-    colcon build $packages_arg --symlink-install
+    # Tắt set -e tạm thời để bắt lỗi build và hiển thị đầy đủ error messages
+    set +e
+    colcon build $packages_arg --symlink-install 2>&1
+    local build_status=$?
+    # Không bật lại set -e ở đây để tránh exit sớm
     
     echo ""
-    echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}Build hoàn tất!${NC}"
-    echo -e "${GREEN}========================================${NC}"
+    if [ $build_status -eq 0 ]; then
+        echo -e "${GREEN}========================================${NC}"
+        echo -e "${GREEN}Build hoàn tất thành công!${NC}"
+        echo -e "${GREEN}========================================${NC}"
+    else
+        echo -e "${RED}========================================${NC}"
+        echo -e "${RED}Build thất bại!${NC}"
+        echo -e "${RED}Vui lòng kiểm tra các thông báo lỗi ở trên.${NC}"
+        echo -e "${RED}========================================${NC}"
+    fi
+    
+    return $build_status
 }
 
 # Main function
@@ -274,15 +330,29 @@ main() {
     echo -e "${YELLOW}Chọn packages để build${NC}"
     handle_menu_input
     
+    # Chuẩn bị thư mục Log (trước khi build)
+    prepare_log_directories
+    
     # Build packages
     echo -e "${YELLOW}Build packages${NC}"
+    # Tắt set -e để không thoát ngay khi build fail và có thể hiển thị đầy đủ errors
+    set +e
     build_packages
+    local build_result=$?
+    # Giữ set +e để đảm bảo phần "press enter to exit" luôn được thực thi
     
-    # Tạm dừng trước khi thoát
+    # Tạm dừng trước khi thoát (luôn hiển thị dù build thành công hay thất bại)
     echo ""
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${YELLOW}Nhấn phím bất kỳ để thoát...${NC}"
-    read -n 1 -s
+    if [ $build_result -eq 0 ]; then
+        echo -e "${GREEN}Nhấn Enter để thoát...${NC}"
+    else
+        echo -e "${RED}Nhấn Enter để thoát...${NC}"
+    fi
+    read -r
+    
+    # Trả về exit code tương ứng với kết quả build
+    exit $build_result
 }
 
 # Chạy main function
