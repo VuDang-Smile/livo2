@@ -84,8 +84,3 @@ echo ""
 echo "=========================================="
 echo "✅ Ceres Solver build and install completed successfully!"
 echo "=========================================="
-<<<<<<< HEAD
-=======
-
-
->>>>>>> f5d777a (update code gui)
