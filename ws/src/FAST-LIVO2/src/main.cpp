@@ -1,7 +1,11 @@
 #include "LIVMapper.h"
+#include "crash_handler.h"
 
 int main(int argc, char **argv)
 {
+  // Install crash handlers early to catch any crashes
+  crash_handler::installCrashHandlers();
+  
   rclcpp::init(argc, argv);
   rclcpp::NodeOptions options;
   options.allow_undeclared_parameters(true);
