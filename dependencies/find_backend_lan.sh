@@ -43,18 +43,24 @@ check_sudo() {
     fi
 }
 
-# Get local IP and subnet
+# Get local IP and subnet (prefer real LAN interface, not docker/bridge)
 get_local_network() {
-    # Get default interface
-    local interface=$(ip route | grep default | awk '{print $5}' | head -n1)
+    # Try to get default interface (IPv4)
+    local interface
+    interface=$(ip -4 route show default 2>/dev/null | awk '{print $5}' | head -n1)
+
+    # If default interface is docker/bridge or empty, pick first global non-virtual iface
+    if [ -z "$interface" ] || [[ "$interface" == "docker0" ]] || [[ "$interface" == br-* ]] || [[ "$interface" == veth* ]]; then
+        interface=$(ip -o -4 addr show scope global 2>/dev/null | awk '!/docker0/ && !/br-/ && !/veth/ {print $2; exit}')
+    fi
     
     if [ -z "$interface" ]; then
         print_error "Could not determine network interface"
         wait_for_exit
     fi
     
-    # Get local IP
-    local_ip=$(ip addr show "$interface" | grep "inet " | awk '{print $2}' | cut -d/ -f1)
+    # Get local IP on that interface
+    local_ip=$(ip -o -4 addr show dev "$interface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)
     
     if [ -z "$local_ip" ]; then
         print_error "Could not determine local IP address"
@@ -62,8 +68,9 @@ get_local_network() {
     fi
     
     # Extract subnet (e.g., 192.168.1.0/24)
-    subnet=$(ip route | grep "$interface" | grep "scope link" | awk '{print $1}' | head -n1)
+    subnet=$(ip -o -4 addr show dev "$interface" 2>/dev/null | awk '{print $4}' | head -n1)
     
+    print_info "Using interface: $interface"
     print_info "Local IP: $local_ip"
     print_info "Subnet: $subnet"
 }
@@ -159,6 +166,20 @@ find_backend() {
     return 1
 }
 
+# Check if backend is running on this machine (using local IP)
+check_local_backend() {
+    print_info "Checking backend on this machine ($local_ip)..."
+
+    if check_backend_health "$local_ip"; then
+        backend_ip="$local_ip"
+        print_success "Backend server is running on this machine ($local_ip)"
+        return 0
+    fi
+
+    print_info "No healthy backend detected on this machine. Falling back to LAN discovery..."
+    return 1
+}
+
 # Backup hosts file
 backup_hosts() {
     local timestamp=$(date +%Y%m%d_%H%M%S)
@@ -199,9 +220,30 @@ main() {
     # Check sudo (pass all arguments)
     check_sudo "$@"
     
-    # Get network info
+    # Get network info first so we know local_ip
     get_local_network
     
+    # First, try to find backend on this machine (using local_ip)
+    if check_local_backend; then
+        # Backup hosts file
+        backup_hosts
+        
+        # Update hosts file
+        update_hosts "$backend_ip"
+        
+        echo ""
+        echo "=========================================="
+        print_success "Setup complete!"
+        echo "=========================================="
+        echo ""
+        echo "You can now access:"
+        echo "  Frontend: http://frontend.lidar.tm"
+        echo "  Backend:  http://backend.lidar.tm"
+        echo ""
+        exit 0
+    fi
+    
+    # If not on this machine, try to discover in LAN
     # Get ARP IPs
     get_arp_ips
     
