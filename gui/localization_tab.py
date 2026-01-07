@@ -13,6 +13,14 @@ import signal
 import sys
 import time
 import json
+import shutil
+import zipfile
+
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
 
 try:
     import tkinter as tk
@@ -30,6 +38,7 @@ class LocalizationTab(ttk.Frame):
         # Paths
         self.workspace_path = Path(__file__).parent.parent / "ws"
         self.default_map_root = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "fastloc_map"
+        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.tm")
         
         # Processes
         self.loc_process = None
@@ -75,6 +84,14 @@ class LocalizationTab(ttk.Frame):
             command=self.browse_map_dir
         )
         browse_btn.pack(side=tk.RIGHT)
+        
+        # Download map từ backend
+        self.download_btn = ttk.Button(
+            map_frame,
+            text="⬇️ Tải map từ backend",
+            command=self.download_map_from_backend
+        )
+        self.download_btn.pack(anchor=tk.W, pady=5)
         
         # Map Info
         self.map_info_label = ttk.Label(
@@ -209,6 +226,70 @@ class LocalizationTab(ttk.Frame):
             # Thử đếm số tile
             num_tiles = len(list(pcd_dir.glob("*.pcd")))
             self.map_info_label.config(text=f"✅ Bản đồ hợp lệ: {num_tiles} tiles được tìm thấy", foreground="green")
+
+    def download_map_from_backend(self):
+        """Luồng tải map zip từ backend, giải nén và chọn vào Localization."""
+        if not REQUESTS_AVAILABLE:
+            messagebox.showerror("Thiếu thư viện", "Thiếu requests. Vui lòng cài: pip install requests")
+            return
+        
+        if not messagebox.askyesno("Xác nhận", "Tải map hiện tại từ backend và thay thế map cục bộ?"):
+            return
+        
+        self.download_btn.config(state=tk.DISABLED)
+        threading.Thread(target=self._download_map_worker, daemon=True).start()
+
+    def _download_map_worker(self):
+        """Worker tải map + giải nén (chạy nền)."""
+        try:
+            base_url = self.backend_base_url.rstrip("/")
+            current_url = f"{base_url}/api/v1/maps/current"
+            download_url = f"{base_url}/api/v1/maps/download"
+            
+            self.log("🌐 Đang lấy thông tin map hiện tại từ backend...")
+            resp = requests.get(current_url, timeout=10)
+            if resp.status_code != 200:
+                self.log(f"❌ Không lấy được thông tin map (HTTP {resp.status_code})")
+                return
+            
+            data = resp.json()
+            upload_id = data.get("upload_id") or data.get("uploadId")
+            filename = data.get("filename") or f"map_{upload_id or 'current'}.zip"
+            
+            dest_root = self.default_map_root.parent
+            dest_root.mkdir(parents=True, exist_ok=True)
+            dest_zip = dest_root / filename
+            
+            self.log(f"⬇️ Đang tải map: {filename}")
+            with requests.get(download_url, stream=True, timeout=120) as r:
+                if r.status_code != 200:
+                    self.log(f"❌ Tải map thất bại (HTTP {r.status_code})")
+                    return
+                with open(dest_zip, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+            
+            self.log("📦 Đang giải nén map...")
+            # Xóa map cũ để tránh lẫn file
+            if self.default_map_root.exists():
+                shutil.rmtree(self.default_map_root, ignore_errors=True)
+            
+            with zipfile.ZipFile(dest_zip, 'r') as zip_ref:
+                zip_ref.extractall(dest_root)
+            
+            # Cập nhật UI và state
+            self.map_root = str(self.default_map_root)
+            self.after(0, lambda: self.map_path_var.set(str(self.default_map_root)))
+            self.after(0, self.update_map_info)
+            self.log("✅ Đã tải và giải nén map từ backend thành công")
+            
+        except requests.exceptions.RequestException as e:
+            self.log(f"❌ Lỗi khi tải map: {e}")
+        except Exception as e:
+            self.log(f"❌ Lỗi giải nén/map: {e}")
+        finally:
+            self.after(0, lambda: self.download_btn.config(state=tk.NORMAL))
 
     def start_localization(self):
         """Khởi động localization node"""
