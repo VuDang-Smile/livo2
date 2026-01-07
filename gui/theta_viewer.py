@@ -47,6 +47,7 @@ from recording_tab import RecordingTab
 from replay_tab import ReplayTab
 from bag_mapping_tab import BagMappingTab
 from pcd_viewer_tab import PCDViewerTab
+from localization_tab import LocalizationTab
 
 
 class MainGUI:
@@ -87,6 +88,10 @@ class MainGUI:
         self.bag_mapping_tab = BagMappingTab(self.notebook)
         self.notebook.add(self.bag_mapping_tab, text="Bag Mapping")
         
+        # Tạo tab Localization
+        self.localization_tab = LocalizationTab(self.notebook)
+        self.notebook.add(self.localization_tab, text="Localization")
+        
         # Tạo tab PCD Viewer
         self.pcd_viewer_tab = PCDViewerTab(self.notebook)
         self.notebook.add(self.pcd_viewer_tab, text="PCD Viewer")
@@ -126,6 +131,11 @@ class MainGUI:
         if hasattr(self.bag_mapping_tab, 'stop_mapping'):
             if self.bag_mapping_tab.is_mapping_running or self.bag_mapping_tab.is_bag_playing:
                 self.bag_mapping_tab.stop_mapping()
+        
+        # Dừng localization nếu đang chạy
+        if hasattr(self.localization_tab, 'stop_localization'):
+            if self.localization_tab.is_running:
+                self.localization_tab.stop_localization()
         
         # Dừng PCD viewer nếu đang chạy
         if hasattr(self.pcd_viewer_tab, 'stop_viewer'):
