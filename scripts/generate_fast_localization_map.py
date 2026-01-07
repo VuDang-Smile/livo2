@@ -89,53 +89,55 @@ def generate_tiles(
     min_points_per_tile: int,
 ) -> Tuple[List[o3d.geometry.PointCloud], List[Dict]]:
     """
-    Cơ chế VIRTUAL SCANCONTEXT (Giống smile-lidar-recorder):
-    Thay vì cắt theo tile vuông (grid), ta sẽ lấy các 'Virtual Scans' tại các điểm node.
-    Mỗi node sẽ lấy các điểm xung quanh nó trong bán kính (tile_size/2).
+    Cơ chế PHÂN CHIA LƯỚI (Grid Partitioning) - Khớp với @smile-lidar-recorder:
+    Chia bản đồ thành các tile vuông KHÔNG ĐÈ LÊN NHAU.
+    Mỗi tile sẽ được lưu ở hệ toạ độ Local (tâm tại 0,0,0).
+    Vị trí Global của tâm tile sẽ được lưu trong pose.json.
     """
     if tile_size <= 0:
         raise ValueError("tile_size phải > 0")
 
     pts = np.asarray(pcd.points)
     x_min, x_max, y_min, y_max = compute_xy_bounds(pcd)
-    print(f"[INFO] Bounds XY tổng: x[{x_min:.2f}, {x_max:.2f}], y[{y_min:.2f}, {y_max:.2f}]")
-
-    # Khoảng cách giữa các điểm quét ảo (spacing). 
-    # Mặc định lấy tile_size/2 để đảm bảo độ phủ (overlap 50%)
-    spacing = tile_size / 2.0 
     
-    nx = max(1, int(math.ceil((x_max - x_min) / spacing)))
-    ny = max(1, int(math.ceil((y_max - y_min) / spacing)))
+    # Grid steps - không dùng overlap để tránh đè map
+    nx = int(math.ceil((x_max - x_min) / tile_size))
+    ny = int(math.ceil((y_max - y_min) / tile_size))
 
-    print(f"[INFO] Tạo Virtual ScanContext: Lưới {nx}x{ny}, khoảng cách {spacing:.2f} m")
+    print(f"[INFO] Chia lưới bản đồ: {nx}x{ny} ô, kích thước {tile_size:.2f}m")
 
     tiles: List[o3d.geometry.PointCloud] = []
     metas: List[Dict] = []
 
-    # Dùng KDTree để trích xuất điểm xung quanh nhanh hơn
-    pcd_tree = o3d.geometry.KDTreeFlann(pcd)
-    radius = tile_size / 2.0
-
     tile_index = 0
     for ix in range(nx):
+        x0 = x_min + ix * tile_size
+        x1 = x0 + tile_size
+        
+        # Mask X
+        mask_x = (pts[:, 0] >= x0) & (pts[:, 0] < x1)
+        if not np.any(mask_x): continue
+        
+        pts_x = pts[mask_x]
+        
         for iy in range(ny):
-            cx = x_min + ix * spacing
-            cy = y_min + iy * spacing
+            y0 = y_min + iy * tile_size
+            y1 = y0 + tile_size
             
-            # Tìm cao độ trung bình tại vị trí này để đặt tâm scan ảo
-            # (Đơn giản nhất là lấy trung bình Z của toàn map hoặc 0)
-            cz = (pts[:, 2].min() + pts[:, 2].max()) / 2.0 
-
-            # Trích xuất các điểm trong bán kính radius quanh tâm (cx, cy, cz)
-            [k, idx, _] = pcd_tree.search_radius_vector_3d([cx, cy, cz], radius)
+            # Mask Y trên tập điểm đã lọc X
+            mask_y = (pts_x[:, 1] >= y0) & (pts_x[:, 1] < y1)
+            tile_pts = pts_x[mask_y]
             
-            if k < min_points_per_tile:
+            if len(tile_pts) < min_points_per_tile:
                 continue
 
-            tile_pts = pts[idx]
-            
-            # Quan trọng: Dịch chuyển cụm điểm về tâm (0,0,0) của virtual scan
-            # Vì ScanContext descriptor được tính toán dựa trên sensor-centric coordinates
+            # Tính tâm của tile (centroid)
+            cx = (x0 + x1) / 2.0
+            cy = (y0 + y1) / 2.0
+            cz = float(tile_pts[:, 2].mean())
+
+            # CHUYỂN VỀ TỌA ĐỘ LOCAL (Quan trọng!)
+            # Khi load, C++ node sẽ dùng pose.json để dịch ngược lại vị trí này.
             tile_pts_local = tile_pts - np.array([cx, cy, cz])
 
             tile_pcd = o3d.geometry.PointCloud()
@@ -148,14 +150,14 @@ def generate_tiles(
                     "y": float(cy),
                     "z": float(cz),
                 },
-                "num_points": int(k)
+                "num_points": len(tile_pts)
             }
 
             tiles.append(tile_pcd)
             metas.append(meta)
             tile_index += 1
 
-    print(f"[INFO] Đã tạo {len(tiles)} Virtual Scans.")
+    print(f"[INFO] Đã chia thành {len(tiles)} tile không chồng lấn.")
     return tiles, metas
 
 

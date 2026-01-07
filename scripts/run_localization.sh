@@ -1,6 +1,6 @@
 #!/bin/bash
 # Script để chạy Localization với FAST-LIO-LOCALIZATION2
-# Usage: ./run_localization.sh <map_root_dir> [use_rviz]
+# Usage: ./run_localization.sh <map_root_dir> [use_rviz] [config_file]
 
 set -e
 
@@ -25,6 +25,7 @@ fi
 
 MAP_ROOT="$1"
 USE_RVIZ="${2:-True}"
+CONFIG_FILE="${3:-mid360.yaml}"
 
 # Check map root
 if [ ! -d "$MAP_ROOT" ]; then
@@ -78,5 +79,5 @@ source "$WS_SETUP"
 ros2 launch fast_lio_localization localization.launch.py \
     map_root:="$MAP_ROOT" \
     rviz:="$USE_RVIZ" \
-    config_file:="mid360.yaml"
+    config_file:="$CONFIG_FILE"
 
