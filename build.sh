@@ -18,9 +18,11 @@ WS_DIR="$SCRIPT_DIR/ws"
 ROS2_SETUP_SCRIPT="/opt/ros/jazzy/setup.bash"
 DRIVE_WS_SETUP_SCRIPT="$SCRIPT_DIR/dependencies/drive_ws/install/setup.sh"
 
-# Danh sách packages trong ws/src
+# Danh sách packages trong ws/src + HBA standalone
 declare -a PACKAGES=(
     "fast_livo"
+    "fast_lio_localization"
+    "hba_standalone"
     "direct_visual_lidar_calibration"
     "theta_driver"
     "vikit_common"
@@ -30,7 +32,7 @@ declare -a PACKAGES=(
 
 # Mảng lưu trạng thái chọn của từng package (0 = chưa chọn, 1 = đã chọn)
 declare -a SELECTED=(
-    0 0 0 0 0 0
+    0 0 0 0 0 0 0 0
 )
 
 # Hàm hiển thị menu
@@ -264,40 +266,71 @@ build_packages() {
     
     # Tạo danh sách packages cần build
     local packages_to_build=()
+    local build_hba=0
+    
     for i in "${!PACKAGES[@]}"; do
         if [ "${SELECTED[$i]}" -eq 1 ]; then
-            packages_to_build+=("${PACKAGES[$i]}")
+            if [ "${PACKAGES[$i]}" = "hba_standalone" ]; then
+                build_hba=1
+            else
+                packages_to_build+=("${PACKAGES[$i]}")
+            fi
         fi
     done
     
-    if [ ${#packages_to_build[@]} -eq 0 ]; then
+    if [ ${#packages_to_build[@]} -eq 0 ] && [ $build_hba -eq 0 ]; then
         echo -e "${RED}Không có package nào được chọn để build!${NC}"
         return 1
     fi
-    
-    echo -e "${GREEN}Packages sẽ được build:${NC}"
-    for pkg in "${packages_to_build[@]}"; do
-        echo -e "  - ${GREEN}$pkg${NC}"
-    done
-    echo ""
-    
-    # Chuyển đến thư mục ws
-    cd "$WS_DIR" || return 1
-    
-    # Build với colcon
-    local packages_arg="--packages-select"
-    for pkg in "${packages_to_build[@]}"; do
-        packages_arg="$packages_arg $pkg"
-    done
-    
-    echo -e "${BLUE}Chạy lệnh: colcon build $packages_arg --symlink-install${NC}"
-    echo ""
-    
-    # Tắt set -e tạm thời để bắt lỗi build và hiển thị đầy đủ error messages
-    set +e
-    colcon build $packages_arg --symlink-install 2>&1
-    local build_status=$?
-    # Không bật lại set -e ở đây để tránh exit sớm
+
+    # 1. Build HBA standalone nếu được chọn
+    if [ $build_hba -eq 1 ]; then
+        echo -e "${YELLOW}>>> Đang build HBA standalone...${NC}"
+        local hba_script="$SCRIPT_DIR/scripts/build_hba_standalone.sh"
+        if [ -f "$hba_script" ]; then
+            # Chạy script build HBA hiện có
+            set +e
+            bash "$hba_script"
+            local hba_status=$?
+            set -e
+            if [ $hba_status -ne 0 ]; then
+                echo -e "${RED}Build HBA thất bại!${NC}"
+                return $hba_status
+            fi
+        else
+            echo -e "${RED}Lỗi: Không tìm thấy script build HBA tại $hba_script${NC}"
+            return 1
+        fi
+        echo ""
+    fi
+
+    # 2. Build ROS2 packages với colcon
+    local build_status=0
+    if [ ${#packages_to_build[@]} -gt 0 ]; then
+        echo -e "${GREEN}ROS2 Packages sẽ được build:${NC}"
+        for pkg in "${packages_to_build[@]}"; do
+            echo -e "  - ${GREEN}$pkg${NC}"
+        done
+        echo ""
+        
+        # Chuyển đến thư mục ws
+        cd "$WS_DIR" || return 1
+        
+        # Build với colcon
+        local packages_arg="--packages-select"
+        for pkg in "${packages_to_build[@]}"; do
+            packages_arg="$packages_arg $pkg"
+        done
+        
+        echo -e "${BLUE}Chạy lệnh: colcon build $packages_arg --symlink-install${NC}"
+        echo ""
+        
+        # Tắt set -e tạm thời để bắt lỗi build và hiển thị đầy đủ error messages
+        set +e
+        colcon build $packages_arg --symlink-install 2>&1
+        build_status=$?
+        # Không bật lại set -e ở đây để tránh exit sớm
+    fi
     
     echo ""
     if [ $build_status -eq 0 ]; then
