@@ -509,7 +509,9 @@ class BagMappingTab(ttk.Frame):
         self.after(0, lambda: self.log("Step 4/4: Đang nén file (Zip)..."))
         try:
             # Đường dẫn nguồn và đích
-            map_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "fastloc_map"
+            log_root = self.workspace_path / "src" / "FAST-LIVO2" / "Log"
+            map_dir = log_root / "fastloc_map"
+            pcd_dir = log_root / "PCD"
             
             # Tự động tìm version mới nhất
             base_output_dir = Path(__file__).parent.parent / "output"
@@ -524,18 +526,29 @@ class BagMappingTab(ttk.Frame):
             zip_filename = f"map_v1.{v_num}_{timestamp}.zip"
             zip_path = output_root / zip_filename
             
-            if not map_dir.exists():
-                self.log(f"❌ Không tìm thấy thư mục map để zip: {map_dir}")
+            sources = []
+            if map_dir.exists():
+                sources.append(map_dir)
+            else:
+                self.log(f"⚠️ Không tìm thấy fastloc_map: {map_dir}")
+            if pcd_dir.exists():
+                sources.append(pcd_dir)
+            else:
+                self.log(f"⚠️ Không tìm thấy PCD: {pcd_dir}")
+
+            if not sources:
+                self.log("❌ Không có thư mục nào để zip (fastloc_map/PCD)")
                 return
 
             self.log(f"📦 Đang tạo file zip: {zip_path}")
             
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, dirs, files in os.walk(map_dir):
-                    for file in files:
-                        file_path = Path(root) / file
-                        arcname = file_path.relative_to(map_dir.parent)
-                        zipf.write(file_path, arcname)
+                for src in sources:
+                    for root, dirs, files in os.walk(src):
+                        for file in files:
+                            file_path = Path(root) / file
+                            arcname = file_path.relative_to(log_root)
+                            zipf.write(file_path, arcname)
             
             self.log(f"✅ Đã tạo file zip thành công tại: {zip_path}")
             self.log("📤 Đang upload file map lên backend...")
