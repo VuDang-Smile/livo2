@@ -17,6 +17,12 @@ import shutil
 import zipfile
 
 try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+
+try:
     import tkinter as tk
     from tkinter import ttk, messagebox, scrolledtext, filedialog
 except ImportError as e:
@@ -54,6 +60,7 @@ class BagMappingTab(ttk.Frame):
         self.use_rviz = False
         self.config_path = None  # Path to config file
         self.bag_rate = 0.5  # Default: 0.5x for slower playback
+        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.tm")
         
         # Tạo UI
         self.create_widgets()
@@ -531,16 +538,72 @@ class BagMappingTab(ttk.Frame):
                         zipf.write(file_path, arcname)
             
             self.log(f"✅ Đã tạo file zip thành công tại: {zip_path}")
+            self.log("📤 Đang upload file map lên backend...")
+            upload_success, upload_info = self.upload_map_to_backend(zip_path)
+            if upload_success:
+                upload_msg = f"✅ Upload backend thành công (upload_id: {upload_info})" if upload_info else "✅ Upload backend thành công"
+                self.log(upload_msg)
+            else:
+                fail_reason = upload_info or "Không rõ lỗi"
+                self.log(f"⚠️ Upload backend thất bại: {fail_reason}")
             
             duration = time.time() - start_time
             self.log(f"🎉 FULL PIPELINE HOÀN TẤT trong {duration:.1f} giây!")
-            self.after(0, lambda: messagebox.showinfo("Thành công", f"Toàn bộ quy trình đã hoàn tất!\n\nFile zip: {zip_path}"))
+            upload_status_line = (
+                f"Upload backend: OK (upload_id: {upload_info})" if upload_success and upload_info
+                else "Upload backend: OK" if upload_success
+                else f"Upload backend: LỖI ({upload_info})"
+            )
+            self.after(
+                0,
+                lambda: messagebox.showinfo(
+                    "Thành công",
+                    f"Toàn bộ quy trình đã hoàn tất!\n\n"
+                    f"File zip: {zip_path}\n"
+                    f"{upload_status_line}"
+                )
+            )
             
         except Exception as e:
             self.log(f"❌ Lỗi khi zip file: {e}")
             self.after(0, lambda: messagebox.showerror("Lỗi Zip", str(e)))
         finally:
             self.after(0, lambda: self.full_pipe_btn.config(state=tk.NORMAL))
+    
+    def upload_map_to_backend(self, zip_path: Path):
+        """Upload file zip map lên backend."""
+        if not REQUESTS_AVAILABLE:
+            msg = "Thiếu thư viện requests. Cài đặt bằng: pip install requests"
+            self.log(f"❌ {msg}")
+            return False, msg
+        
+        zip_path = Path(zip_path)
+        if not zip_path.exists():
+            return False, f"Không tìm thấy file: {zip_path}"
+        
+        upload_url = f"{self.backend_base_url.rstrip('/')}/api/v1/maps/upload"
+        self.log(f"🌐 Endpoint: {upload_url}")
+        
+        try:
+            with open(zip_path, "rb") as f:
+                files = {"file": (zip_path.name, f, "application/zip")}
+                response = requests.post(upload_url, files=files, timeout=30)
+            
+            if response.status_code in (200, 201):
+                upload_id = None
+                try:
+                    data = response.json()
+                    upload_id = data.get("upload_id") or data.get("uploadId")
+                except Exception:
+                    upload_id = None
+                return True, upload_id
+            
+            # Non-200 response
+            error_text = response.text.strip()[:200] if response.text else f"status {response.status_code}"
+            return False, error_text
+        
+        except requests.exceptions.RequestException as e:
+            return False, str(e)
     
     def set_default_config(self):
         """Set default config file"""
