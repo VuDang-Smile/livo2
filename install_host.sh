@@ -236,20 +236,34 @@ else
     print_warning "Nginx health check failed (may still be starting)"
 fi
 
-# Check Frontend
+# Check Frontend (via Nginx)
 sleep 2
 if curl -f http://localhost/health -H "Host: frontend.lidar.tm" &> /dev/null; then
-    print_success "Frontend is healthy"
+    print_success "Frontend is healthy (via Nginx)"
 else
-    print_warning "Frontend health check failed (may still be starting)"
+    print_warning "Frontend health check via Nginx failed (may still be starting)"
 fi
 
-# Check Backend
-sleep 3
-if curl -f http://localhost/health -H "Host: backend.lidar.tm" &> /dev/null; then
-    print_success "Backend is healthy"
+# Check Frontend (direct port 3000)
+if curl -f http://localhost:3000/health &> /dev/null; then
+    print_success "Frontend is healthy (direct port 3000)"
 else
-    print_warning "Backend health check failed (may still be starting)"
+    print_warning "Frontend health check on port 3000 failed (may still be starting)"
+fi
+
+# Check Backend (via Nginx)
+sleep 2
+if curl -f http://localhost/health -H "Host: backend.lidar.tm" &> /dev/null; then
+    print_success "Backend is healthy (via Nginx)"
+else
+    print_warning "Backend health check via Nginx failed (may still be starting)"
+fi
+
+# Check Backend (direct port 8000)
+if curl -f http://localhost:8000/health &> /dev/null; then
+    print_success "Backend is healthy (direct port 8000)"
+else
+    print_warning "Backend health check on port 8000 failed (may still be starting)"
 fi
 
 # Check MongoDB
@@ -265,14 +279,25 @@ print_success "All services started!"
 echo "=========================================="
 echo ""
 echo "Services:"
-echo "  - Nginx Reverse Proxy: http://localhost"
+echo ""
+echo "Access via Domain (through Nginx):"
 echo "  - Frontend:            http://frontend.lidar.tm"
 echo "  - Backend API:         http://backend.lidar.tm"
 echo "  - Backend Docs:        http://backend.lidar.tm/docs"
+echo ""
+echo "Access via IP and Port (direct):"
+echo "  - Frontend:            http://<server_ip>:3000"
+echo "  - Backend API:         http://<server_ip>:8000"
+echo "  - Backend Docs:        http://<server_ip>:8000/docs"
+echo ""
+echo "Access via IP (through Nginx on port 80):"
+echo "  - Frontend:            http://<server_ip>"
+echo ""
+echo "Other Services:"
 echo "  - MongoDB:             localhost:27017"
 echo "  - MQTT Broker:         localhost:1883"
 echo ""
-echo "Note: Make sure to add these domains to /etc/hosts:"
+echo "Note: To use domain names, add these to /etc/hosts:"
 echo "  <server_ip>    frontend.lidar.tm"
 echo "  <server_ip>    backend.lidar.tm"
 echo ""

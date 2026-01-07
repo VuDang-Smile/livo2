@@ -20,9 +20,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: livo-frontend
-    # Don't expose port directly, use nginx instead
-    expose:
-      - "80"
+    # Expose port directly for IP access
+    ports:
+      - "3000:80"
     networks:
       - livo-network
     restart: unless-stopped
@@ -33,9 +33,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: livo-backend
-    # Don't expose port directly, use nginx instead
-    expose:
-      - "8000"
+    # Expose port directly for IP access
+    ports:
+      - "8000:8000"
     environment:
       - MONGODB_URL=mongodb://mongodb:27017
       - MONGODB_DB_NAME=livo_backend
@@ -89,4 +89,5 @@ volumes:
 networks:
   livo-network:
     driver: bridge
+
 
