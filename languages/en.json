@@ -1,0 +1,32 @@
+{
+    "title": {
+        "livox_panel": "Livox control panel"
+    },
+    "label": {
+        "livox_driver_2": "LIVOX DRIVER 2",
+        "enable_converter": "Enable Converter",
+        "lidar_topic": "Lidar topic",
+        "imu_topic": "IMU topic",
+        "recording_configuration": "RECORDING CONFIGURATION",
+        "storage_directory": "Storage Directory",
+        "status": "Status",
+        "log": "Log",
+        "system_logs": "System Logs"
+    },
+    "message": {
+        "select_output_dir": "Please select an output directory for recordings.",
+        "recording_started": "Recording has started.",
+        "recording_stopped": "Recording has stopped."
+    },
+    "button": {
+        "browse": "Browse",
+        "start": "Start",
+        "stop": "Stop",
+        "clear_log": "Clear Log"
+    },
+    "status": {
+        "ready": "Ready",
+        "error": "Error",
+        "active": "Active"
+    }
+}

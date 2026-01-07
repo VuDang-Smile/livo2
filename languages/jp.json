@@ -1,0 +1,32 @@
+{
+    "title": {
+        "livox_panel": "Livox コントロールパネル"
+    },
+    "label": {
+        "livox_driver_2": "LIVOX DRIVER 2",
+        "enable_converter": "コンバーターを有効にする",
+        "lidar_topic": "Lidar トピック",
+        "imu_topic": "IMU トピック",
+        "recording_configuration": "録画設定",
+        "storage_directory": "保存先ディレクトリ",
+        "status": "ステータス",
+        "log": "ログ",
+        "system_logs": "システムログ"
+    },
+    "message": {
+        "select_output_dir": "録画の出力ディレクトリを選択してください。",
+        "recording_started": "録画を開始しました。",
+        "recording_stopped": "録画を停止しました。"
+    },
+    "button": {
+        "browse": "参照",
+        "start": "開始",
+        "stop": "停止",
+        "clear_log": "ログを消去"
+    },
+    "status": {
+        "ready": "準備完了",
+        "error": "エラー",
+        "active": "アクティブ"
+    }
+}
