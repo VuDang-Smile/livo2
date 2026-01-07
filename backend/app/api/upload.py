@@ -1,7 +1,9 @@
 """Upload API endpoints."""
 import logging
 from uuid import UUID
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from app.models.upload import UploadResponse, CurrentMapResponse, MapMetadata
 from app.services.map_processor import MapProcessor
 from app.services.database_service import database_service
@@ -113,6 +115,30 @@ async def get_current_map():
 async def get_maps():
     """Alias for /current (backward compatibility)."""
     return await get_current_map()
+
+
+@router.get("/download")
+async def download_current_map():
+    """Tải file map (zip) hiện tại."""
+    try:
+        map_doc = await database_service.get_current_map()
+        if not map_doc or not map_doc.get("file_path"):
+            raise HTTPException(status_code=404, detail="No map found")
+        
+        file_path = Path(map_doc["file_path"])
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Map file not found on disk")
+        
+        return FileResponse(
+            path=file_path,
+            filename=file_path.name,
+            media_type="application/zip"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading map: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/current")
