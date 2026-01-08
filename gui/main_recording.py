@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import os
 from functools import partial
+from ament_index_python import get_package_share_directory
 from languages.translate_engine import translator
 from recorder_logic import Recorder # Import file mới
 from theta_logic import ThetaDriver # Import file mới
@@ -244,21 +245,27 @@ class LivoxApp:
             self.topic_vars[topic] = var
 
     def open_rviz(self):
-        """Mở RViz2 với cấu hình đã cho"""
+        """Mở RViz2 trực tiếp bằng subprocess"""
+        rviz_config_file = os.path.join(get_package_share_directory("fast_livo"), "rviz_cfg", "fast_livo2.rviz")
         self.log("🚀 Đang khởi động RViz2...")
-        rviz_use = LaunchConfiguration('rviz')
-        rviz_cfg = LaunchConfiguration('rviz_cfg')
-        try: 
-            return LaunchDescription([
-                Node(
-                    package='rviz2',
-                    executable='rviz2',
-                    arguments=['-d', rviz_cfg],
-                    condition=IfCondition(rviz_use)
-                )
-            ])
+        
+        # Kiểm tra xem file có tồn tại không để tránh lỗi im lặng
+        if not os.path.exists(rviz_config_file):
+            self.log(f"⚠️ Cảnh báo: Không tìm thấy file cấu hình tại {rviz_config_file}. Sẽ mở RViz mặc định.")
+            cmd = ['rviz2']
+        else:
+            cmd = ['rviz2', '-d', rviz_config_file]
+
+        try:
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL, # Ẩn log của RViz để đỡ rối terminal
+                stderr=subprocess.STDOUT
+            )
+            self.log("✅ RViz2 đã được mở thành công.")
+            
         except Exception as e:
-            self.log(f"❌ Lỗi khi khởi động RViz2: {e}")
+            self.log(f"❌ Lỗi khi thực thi lệnh rviz2: {e}")
 
     def _verify_source(self, setup_script, name):
         """Verify rằng setup script có thể source được"""
