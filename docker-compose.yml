@@ -1,0 +1,93 @@
+services:
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: livo-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - livo-network
+    restart: unless-stopped
+
+  # Frontend (React)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: livo-frontend
+    # Expose port directly for IP access
+    ports:
+      - "3000:80"
+    networks:
+      - livo-network
+    restart: unless-stopped
+
+  # Backend (FastAPI)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: livo-backend
+    # Expose port directly for IP access
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DB_NAME=livo_backend
+      - MQTT_BROKER_HOST=mqtt
+      - MQTT_BROKER_PORT=1883
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/processed:/app/processed
+      - ./backend/.env:/app/.env
+    depends_on:
+      - mongodb
+      - mqtt
+    networks:
+      - livo-network
+    restart: unless-stopped
+
+  # MongoDB
+  mongodb:
+    image: mongo:7
+    container_name: livo-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - livo-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MQTT Broker
+  mqtt:
+    image: eclipse-mosquitto:latest
+    container_name: livo-mqtt
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./backend/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - livo-network
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+
+networks:
+  livo-network:
+    driver: bridge
+
+

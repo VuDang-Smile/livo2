@@ -13,6 +13,14 @@ import platform
 import signal
 import sys
 import time
+import shutil
+import zipfile
+
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
 
 try:
     import tkinter as tk
@@ -52,6 +60,7 @@ class BagMappingTab(ttk.Frame):
         self.use_rviz = False
         self.config_path = None  # Path to config file
         self.bag_rate = 0.5  # Default: 0.5x for slower playback
+        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.tm")
         
         # Tạo UI
         self.create_widgets()
@@ -206,6 +215,31 @@ class BagMappingTab(ttk.Frame):
             command=self.merge_pcd_files
         )
         self.merge_pcd_btn.pack(side=tk.LEFT, padx=5)
+
+        # HBA Optimize button
+        self.hba_btn = ttk.Button(
+            control_frame,
+            text="🪄 HBA Optimize",
+            command=self.run_hba_optimization
+        )
+        self.hba_btn.pack(side=tk.LEFT, padx=5)
+
+        # ScanContext button
+        self.sc_btn = ttk.Button(
+            control_frame,
+            text="🗺️ SC Tile",
+            command=self.run_scancontext_tiling
+        )
+        self.sc_btn.pack(side=tk.LEFT, padx=5)
+
+        # Full Pipeline button
+        self.full_pipe_btn = ttk.Button(
+            control_frame,
+            text="🚀 Full Pipeline",
+            command=self.run_full_pipeline,
+            style="Accent.TButton" # Nếu có theme hỗ trợ, nếu không thì bình thường
+        )
+        self.full_pipe_btn.pack(side=tk.LEFT, padx=5)
         
         # Status label
         self.status_label = ttk.Label(
@@ -234,22 +268,22 @@ class BagMappingTab(ttk.Frame):
         self.log("✅ Bag Mapping Tab đã sẵn sàng")
         self.log("📝 Vui lòng chọn bag file và config file để bắt đầu mapping")
     
-    def merge_pcd_files(self):
+    def merge_pcd_files(self, silent=False):
         """Gộp tất cả các file PCD trong thư mục Log/PCD thành một file lớn"""
         pcd_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "PCD"
         
         if not pcd_dir.exists():
-            messagebox.showerror("Lỗi", f"Thư mục PCD không tồn tại: {pcd_dir}")
+            if not silent: messagebox.showerror("Lỗi", f"Thư mục PCD không tồn tại: {pcd_dir}")
             self.log(f"❌ Thư mục PCD không tồn tại: {pcd_dir}")
-            return
+            return False
         
         # Tìm tất cả file PCD (bỏ qua file merged nếu có)
         pcd_files = sorted([f for f in pcd_dir.glob("*.pcd") if f.name != "merged_all.pcd"])
         
         if not pcd_files:
-            messagebox.showwarning("Cảnh báo", f"Không tìm thấy file PCD nào trong thư mục: {pcd_dir}")
+            if not silent: messagebox.showwarning("Cảnh báo", f"Không tìm thấy file PCD nào trong thư mục: {pcd_dir}")
             self.log(f"⚠️ Không tìm thấy file PCD nào trong: {pcd_dir}")
-            return
+            return False
         
         self.log("=" * 60)
         self.log(f"🔗 Bắt đầu merge {len(pcd_files)} file PCD...")
@@ -269,9 +303,9 @@ class BagMappingTab(ttk.Frame):
                     "pip install open3d\n\n"
                     "Hoặc thêm vào requirements.txt và cài đặt lại."
                 )
-                messagebox.showerror("Thiếu thư viện", error_msg)
+                if not silent: messagebox.showerror("Thiếu thư viện", error_msg)
                 self.log("❌ open3d chưa được cài đặt. Vui lòng cài đặt: pip install open3d")
-                return
+                return False
             
             merged_cloud = None
             total_points = 0
@@ -299,9 +333,9 @@ class BagMappingTab(ttk.Frame):
                     continue
             
             if merged_cloud is None or len(merged_cloud.points) == 0:
-                messagebox.showerror("Lỗi", "Không thể merge PCD files. Không có điểm nào hợp lệ.")
+                if not silent: messagebox.showerror("Lỗi", "Không thể merge PCD files. Không có điểm nào hợp lệ.")
                 self.log("❌ Không có điểm nào để merge")
-                return
+                return False
             
             # Lưu file merged
             output_file = pcd_dir / "merged_all.pcd"
@@ -317,21 +351,259 @@ class BagMappingTab(ttk.Frame):
                 self.log(f"📊 Tổng số điểm: {total_points:,}")
                 self.log(f"💾 Kích thước file: {size_mb:.2f} MB")
                 self.log("=" * 60)
-                messagebox.showinfo("Thành công", 
-                    f"Đã merge {len(pcd_files)} file PCD thành công!\n\n"
-                    f"File output: {output_file.name}\n"
-                    f"Tổng số điểm: {total_points:,}\n"
-                    f"Kích thước: {size_mb:.2f} MB")
+                if not silent:
+                    messagebox.showinfo("Thành công", 
+                        f"Đã merge {len(pcd_files)} file PCD thành công!\n\n"
+                        f"File output: {output_file.name}\n"
+                        f"Tổng số điểm: {total_points:,}\n"
+                        f"Kích thước: {size_mb:.2f} MB")
+                return True
             else:
                 raise Exception("File output không được tạo")
                 
         except Exception as e:
             error_msg = f"Lỗi khi merge PCD files: {e}"
             self.log(f"❌ {error_msg}")
-            messagebox.showerror("Lỗi", error_msg)
+            if not silent: messagebox.showerror("Lỗi", error_msg)
+            return False
         finally:
             # Re-enable button
             self.merge_pcd_btn.config(state=tk.NORMAL)
+
+    def run_hba_optimization(self):
+        """Chạy tối ưu hóa bản đồ bằng HBA standalone"""
+        self.hba_btn.config(state=tk.DISABLED)
+        threading.Thread(target=lambda: [self._run_hba_core(), self.after(0, lambda: self.hba_btn.config(state=tk.NORMAL))], daemon=True).start()
+
+    def _run_hba_core(self):
+        """Core logic của HBA optimization (đồng bộ)"""
+        pcd_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "PCD"
+        hba_script = Path(__file__).parent.parent / "scripts" / "normalize_map_hba.py"
+        
+        if not pcd_dir.exists():
+            self.after(0, lambda: messagebox.showerror("Lỗi", f"Thư mục PCD không tồn tại: {pcd_dir}"))
+            return False
+        
+        if not hba_script.exists():
+            self.after(0, lambda: messagebox.showerror("Lỗi", f"Không tìm thấy script HBA tại: {hba_script}"))
+            return False
+
+        pose_file = pcd_dir / "scans_pos.json"
+        if not pose_file.exists():
+            self.after(0, lambda: messagebox.showerror("Lỗi", f"Thiếu file scans_pos.json trong {pcd_dir}"))
+            return False
+
+        self.log("=" * 60)
+        self.log("🪄 Đang bắt đầu tối ưu hóa bản đồ bằng HBA Standalone...")
+
+        try:
+            cmd = f"python3 {hba_script} --input_dir {pcd_dir}"
+            process = subprocess.Popen(
+                cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
+            
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    self.log(f"[HBA] {line.strip()}")
+            
+            process.wait()
+            
+            if process.returncode == 0:
+                output_file = pcd_dir / "merge_all_hba.pcd"
+                if output_file.exists():
+                    self.log("✅ HBA Optimization hoàn tất!")
+                    return True
+                else:
+                    self.log("⚠️ HBA hoàn tất nhưng không tìm thấy file output.")
+                    return False
+            else:
+                self.log(f"❌ HBA failed với code {process.returncode}")
+                return False
+        except Exception as e:
+            self.log(f"❌ Lỗi HBA: {e}")
+            return False
+
+    def run_scancontext_tiling(self):
+        """Chia tile bản đồ PCD theo kiểu ScanContext (bỏ màu)"""
+        self.sc_btn.config(state=tk.DISABLED)
+        threading.Thread(target=lambda: [self._run_sc_core(), self.after(0, lambda: self.sc_btn.config(state=tk.NORMAL))], daemon=True).start()
+
+    def _run_sc_core(self):
+        """Core logic của ScanContext tiling (đồng bộ)"""
+        pcd_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "PCD"
+        input_pcd = pcd_dir / "merge_all_hba.pcd"
+        sc_script = Path(__file__).parent.parent / "scripts" / "generate_fast_localization_map.py"
+        output_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "fastloc_map"
+
+        if not input_pcd.exists():
+            self.log("⚠️ Không tìm thấy bản đồ đã HBA, thử dùng merged_all.pcd...")
+            input_pcd = pcd_dir / "merged_all.pcd"
+            if not input_pcd.exists():
+                self.after(0, lambda: messagebox.showerror("Lỗi", "Không tìm thấy bất kỳ file PCD tổng nào"))
+                return False
+
+        self.log("=" * 60)
+        self.log(f"🗺️ Đang chuẩn bị bản đồ ScanContext từ {input_pcd.name}...")
+
+        try:
+            cmd = (
+                f"python3 {sc_script} "
+                f"--input_pcd {input_pcd} "
+                f"--output_dir {output_dir} "
+                f"--strip_color --voxel_size 0.2 --tile_size 50.0"
+            )
+            process = subprocess.Popen(
+                cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
+            
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    self.log(f"[ScanContext] {line.strip()}")
+            
+            process.wait()
+            
+            if process.returncode == 0:
+                self.log("✅ ScanContext Tiling thành công!")
+                self.log(f"📁 Output: {output_dir}")
+                return True
+            else:
+                self.log(f"❌ Tiling failed với code {process.returncode}")
+                return False
+        except Exception as e:
+            self.log(f"❌ Lỗi ScanContext: {e}")
+            return False
+
+    def run_full_pipeline(self):
+        """Thực hiện toàn bộ quy trình: Merge -> HBA -> SC -> Zip"""
+        if messagebox.askyesno("Xác nhận", "Bắt đầu chạy toàn bộ quy trình (Merge -> HBA -> SC -> Zip)?"):
+            self.full_pipe_btn.config(state=tk.DISABLED)
+            threading.Thread(target=self._run_full_pipeline_thread, daemon=True).start()
+
+    def _run_full_pipeline_thread(self):
+        """Thread thực hiện quy trình Full Pipeline"""
+        start_time = time.time()
+        self.log("🚀 BẮT ĐẦU FULL PIPELINE...")
+        
+        # 1. Merge PCD
+        self.after(0, lambda: self.log("Step 1/4: Đang gộp file PCD..."))
+        if not self.merge_pcd_files(silent=True):
+            self.log("❌ Pipeline dừng lại ở bước Merge PCD.")
+            self.after(0, lambda: self.full_pipe_btn.config(state=tk.NORMAL))
+            return
+        
+        # 2. HBA Optimize
+        self.after(0, lambda: self.log("Step 2/4: Đang chạy HBA Optimize..."))
+        if not self._run_hba_core():
+            self.log("❌ Pipeline dừng lại ở bước HBA.")
+            self.after(0, lambda: self.full_pipe_btn.config(state=tk.NORMAL))
+            return
+
+        # 3. SC Tile
+        self.after(0, lambda: self.log("Step 3/4: Đang chạy ScanContext Tiling..."))
+        if not self._run_sc_core():
+            self.log("❌ Pipeline dừng lại ở bước ScanContext.")
+            self.after(0, lambda: self.full_pipe_btn.config(state=tk.NORMAL))
+            return
+
+        # 4. Zip output
+        self.after(0, lambda: self.log("Step 4/4: Đang nén file (Zip)..."))
+        try:
+            # Đường dẫn nguồn và đích (zip toàn bộ thư mục Log)
+            log_root = self.workspace_path / "src" / "FAST-LIVO2" / "Log"
+            
+            # Tự động tìm version mới nhất
+            base_output_dir = Path(__file__).parent.parent / "output"
+            v_num = 1
+            while (base_output_dir / f"version1.{v_num}").exists():
+                v_num += 1
+            
+            output_root = base_output_dir / f"version1.{v_num}"
+            output_root.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            zip_filename = f"map_v1.{v_num}_{timestamp}.zip"
+            zip_path = output_root / zip_filename
+            
+            if not log_root.exists():
+                self.log(f"❌ Không tìm thấy thư mục Log để zip: {log_root}")
+                return
+
+            self.log(f"📦 Đang tạo file zip: {zip_path}")
+            
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(log_root):
+                    for file in files:
+                        file_path = Path(root) / file
+                        arcname = file_path.relative_to(log_root)
+                        zipf.write(file_path, arcname)
+            
+            self.log(f"✅ Đã tạo file zip thành công tại: {zip_path}")
+            self.log("📤 Đang upload file map lên backend...")
+            upload_success, upload_info = self.upload_map_to_backend(zip_path)
+            if upload_success:
+                upload_msg = f"✅ Upload backend thành công (upload_id: {upload_info})" if upload_info else "✅ Upload backend thành công"
+                self.log(upload_msg)
+            else:
+                fail_reason = upload_info or "Không rõ lỗi"
+                self.log(f"⚠️ Upload backend thất bại: {fail_reason}")
+            
+            duration = time.time() - start_time
+            self.log(f"🎉 FULL PIPELINE HOÀN TẤT trong {duration:.1f} giây!")
+            upload_status_line = (
+                f"Upload backend: OK (upload_id: {upload_info})" if upload_success and upload_info
+                else "Upload backend: OK" if upload_success
+                else f"Upload backend: LỖI ({upload_info})"
+            )
+            self.after(
+                0,
+                lambda: messagebox.showinfo(
+                    "Thành công",
+                    f"Toàn bộ quy trình đã hoàn tất!\n\n"
+                    f"File zip: {zip_path}\n"
+                    f"{upload_status_line}"
+                )
+            )
+            
+        except Exception as e:
+            self.log(f"❌ Lỗi khi zip file: {e}")
+            self.after(0, lambda: messagebox.showerror("Lỗi Zip", str(e)))
+        finally:
+            self.after(0, lambda: self.full_pipe_btn.config(state=tk.NORMAL))
+    
+    def upload_map_to_backend(self, zip_path: Path):
+        """Upload file zip map lên backend."""
+        if not REQUESTS_AVAILABLE:
+            msg = "Thiếu thư viện requests. Cài đặt bằng: pip install requests"
+            self.log(f"❌ {msg}")
+            return False, msg
+        
+        zip_path = Path(zip_path)
+        if not zip_path.exists():
+            return False, f"Không tìm thấy file: {zip_path}"
+        
+        upload_url = f"{self.backend_base_url.rstrip('/')}/api/v1/maps/upload"
+        self.log(f"🌐 Endpoint: {upload_url}")
+        
+        try:
+            with open(zip_path, "rb") as f:
+                files = {"file": (zip_path.name, f, "application/zip")}
+                response = requests.post(upload_url, files=files, timeout=30)
+            
+            if response.status_code in (200, 201):
+                upload_id = None
+                try:
+                    data = response.json()
+                    upload_id = data.get("upload_id") or data.get("uploadId")
+                except Exception:
+                    upload_id = None
+                return True, upload_id
+            
+            # Non-200 response
+            error_text = response.text.strip()[:200] if response.text else f"status {response.status_code}"
+            return False, error_text
+        
+        except requests.exceptions.RequestException as e:
+            return False, str(e)
     
     def set_default_config(self):
         """Set default config file"""

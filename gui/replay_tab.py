@@ -189,9 +189,13 @@ class ReplayTab(ttk.Frame):
     
     def browse_bag_folder(self):
         """Browse cho bag folder"""
+        initial_dir = "/media/an/ANHSON"
+        if not Path(initial_dir).exists():
+            initial_dir = str(self.workspace_path)
+            
         folder = filedialog.askdirectory(
             title="Chọn thư mục chứa bag files",
-            initialdir=self.bag_path_var.get() or str(self.workspace_path)
+            initialdir=self.bag_path_var.get() or initial_dir
         )
         if folder:
             self.bag_path_var.set(folder)

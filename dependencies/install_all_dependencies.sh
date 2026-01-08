@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Master installation script for all dependencies
-# Installs ROS2, common dependencies, Livox driver, Theta driver, and Calibration libraries in sequence
+# Installs Docker, ROS2, common dependencies, Livox driver, Theta driver, and Calibration libraries in sequence
 
 # Colors for output
 RED='\033[0;31m'
@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Script paths
+DOCKER_SCRIPT="${SCRIPT_DIR}/install_docker.sh"
 ROS2_SCRIPT="${SCRIPT_DIR}/install_ros2_jazzy.sh"
 COMMON_SCRIPT="${SCRIPT_DIR}/install_common_dependencies.sh"
 LIVOX_SDK_SCRIPT="${SCRIPT_DIR}/Livox-SDK2/build.sh"
@@ -22,6 +23,7 @@ LIVOX_SCRIPT="${SCRIPT_DIR}/drive_ws/build.sh"
 THETA_SCRIPT="${PROJECT_ROOT}/ws/src/theta_driver/3rd/build.sh"
 CALIBRATION_SCRIPT="${SCRIPT_DIR}/calibration/build.sh"
 SOPHUS_SCRIPT="${SCRIPT_DIR}/livo/Sophus/build.sh"
+FIND_BACKEND_SCRIPT="${SCRIPT_DIR}/find_backend_lan.sh"
 
 # Track overall status
 OVERALL_SUCCESS=true
@@ -201,13 +203,15 @@ main() {
     echo -e "${BLUE}========================================${NC}"
     echo ""
     echo -e "${BLUE}This script will install:${NC}"
-    echo -e "  ${BLUE}1.${NC} ROS2 Jazzy"
-    echo -e "  ${BLUE}2.${NC} Common ROS2 Dependencies"
-    echo -e "  ${BLUE}3.${NC} Livox SDK2"
-    echo -e "  ${BLUE}4.${NC} Livox ROS2 Driver"
-    echo -e "  ${BLUE}5.${NC} Theta Driver"
-    echo -e "  ${BLUE}6.${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
-    echo -e "  ${BLUE}7.${NC} Sophus Library"
+    echo -e "  ${BLUE}1.${NC} Docker Engine and Docker Compose"
+    echo -e "  ${BLUE}2.${NC} ROS2 Jazzy"
+    echo -e "  ${BLUE}3.${NC} Common ROS2 Dependencies"
+    echo -e "  ${BLUE}4.${NC} Livox SDK2"
+    echo -e "  ${BLUE}5.${NC} Livox ROS2 Driver"
+    echo -e "  ${BLUE}6.${NC} Theta Driver"
+    echo -e "  ${BLUE}7.${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
+    echo -e "  ${BLUE}8.${NC} Sophus Library"
+    echo -e "  ${BLUE}9.${NC} Setup LAN Backend Discovery (find_backend_lan.sh)"
     echo ""
     
     # Request sudo password at the beginning
@@ -215,9 +219,9 @@ main() {
         exit 1
     fi
     
-    # Step 1: Install ROS2 Jazzy
-    if ! run_step_with_auto_continue "Installing ROS2 Jazzy" "${ROS2_SCRIPT}" "1"; then
-        print_error "Failed at Step 1: ROS2 Jazzy installation"
+    # Step 1: Install Docker
+    if ! run_step_with_auto_continue "Installing Docker" "${DOCKER_SCRIPT}" "1"; then
+        print_error "Failed at Step 1: Docker installation"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -225,9 +229,9 @@ main() {
         exit 1
     fi
     
-    # Step 2: Install Common Dependencies
-    if ! run_step_with_auto_continue "Installing Common Dependencies" "${COMMON_SCRIPT}" "2"; then
-        print_error "Failed at Step 2: Common Dependencies installation"
+    # Step 2: Install ROS2 Jazzy
+    if ! run_step_with_auto_continue "Installing ROS2 Jazzy" "${ROS2_SCRIPT}" "2"; then
+        print_error "Failed at Step 2: ROS2 Jazzy installation"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -235,9 +239,9 @@ main() {
         exit 1
     fi
     
-    # Step 3: Build Livox SDK2
-    if ! run_step_with_auto_continue "Building Livox SDK2" "${LIVOX_SDK_SCRIPT}" "3"; then
-        print_error "Failed at Step 3: Livox SDK2 build"
+    # Step 3: Install Common Dependencies
+    if ! run_step_with_auto_continue "Installing Common Dependencies" "${COMMON_SCRIPT}" "3"; then
+        print_error "Failed at Step 3: Common Dependencies installation"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -245,9 +249,9 @@ main() {
         exit 1
     fi
     
-    # Step 4: Build Livox Driver
-    if ! run_step_with_auto_continue "Building Livox Driver" "${LIVOX_SCRIPT}" "4"; then
-        print_error "Failed at Step 4: Livox Driver build"
+    # Step 4: Build Livox SDK2
+    if ! run_step_with_auto_continue "Building Livox SDK2" "${LIVOX_SDK_SCRIPT}" "4"; then
+        print_error "Failed at Step 4: Livox SDK2 build"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -255,9 +259,9 @@ main() {
         exit 1
     fi
     
-    # Step 5: Build Theta Driver
-    if ! run_step_with_auto_continue "Building Theta Driver" "${THETA_SCRIPT}" "5"; then
-        print_error "Failed at Step 5: Theta Driver build"
+    # Step 5: Build Livox Driver
+    if ! run_step_with_auto_continue "Building Livox Driver" "${LIVOX_SCRIPT}" "5"; then
+        print_error "Failed at Step 5: Livox Driver build"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -265,9 +269,9 @@ main() {
         exit 1
     fi
     
-    # Step 6: Build Calibration Libraries
-    if ! run_step_with_auto_continue "Building Calibration Libraries" "${CALIBRATION_SCRIPT}" "6"; then
-        print_error "Failed at Step 6: Calibration Libraries build"
+    # Step 6: Build Theta Driver
+    if ! run_step_with_auto_continue "Building Theta Driver" "${THETA_SCRIPT}" "6"; then
+        print_error "Failed at Step 6: Theta Driver build"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
@@ -275,14 +279,62 @@ main() {
         exit 1
     fi
     
-    # Step 7: Build Sophus Library
-    if ! run_step_with_auto_continue "Building Sophus Library" "${SOPHUS_SCRIPT}" "7"; then
-        print_error "Failed at Step 7: Sophus Library build"
+    # Step 7: Build Calibration Libraries
+    if ! run_step_with_auto_continue "Building Calibration Libraries" "${CALIBRATION_SCRIPT}" "7"; then
+        print_error "Failed at Step 7: Calibration Libraries build"
         print_info "Please check the error messages above and fix the issues before continuing."
         echo ""
         echo -e "${YELLOW}Press Enter to exit...${NC}"
         read -r
         exit 1
+    fi
+    
+    # Step 8: Build Sophus Library
+    if ! run_step_with_auto_continue "Building Sophus Library" "${SOPHUS_SCRIPT}" "8"; then
+        print_error "Failed at Step 8: Sophus Library build"
+        print_info "Please check the error messages above and fix the issues before continuing."
+        echo ""
+        echo -e "${YELLOW}Press Enter to exit...${NC}"
+        read -r
+        exit 1
+    fi
+    
+    # Step 9: Setup LAN Backend Discovery
+    echo ""
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}Step 9: Setup LAN Backend Discovery${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    echo ""
+    print_info "This step will help you find and configure the backend server in your LAN."
+    print_info "It will scan the network and update /etc/hosts with frontend.lidar.tm and backend.lidar.tm"
+    echo ""
+    read -p "Do you want to run LAN Backend Discovery now? (y/N): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if [ ! -f "${FIND_BACKEND_SCRIPT}" ]; then
+            print_error "Script not found: ${FIND_BACKEND_SCRIPT}"
+            OVERALL_SUCCESS=false
+            FAILED_STEPS+=("LAN Backend Discovery (script not found)")
+        else
+            chmod +x "${FIND_BACKEND_SCRIPT}"
+            print_info "Running: ${FIND_BACKEND_SCRIPT}"
+            echo ""
+            # Run find_backend_lan.sh - it will request sudo itself
+            # Use yes to provide Enter input for "Press Enter to exit" prompts
+            if yes "" | bash "${FIND_BACKEND_SCRIPT}" 2>&1; then
+                print_success "LAN Backend Discovery completed successfully!"
+                echo ""
+            else
+                local exit_code=${PIPESTATUS[1]}
+                print_warning "LAN Backend Discovery completed with exit code: ${exit_code}"
+                print_info "You can run this manually later with: sudo ./dependencies/find_backend_lan.sh"
+                echo ""
+            fi
+        fi
+    else
+        print_info "Skipping LAN Backend Discovery setup."
+        print_info "You can run it manually later with: sudo ./dependencies/find_backend_lan.sh"
+        echo ""
     fi
     
     # Final summary
@@ -295,6 +347,7 @@ main() {
         print_success "All dependencies have been installed successfully!"
         echo ""
         print_info "Installed components:"
+        echo -e "  ${GREEN}✓${NC} Docker Engine and Docker Compose"
         echo -e "  ${GREEN}✓${NC} ROS2 Jazzy"
         echo -e "  ${GREEN}✓${NC} Common ROS2 Dependencies"
         echo -e "  ${GREEN}✓${NC} Livox SDK2"
@@ -302,6 +355,7 @@ main() {
         echo -e "  ${GREEN}✓${NC} Theta Driver"
         echo -e "  ${GREEN}✓${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
         echo -e "  ${GREEN}✓${NC} Sophus Library"
+        echo -e "  ${GREEN}✓${NC} LAN Backend Discovery (optional)"
         echo ""
         print_info "You can now use ROS2 and the installed drivers."
         echo ""
