@@ -1,6 +1,5 @@
-"""Map processing logic including PCD to 2D map conversion."""
+"""Map processing logic including map extraction and processing."""
 import logging
-import subprocess
 import json
 import zipfile
 import tempfile
@@ -21,6 +20,8 @@ class MapProcessor:
     
     def _extract_zip(self, zip_path: Path) -> Optional[Path]:
         """Extract ZIP file to temporary directory and return temp_dir path."""
+        temp_dir = None
+        temp_path = None
         try:
             temp_dir = tempfile.mkdtemp()
             temp_path = Path(temp_dir)
@@ -32,6 +33,13 @@ class MapProcessor:
             return temp_path
         except Exception as e:
             logger.error(f"Error extracting ZIP: {e}")
+            # Cleanup temp directory if extraction failed
+            if temp_dir and temp_path and temp_path.exists():
+                try:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    logger.info(f"Cleaned up temporary directory: {temp_dir}")
+                except Exception as cleanup_error:
+                    logger.warning(f"Error cleaning up temp directory {temp_dir}: {cleanup_error}")
             return None
     
     def _find_pcd_in_extracted(self, temp_dir: Path) -> Optional[Path]:
@@ -57,21 +65,6 @@ class MapProcessor:
         except Exception as e:
             logger.error(f"Error finding PCD in extracted ZIP: {e}")
             return None
-    
-    def _find_pcd_in_zip(self, zip_path: Path) -> Optional[Path]:
-        """Extract ZIP and find PCD file (legacy method for backward compatibility)."""
-        temp_dir = self._extract_zip(zip_path)
-        if not temp_dir:
-            return None
-        
-        try:
-            return self._find_pcd_in_extracted(temp_dir)
-        finally:
-            # Cleanup temp directory
-            try:
-                shutil.rmtree(temp_dir)
-            except Exception as e:
-                logger.warning(f"Error cleaning up temp directory: {e}")
     
     def _find_floorplan_in_zip(self, temp_dir: Path) -> Optional[Dict[str, Any]]:
         """Find floorplan files in extracted ZIP directory."""
@@ -184,65 +177,6 @@ class MapProcessor:
             logger.error(f"Error extracting floorplan files: {e}")
             return None
     
-    # DEPRECATED: Floorplan generation is now done in GUI (bag_mapping_tab.py)
-    # This method is kept for reference/testing purposes only
-    def _generate_2d_maps(self, pcd_path: Path, output_dir: Path) -> Optional[Dict[str, Any]]:
-        """
-        DEPRECATED: Call Python script to generate 3 2D map views.
-        
-        This method is no longer used. Floorplan generation is now done in GUI
-        during Full Pipeline execution. Backend only extracts floorplan files from ZIP.
-        """
-        logger.warning("_generate_2d_maps is deprecated. Floorplan should be generated in GUI.")
-        try:
-            # Get path to Python script
-            script_path = Path(__file__).parent.parent.parent / "example" / "pcd_to_floorplan.py"
-            
-            if not script_path.exists():
-                logger.error(f"Python script not found: {script_path}")
-                return None
-            
-            # Import the function directly
-            import sys
-            sys.path.insert(0, str(script_path.parent))
-            
-            from pcd_to_floorplan import pcd_to_3_views
-            
-            # Generate 3 views
-            result = pcd_to_3_views(
-                str(pcd_path),
-                output_dir=str(output_dir),
-                resolution=0.05,
-                colormap='binary',
-                invert_colors=True,
-                auto_crop=True,
-                crop_margin=5,
-                border_margin=20,
-                outlier_filter=True,
-                outlier_percentile=1.0
-            )
-            
-            logger.info(f"Generated 3 views successfully: {result['image_paths']}")
-            return result
-            
-        except ImportError as e:
-            logger.error(f"Failed to import pcd_to_floorplan: {e}")
-            # Fallback: try calling as subprocess
-            try:
-                script_path = Path(__file__).parent.parent.parent / "example" / "pcd_to_floorplan.py"
-                python_cmd = ["python3", str(script_path)]
-                
-                # This won't work directly, need to modify script to support 3 views via CLI
-                # For now, return None and log error
-                logger.error("Subprocess call not implemented yet. Please ensure pcd_to_floorplan.py is importable.")
-                return None
-            except Exception as e2:
-                logger.error(f"Subprocess fallback also failed: {e2}")
-                return None
-        except Exception as e:
-            logger.error(f"Error generating 2D maps: {e}")
-            return None
-    
     async def process_upload(
         self,
         file_content: bytes,
@@ -297,6 +231,7 @@ class MapProcessor:
             pcd_path = None
             upload_id = str(uuid4())
             temp_dir = None
+            map_result = None
             
             if filename.endswith('.zip'):
                 logger.info(f"Extracting ZIP file: {filename}")
@@ -389,6 +324,33 @@ class MapProcessor:
                 storage_service.delete_file(file_path)
                 if pcd_path != file_path:
                     storage_service.delete_file(pcd_path)
+                
+                # Cleanup floorplan files (images + metadata) that were already extracted
+                if map_result:
+                    # Delete floorplan image files
+                    if map_result.get("image_paths"):
+                        for view_id, rel_path in map_result["image_paths"].items():
+                            image_path = storage_service.get_processed_path(rel_path)
+                            storage_service.delete_file(image_path)
+                            logger.info(f"Cleaned up floorplan image ({view_id}): {image_path}")
+                    
+                    # Delete metadata file
+                    if map_result.get("metadata_path"):
+                        metadata_path = storage_service.get_processed_path(map_result["metadata_path"])
+                        storage_service.delete_file(metadata_path)
+                        logger.info(f"Cleaned up metadata file: {metadata_path}")
+                    
+                    # Delete upload_id directory if it exists and is empty
+                    upload_dir = storage_service.get_processed_path(upload_id)
+                    try:
+                        if upload_dir.exists() and upload_dir.is_dir():
+                            # Try to remove directory (will fail if not empty, which is fine)
+                            upload_dir.rmdir()
+                            logger.info(f"Cleaned up upload directory: {upload_dir}")
+                    except Exception as e:
+                        # Directory not empty or other error - that's okay, individual files were deleted
+                        logger.debug(f"Could not remove upload directory {upload_dir}: {e}")
+                
                 return None
             
             logger.info(f"Map processed successfully: {upload_id}")
