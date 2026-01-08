@@ -8,7 +8,13 @@ import subprocess
 import os
 from functools import partial
 from languages.translate_engine import translator
-
+from recorder_logic import Recorder # Import file mới
+from theta_logic import ThetaDriver # Import file mới
+from livox_logic import LivoxTab # Import file mới
+from launch import LaunchDescription
+from launch_ros.actions import Node
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.conditions import IfCondition
 try:
     import tkinter as tk
     from tkinter import ttk, messagebox, scrolledtext, filedialog
@@ -58,7 +64,15 @@ class LivoxApp:
         
         # Dictionary để lưu checkbox variables
         self.topic_vars = {}
+        self.recorder = Recorder(log_callback=self.log)
+        self.theta_driver = ThetaDriver(log_callback=self.log)
+        self.livox_tab = LivoxTab(log_callback=self.log, update_label_livo_connected=self.update_label_livo_connected)
+        
+        self.is_recording = False
         self._setup_layout()
+
+    def update_label_livo_connected(self, is_running):
+        pass
     
     def toggle_language(self):
         # Logic đổi qua lại giữa 'en' và 'jp'
@@ -108,14 +122,55 @@ class LivoxApp:
         self.sidebar = tk.LabelFrame(self.main_container, text=translator.get("label.livox_driver_2"), padx=10, pady=10)
         self.sidebar.pack(side="left", fill="y", padx=5, pady=5)
 
-        tk.Checkbutton(self.sidebar, text=translator.get("label.enable_converter")).pack(anchor="w")
+        # tk.Checkbutton(self.sidebar, text=translator.get("label.enable_converter")).pack(anchor="w")
 
         btn_driver_frame = tk.Frame(self.sidebar)
         btn_driver_frame.pack(fill="x", pady=10)
-        tk.Button(btn_driver_frame, text=translator.get("button.start"), width=10).pack(side="left", padx=2)
-        tk.Button(btn_driver_frame, text=translator.get("button.stop"), width=10).pack(side="left", padx=2)
-        tk.Label(self.sidebar, text="● " + translator.get("label.lidar_topic") + ": " + translator.get("status.active"), fg="green").pack(anchor="w", pady=5)
-        tk.Label(self.sidebar, text="● " + translator.get("label.imu_topic") + ": " + translator.get("status.active"), fg="green").pack(anchor="w")
+        self.btn_start_livox = tk.Button(btn_driver_frame, text=translator.get("button.start"), width=10, command=self.start_livox_driver)
+        self.btn_start_livox.pack(side="left", padx=2)
+        self.btn_stop_livox = tk.Button(btn_driver_frame, text=translator.get("button.stop"), width=10, command=self.stop_livox_driver)
+        self.btn_stop_livox.pack(side="left", padx=2)
+        self.btn_stop_livox.config(state=tk.DISABLED)
+
+        # Trong hàm khởi tạo (ví dụ __init__)
+        self.label_theta_usb = tk.Label(
+            self.sidebar, 
+            text="● " + translator.get("label.camera") + ": " + translator.get("status.disconnected")
+        )
+        self.label_theta_usb.pack(anchor="w", pady=5)
+
+        self.label_slam_usb = tk.Label(
+            self.sidebar, 
+            text="● " + translator.get("label.slam") + ": " + translator.get("status.disconnected")
+        )
+        self.label_slam_usb.pack(anchor="w", pady=5)
+        
+        self.label_theta = tk.Label(
+            self.sidebar, 
+            text="● " + translator.get("label.theta_driver") + ": " + translator.get("status.not_running")
+        )
+        self.label_theta.pack(anchor="w", pady=5)
+
+        self.label_livox = tk.Label(
+            self.sidebar, 
+            text="● " + translator.get("label.livox_driver") + ": " + translator.get("status.not_running")
+        )
+        self.label_livox.pack(anchor="w")
+
+        # --- THÊM NÚT RVIZ TẠI ĐÂY ---
+        # Một đường kẻ ngang nhẹ để phân cách (tùy chọn)
+        # tk.Frame(self.sidebar, height=1, bg="grey").pack(fill="x", pady=5)
+
+        self.btn_rviz = tk.Button(
+            self.sidebar, 
+            text="📊 " + translator.get("button.launch_rviz2"), 
+            command=self.open_rviz,
+            width=10
+        )
+        self.btn_rviz.pack(side="right", pady=10)   
+
+        # tk.Label(self.sidebar, text="● " + translator.get("label.theta_driver") + ": " + translator.get("status.disconnected")).pack(anchor="w", pady=5)
+        # tk.Label(self.sidebar, text="● " + translator.get("label.livox_driver") + ": " + translator.get("status.disconnected")).pack(anchor="w")
 
         # 3. Workspace (Phải)
         self.workspace = tk.Frame(self.main_container)
@@ -187,7 +242,23 @@ class LivoxApp:
             # Checkbox variable
             var = tk.BooleanVar(value=config["enabled"])
             self.topic_vars[topic] = var
-            
+
+    def open_rviz(self):
+        """Mở RViz2 với cấu hình đã cho"""
+        self.log("🚀 Đang khởi động RViz2...")
+        rviz_use = LaunchConfiguration('rviz')
+        rviz_cfg = LaunchConfiguration('rviz_cfg')
+        try: 
+            return LaunchDescription([
+                Node(
+                    package='rviz2',
+                    executable='rviz2',
+                    arguments=['-d', rviz_cfg],
+                    condition=IfCondition(rviz_use)
+                )
+            ])
+        except Exception as e:
+            self.log(f"❌ Lỗi khi khởi động RViz2: {e}")
 
     def _verify_source(self, setup_script, name):
         """Verify rằng setup script có thể source được"""
@@ -429,19 +500,42 @@ class LivoxApp:
         self.log_text.config(state="disabled")
         self.log("Log cleared.")
 
+    # def toggle_recording(self):
+    #     if not self.is_recording:
+    #         self.btn_record.config(text="■ STOP RECORDING")
+    #         self.lbl_status.config(text="Status: Recording...", fg="red")
+    #         self.btn_upload.pack_forget()
+    #         self.log("Recording started...")
+    #         self.start_recording()
+    #     else:
+    #         self.btn_record.config(text="● START RECORDING")
+    #         self.lbl_status.config(text="Status: File Saved", fg="green")
+    #         self.btn_upload.pack(side="left", padx=10)
+    #         self.log("Recording saved.")
+    #         self.stop_recording()
+
     def toggle_recording(self):
-        if not self.is_recording:
-            self.btn_record.config(text="■ STOP RECORDING")
-            self.lbl_status.config(text="Status: Recording...", fg="red")
-            self.btn_upload.pack_forget()
-            self.log("Recording started...")
-            self.start_recording()
+        if not self.recorder.is_recording:
+            # Gọi logic start từ file riêng
+            success = self.recorder.start(
+                output_dir_str=self.output_dir_var.get(),
+                topic_vars=self.topic_vars,
+                workspace_path=self.workspace_path,
+                drive_ws_path=self.drive_ws_path,
+                max_bag_size_str=self.max_bag_size_var.get()
+            )
+            
+            if success:
+                self.btn_record.config(text="■ STOP RECORDING")
+                self.lbl_status.config(text="Status: Recording...", fg="red")
+                self.btn_upload.pack_forget()
         else:
+            # Gọi logic stop từ file riêng
+            saved_path = self.recorder.stop()
             self.btn_record.config(text="● START RECORDING")
-            self.lbl_status.config(text="Status: File Saved", fg="green")
+            self.lbl_status.config(text=f"Status: Saved", fg="green")
             self.btn_upload.pack(side="left", padx=10)
-            self.log("Recording saved.")
-            self.stop_recording()
+            self.log(f"✅ Đã lưu tại: {saved_path}")
 
     def start_upload_thread(self):
         self.btn_upload.config(state="disabled")
@@ -461,7 +555,59 @@ class LivoxApp:
         time.sleep(1)
         self.progress.pack_forget()
         self.lbl_percent.pack_forget()
+
+    def check_theta_usb_callback(self, is_connected):
+        """Callback để cập nhật UI dựa trên trạng thái kết nối USB của Theta"""
+        if is_connected:
+            self.label_theta_usb.config(text="● " + translator.get("label.camera") + ": " + translator.get("status.connected"), fg="green")
+        else:
+            self.label_theta_usb.config(text="● " + translator.get("label.camera") + ": " + translator.get("status.disconnected"), fg="red")
     
+    def update_ui_theta_connected(self, is_active_theta):
+        """Hàm này chuyên trách việc đổi màu/text trên giao diện"""
+        # self.label_theta.config(text="● " + translator.get("label.theta_driver") + ": " + translator.get("status.connected"), fg="green")
+        # self.label_livox.config(text="● " + translator.get("label.livox_driver") + ": " + translator.get("status.connected"), fg="green")
+        # Xác định màu sắc dựa trên biến success
+        color = "green" if is_active_theta else "red"
+        
+        # Xác định nội dung text dựa trên biến success
+        status_text = translator.get("status.connected") if is_active_theta else translator.get("status.disconnected")
+
+        print(f"UI cập nhật: is_active_theta={is_active_theta}")
+        
+        # Cập nhật UI Theta
+        full_text_theta = f"● {translator.get('label.theta_driver')}: {status_text}"
+        full_text_livox = f"● {translator.get('label.livox_driver')}: {status_text}"
+
+        self.label_theta.config(text=full_text_theta, fg=color)
+        if is_active_theta:
+            self.btn_start_livox.config(state=tk.DISABLED)
+            self.btn_stop_livox.config(state=tk.NORMAL)
+        else:
+            self.btn_start_livox.config(state=tk.NORMAL)
+            self.btn_stop_livox.config(state=tk.DISABLED)
+
+        # self.label_livox.config(text=full_text_livox, fg=color)
+    
+    def stop_livox_driver(self):
+        self.theta_driver.stop_all()
+        self.livox_tab.stop_livox_driver()
+        self.livox_tab.stop_converter()
+        self.livox_tab.stop_ros_subscriber()
+    
+    def start_livox_driver(self):
+        try:
+            self.log("🚀 Đang khởi động Livox Driver 2 và Theta Driver...")
+            # Kiểm tra kết nối USB của Theta trước
+            self.theta_driver.check_theta_usb_connection(self.check_theta_usb_callback)
+            self.theta_driver.launch_theta_driver()
+            self.theta_driver.launch_camera_info_publisher()
+            self.livox_tab.start_livox_driver()
+            self.livox_tab.start_converter()
+            self.livox_tab.start_ros_subscriber()
+        except Exception as e:
+            self.log(f"❌ Lỗi khi khởi động Livox Driver 2 và Theta Driver: {e}")
+            
     def monitor_record_process(self):
         """Monitor record process output"""
         if not self.record_process:
