@@ -140,6 +140,7 @@ class LivoxTab(ttk.Frame):
         self.lidar_count = 0
         self.imu_count = 0
         self.points2_count = 0
+
         
         # Tạo UI
         self.create_widgets()
@@ -366,9 +367,11 @@ class LivoxTab(ttk.Frame):
                 self.start_driver_btn.config(state=tk.DISABLED)
                 self.stop_driver_btn.config(state=tk.NORMAL)
                 self.start_subscriber_btn.config(state=tk.NORMAL)
+                self.update_label_livo_connected(True)
                 self.start_converter()
             # Converter button đã enable từ đầu, không cần enable lại
         except Exception as e:
+            self.update_label_livo_connected(False)
             print(f"Livox MID 360 driver... error {e}")
 
         # print("Bắt đầu Livox MID 360 driver...")
@@ -712,6 +715,7 @@ class LivoxTab(ttk.Frame):
         ):
             self.start_converter_btn.config(state=tk.DISABLED)
             self.stop_converter_btn.config(state=tk.NORMAL)
+            print("Đang restart subscriber để subscribe /livox/points2...")
             
             # Nếu subscriber đang chạy, cần restart để subscribe /livox/points2
             if self.is_ros_running:

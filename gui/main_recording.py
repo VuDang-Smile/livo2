@@ -74,7 +74,25 @@ class LivoxApp:
         self.livox_tab = LivoxTab(log_callback=self.log, update_label_livo_connected=self.update_label_livo_connected)
 
     def update_label_livo_connected(self, is_running):
-        pass
+        if is_running:
+            self.label_slam_usb.config(
+                text="● " + translator.get("label.slam_usb") + ": " + translator.get("status.connected"),
+                fg="green"
+            )
+            self.label_livox.config(
+                text="● " + translator.get("label.livox_driver") + ": " + translator.get("status.running"),
+                fg="green"
+            )
+        else:
+            self.label_livox.config(
+                text="● " + translator.get("label.livox_driver") + ": " + translator.get("status.not_running"),
+                fg="red"
+            )
+            self.label_slam_usb.config(
+                text="● " + translator.get("label.slam_usb") + ": " + translator.get("status.disconnected"),
+                fg="red"
+            )
+
     
     def toggle_language(self):
         # Logic đổi qua lại giữa 'en' và 'jp'
@@ -616,6 +634,7 @@ class LivoxApp:
             self.theta_driver.launch_theta_driver()
             self.theta_driver.launch_camera_info_publisher()
             self.livox_tab.start_livox_driver()
+            
             # self.after(2000,  self.livox_tab.start_converter())
             # self.livox_tab.start_converter()
             # self.after(4000,  self.livox_tab.start_ros_subscriber())
