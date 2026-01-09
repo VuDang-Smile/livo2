@@ -23,6 +23,7 @@ LIVOX_SCRIPT="${SCRIPT_DIR}/drive_ws/build.sh"
 THETA_SCRIPT="${PROJECT_ROOT}/ws/src/theta_driver/3rd/build.sh"
 CALIBRATION_SCRIPT="${SCRIPT_DIR}/calibration/build.sh"
 SOPHUS_SCRIPT="${SCRIPT_DIR}/livo/Sophus/build.sh"
+HBA_SCRIPT="${SCRIPT_DIR}/HBA/install.sh"
 FIND_BACKEND_SCRIPT="${SCRIPT_DIR}/find_backend_lan.sh"
 
 # Track overall status
@@ -211,7 +212,8 @@ main() {
     echo -e "  ${BLUE}6.${NC} Theta Driver"
     echo -e "  ${BLUE}7.${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
     echo -e "  ${BLUE}8.${NC} Sophus Library"
-    echo -e "  ${BLUE}9.${NC} Setup LAN Backend Discovery (find_backend_lan.sh)"
+    echo -e "  ${BLUE}9.${NC} HBA Standalone Tool"
+    echo -e "  ${BLUE}10.${NC} Setup LAN Backend Discovery (find_backend_lan.sh)"
     echo ""
     
     # Request sudo password at the beginning
@@ -299,10 +301,20 @@ main() {
         exit 1
     fi
     
-    # Step 9: Setup LAN Backend Discovery
+    # Step 9: Build HBA Standalone
+    if ! run_step_with_auto_continue "Building HBA Standalone Tool" "${HBA_SCRIPT}" "9"; then
+        print_error "Failed at Step 9: HBA Standalone build"
+        print_info "Please check the error messages above and fix the issues before continuing."
+        echo ""
+        echo -e "${YELLOW}Press Enter to exit...${NC}"
+        read -r
+        exit 1
+    fi
+    
+    # Step 10: Setup LAN Backend Discovery
     echo ""
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}Step 9: Setup LAN Backend Discovery${NC}"
+    echo -e "${BLUE}Step 10: Setup LAN Backend Discovery${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     print_info "This step will help you find and configure the backend server in your LAN."
@@ -355,6 +367,7 @@ main() {
         echo -e "  ${GREEN}✓${NC} Theta Driver"
         echo -e "  ${GREEN}✓${NC} Calibration Libraries (Ceres Solver, GTSAM, Iridescence)"
         echo -e "  ${GREEN}✓${NC} Sophus Library"
+        echo -e "  ${GREEN}✓${NC} HBA Standalone Tool"
         echo -e "  ${GREEN}✓${NC} LAN Backend Discovery (optional)"
         echo ""
         print_info "You can now use ROS2 and the installed drivers."
