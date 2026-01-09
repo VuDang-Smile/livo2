@@ -275,8 +275,16 @@ class LocalizationTab(ttk.Frame):
             if self.default_map_root.exists():
                 shutil.rmtree(self.default_map_root, ignore_errors=True)
             
+            # Giải nén và sau đó xóa file zip để tránh tồn tại file tạm
             with zipfile.ZipFile(dest_zip, 'r') as zip_ref:
                 zip_ref.extractall(dest_root)
+            
+            try:
+                dest_zip.unlink()
+                self.log(f"🧹 Đã xóa file zip tạm: {dest_zip.name}")
+            except Exception as e:
+                # Không fail workflow nếu xóa file zip lỗi, chỉ log cảnh báo
+                self.log(f"⚠️ Không thể xóa file zip tạm ({dest_zip.name}): {e}")
             
             # Cập nhật UI và state
             self.map_root = str(self.default_map_root)

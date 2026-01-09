@@ -494,8 +494,8 @@ class BagMappingTab(ttk.Frame):
         self.log(f"📁 Output directory: {floorplan_output_dir}")
         
         try:
-            # Setup path to import pcd_to_floorplan
-            script_dir = Path(__file__).parent.parent / "example"
+            # Setup path to import pcd_to_floorplan từ thư mục scripts của project
+            script_dir = Path(__file__).parent.parent / "scripts"
             if script_dir not in [Path(p) for p in sys.path]:
                 sys.path.insert(0, str(script_dir))
             
@@ -742,7 +742,7 @@ class BagMappingTab(ttk.Frame):
     
     def browse_bag_file(self):
         """Chọn bag file"""
-        initial_dir = "/media/an/ANHSON/"
+        initial_dir = "/media/an/01DC80D9DB838380/"
         bag_path = filedialog.askdirectory(
             title="Chọn Bag Folder",
             initialdir=initial_dir
