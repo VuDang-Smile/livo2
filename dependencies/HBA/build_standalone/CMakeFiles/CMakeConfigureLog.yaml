@@ -1702,3 +1702,121 @@ events:
         
       exitCode: 0
 ...
+
+---
+events:
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/FindMPI.cmake:1278 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/FindMPI.cmake:1322 (_MPI_try_staged_settings)"
+      - "/usr/share/cmake-3.28/Modules/FindMPI.cmake:1645 (_MPI_check_lang_works)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/vtk-9.1/VTK-vtk-module-find-packages.cmake:397 (find_package)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/vtk-9.1/vtk-config.cmake:150 (include)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake:275 (find_package)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake:324 (find_VTK)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake:567 (find_external_library)"
+      - "CMakeLists.txt:10 (find_package)"
+    description: "The MPI test test_mpi for C in mode normal"
+    directories:
+      source: "/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-aUpfjS"
+      binary: "/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-aUpfjS"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/usr/lib/x86_64-linux-gnu/cmake/vtk-9.1/patches/99;/usr/lib/x86_64-linux-gnu/cmake/vtk-9.1;/usr/lib/x86_64-linux-gnu/cmake/pcl/Modules"
+    buildResult:
+      variable: "MPI_RESULT_C_test_mpi_normal"
+      cached: true
+      stdout: |
+        Change Dir: '/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-aUpfjS'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_0cb4c/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_0cb4c.dir/build.make CMakeFiles/cmTC_0cb4c.dir/build
+        gmake[1]: Entering directory '/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-aUpfjS'
+        Building C object CMakeFiles/cmTC_0cb4c.dir/test_mpi.c.o
+        /usr/bin/cc  -isystem /usr/lib/x86_64-linux-gnu/openmpi/include -isystem /usr/lib/x86_64-linux-gnu/openmpi/include/openmpi  -o CMakeFiles/cmTC_0cb4c.dir/test_mpi.c.o -c /home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-aUpfjS/test_mpi.c
+        Linking C executable cmTC_0cb4c
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_0cb4c.dir/link.txt --verbose=1
+        /usr/bin/cc -L/usr/lib/x86_64-linux-gnu/openmpi/lib CMakeFiles/cmTC_0cb4c.dir/test_mpi.c.o -o cmTC_0cb4c  /usr/lib/x86_64-linux-gnu/libmpi.so 
+        gmake[1]: Leaving directory '/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-aUpfjS'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/FindMPI.cmake:1278 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/FindMPI.cmake:1322 (_MPI_try_staged_settings)"
+      - "/usr/share/cmake-3.28/Modules/FindMPI.cmake:1645 (_MPI_check_lang_works)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/vtk-9.1/VTK-vtk-module-find-packages.cmake:397 (find_package)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/vtk-9.1/vtk-config.cmake:150 (include)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake:275 (find_package)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake:324 (find_VTK)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake:567 (find_external_library)"
+      - "CMakeLists.txt:10 (find_package)"
+    description: "The MPI test test_mpi for C in mode normal"
+    directories:
+      source: "/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-vocJtG"
+      binary: "/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-vocJtG"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/usr/lib/x86_64-linux-gnu/cmake/vtk-9.1/patches/99;/usr/lib/x86_64-linux-gnu/cmake/vtk-9.1;/usr/lib/x86_64-linux-gnu/cmake/pcl/Modules"
+    buildResult:
+      variable: "MPI_RESULT_C_test_mpi_normal"
+      cached: true
+      stdout: |
+        Change Dir: '/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-vocJtG'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_3fd08/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_3fd08.dir/build.make CMakeFiles/cmTC_3fd08.dir/build
+        gmake[1]: Entering directory '/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-vocJtG'
+        Building C object CMakeFiles/cmTC_3fd08.dir/test_mpi.c.o
+        /usr/bin/cc  -isystem /usr/lib/x86_64-linux-gnu/openmpi/include -isystem /usr/lib/x86_64-linux-gnu/openmpi/include/openmpi  -o CMakeFiles/cmTC_3fd08.dir/test_mpi.c.o -c /home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-vocJtG/test_mpi.c
+        Linking C executable cmTC_3fd08
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_3fd08.dir/link.txt --verbose=1
+        /usr/bin/cc -L/usr/lib/x86_64-linux-gnu/openmpi/lib CMakeFiles/cmTC_3fd08.dir/test_mpi.c.o -o cmTC_3fd08  /usr/lib/x86_64-linux-gnu/libmpi.so 
+        gmake[1]: Leaving directory '/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-vocJtG'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/FindMPI.cmake:1278 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/FindMPI.cmake:1322 (_MPI_try_staged_settings)"
+      - "/usr/share/cmake-3.28/Modules/FindMPI.cmake:1645 (_MPI_check_lang_works)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/vtk-9.1/VTK-vtk-module-find-packages.cmake:397 (find_package)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/vtk-9.1/vtk-config.cmake:150 (include)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake:275 (find_package)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake:324 (find_VTK)"
+      - "/usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake:567 (find_external_library)"
+      - "CMakeLists.txt:10 (find_package)"
+    description: "The MPI test test_mpi for C in mode normal"
+    directories:
+      source: "/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-MI9U6V"
+      binary: "/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-MI9U6V"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/usr/lib/x86_64-linux-gnu/cmake/vtk-9.1/patches/99;/usr/lib/x86_64-linux-gnu/cmake/vtk-9.1;/usr/lib/x86_64-linux-gnu/cmake/pcl/Modules"
+    buildResult:
+      variable: "MPI_RESULT_C_test_mpi_normal"
+      cached: true
+      stdout: |
+        Change Dir: '/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-MI9U6V'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_80180/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_80180.dir/build.make CMakeFiles/cmTC_80180.dir/build
+        gmake[1]: Entering directory '/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-MI9U6V'
+        Building C object CMakeFiles/cmTC_80180.dir/test_mpi.c.o
+        /usr/bin/cc  -isystem /usr/lib/x86_64-linux-gnu/openmpi/include -isystem /usr/lib/x86_64-linux-gnu/openmpi/include/openmpi  -o CMakeFiles/cmTC_80180.dir/test_mpi.c.o -c /home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-MI9U6V/test_mpi.c
+        Linking C executable cmTC_80180
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_80180.dir/link.txt --verbose=1
+        /usr/bin/cc -L/usr/lib/x86_64-linux-gnu/openmpi/lib CMakeFiles/cmTC_80180.dir/test_mpi.c.o -o cmTC_80180  /usr/lib/x86_64-linux-gnu/libmpi.so 
+        gmake[1]: Leaving directory '/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/CMakeFiles/CMakeScratch/TryCompile-MI9U6V'
+        
+      exitCode: 0
+...

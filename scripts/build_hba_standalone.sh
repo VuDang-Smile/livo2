@@ -3,7 +3,17 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-HBA_DIR="$PROJECT_ROOT/dependencies/HBA"
+
+# Tìm thư mục HBA thay vì dùng hardcoded path
+echo "Searching for HBA directory..."
+HBA_DIR=$(find "$PROJECT_ROOT" -type d -name "HBA" -not -path "*/build*" -not -path "*/.*" | head -n 1)
+
+if [ -z "$HBA_DIR" ]; then
+    echo "Error: Could not find HBA directory in $PROJECT_ROOT"
+    exit 1
+fi
+
+echo "Found HBA at: $HBA_DIR"
 BUILD_DIR="$HBA_DIR/build_standalone"
 
 echo "Building HBA as a standalone tool..."

@@ -34,10 +34,45 @@ def get_transformation_matrix(t, q):
     T[:3, 3] = t
     return T
 
+def find_hba_binary(project_root):
+    """Tìm binary hba_standalone trong project_root"""
+    print(f"[INFO] Searching for hba_standalone binary in {project_root}...")
+    # Thử tìm trong các vị trí phổ biến
+    search_paths = [
+        project_root / "dependencies" / "HBA" / "build_standalone" / "hba_standalone",
+        project_root / "dependencies" / "HBA" / "hba_standalone",
+        project_root / "build" / "hba_standalone",
+    ]
+    
+    for path in search_paths:
+        if path.exists():
+            return path
+            
+    # Nếu không thấy, dùng lệnh find
+    try:
+        result = subprocess.run(
+            ["find", str(project_root), "-name", "hba_standalone", "-type", "f", "-not", "-path", "*/.*"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Lấy kết quả đầu tiên
+            return Path(result.stdout.strip().split('\n')[0])
+    except Exception:
+        pass
+        
+    return None
+
 def main():
+    # Determine default HBA binary path relative to this script
+    script_dir = Path(__file__).parent.resolve()
+    project_root = script_dir.parent
+    
+    hba_bin_found = find_hba_binary(project_root)
+    default_hba_bin = hba_bin_found if hba_bin_found else (project_root / "dependencies" / "HBA" / "build_standalone" / "hba_standalone")
+
     parser = argparse.ArgumentParser(description="Normalize map using HBA.")
     parser.add_argument("--input_dir", type=str, required=True, help="FAST-LIVO2 Log/PCD directory.")
-    parser.add_argument("--hba_binary", type=str, default="/home/an/Desktop/lidar/livo2/dependencies/HBA/build_standalone/hba_standalone", help="Path to hba_standalone binary.")
+    parser.add_argument("--hba_binary", type=str, default=str(default_hba_bin), help="Path to hba_standalone binary.")
     parser.add_argument("--layers", type=int, default=2, help="Number of layers for HBA.")
     parser.add_argument("--threads", type=int, default=16, help="Number of threads for HBA.")
     parser.add_argument("--output_pcd", type=str, default="merge_all_hba.pcd", help="Output merged PCD file.")

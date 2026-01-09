@@ -473,6 +473,82 @@ class BagMappingTab(ttk.Frame):
             self.log(f"❌ Lỗi ScanContext: {e}")
             return False
 
+    def _generate_floorplan(self):
+        """Generate floorplan from PCD file using pcd_to_3_views."""
+        pcd_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "PCD"
+        
+        # Prefer merge_all_hba.pcd, fallback to merged_all.pcd
+        input_pcd = pcd_dir / "merge_all_hba.pcd"
+        if not input_pcd.exists():
+            self.log("⚠️ merge_all_hba.pcd not found, trying merged_all.pcd...")
+            input_pcd = pcd_dir / "merged_all.pcd"
+            if not input_pcd.exists():
+                self.log("❌ Neither merge_all_hba.pcd nor merged_all.pcd found for floorplan generation")
+                return False
+        
+        floorplan_output_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "floorplan"
+        floorplan_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.log("=" * 60)
+        self.log(f"🗺️ Generating floorplan from: {input_pcd.name}")
+        self.log(f"📁 Output directory: {floorplan_output_dir}")
+        
+        try:
+            # Setup path to import pcd_to_floorplan
+            script_dir = Path(__file__).parent.parent / "example"
+            if script_dir not in [Path(p) for p in sys.path]:
+                sys.path.insert(0, str(script_dir))
+            
+            # Dynamic import using importlib to avoid linter warnings
+            import importlib
+            pcd_module = importlib.import_module("pcd_to_floorplan")
+            pcd_to_3_views = pcd_module.pcd_to_3_views
+            
+            # Generate 3 views with same parameters as backend
+            result = pcd_to_3_views(
+                str(input_pcd),
+                output_dir=str(floorplan_output_dir),
+                resolution=0.05,
+                colormap='binary',
+                invert_colors=True,
+                auto_crop=True,
+                crop_margin=5,
+                border_margin=20,
+                outlier_filter=True,
+                outlier_percentile=1.0
+            )
+            
+            # Validate output files
+            expected_files = [
+                floorplan_output_dir / f"{input_pcd.stem}_top.png",
+                floorplan_output_dir / f"{input_pcd.stem}_side_x.png",
+                floorplan_output_dir / f"{input_pcd.stem}_side_y.png",
+                floorplan_output_dir / f"{input_pcd.stem}_metadata.json"
+            ]
+            
+            all_exist = all(f.exists() for f in expected_files)
+            if not all_exist:
+                missing = [f.name for f in expected_files if not f.exists()]
+                self.log(f"❌ Missing floorplan files: {missing}")
+                return False
+            
+            self.log("=" * 60)
+            self.log(f"✅ Floorplan generated successfully!")
+            self.log(f"📁 Directory: {floorplan_output_dir}")
+            self.log(f"📄 Metadata: {result.get('metadata_path', 'N/A')}")
+            self.log("=" * 60)
+            return True
+            
+        except ImportError as e:
+            self.log(f"❌ Failed to import pcd_to_floorplan: {e}")
+            self.log(f"   Check path: {script_dir}")
+            return False
+        except Exception as e:
+            self.log(f"❌ Error generating floorplan: {e}")
+            import traceback
+            self.log(f"   Details: {traceback.format_exc()}")
+            return False
+
     def run_full_pipeline(self):
         """Thực hiện toàn bộ quy trình: Merge -> HBA -> SC -> Zip"""
         if messagebox.askyesno("Xác nhận", "Bắt đầu chạy toàn bộ quy trình (Merge -> HBA -> SC -> Zip)?"):
@@ -485,28 +561,35 @@ class BagMappingTab(ttk.Frame):
         self.log("🚀 BẮT ĐẦU FULL PIPELINE...")
         
         # 1. Merge PCD
-        self.after(0, lambda: self.log("Step 1/4: Đang gộp file PCD..."))
+        self.after(0, lambda: self.log("Step 1/5: Đang gộp file PCD..."))
         if not self.merge_pcd_files(silent=True):
             self.log("❌ Pipeline dừng lại ở bước Merge PCD.")
             self.after(0, lambda: self.full_pipe_btn.config(state=tk.NORMAL))
             return
         
         # 2. HBA Optimize
-        self.after(0, lambda: self.log("Step 2/4: Đang chạy HBA Optimize..."))
+        self.after(0, lambda: self.log("Step 2/5: Đang chạy HBA Optimize..."))
         if not self._run_hba_core():
             self.log("❌ Pipeline dừng lại ở bước HBA.")
             self.after(0, lambda: self.full_pipe_btn.config(state=tk.NORMAL))
             return
 
         # 3. SC Tile
-        self.after(0, lambda: self.log("Step 3/4: Đang chạy ScanContext Tiling..."))
+        self.after(0, lambda: self.log("Step 3/5: Đang chạy ScanContext Tiling..."))
         if not self._run_sc_core():
             self.log("❌ Pipeline dừng lại ở bước ScanContext.")
             self.after(0, lambda: self.full_pipe_btn.config(state=tk.NORMAL))
             return
 
+        # 3.5. Generate Floorplan
+        self.after(0, lambda: self.log("Step 4/5: Đang sinh floorplan..."))
+        if not self._generate_floorplan():
+            self.log("❌ Pipeline dừng lại ở bước Generate Floorplan.")
+            self.after(0, lambda: self.full_pipe_btn.config(state=tk.NORMAL))
+            return
+
         # 4. Zip output
-        self.after(0, lambda: self.log("Step 4/4: Đang nén file (Zip)..."))
+        self.after(0, lambda: self.log("Step 5/5: Đang nén file (Zip)..."))
         try:
             # Đường dẫn nguồn và đích (zip toàn bộ thư mục Log)
             log_root = self.workspace_path / "src" / "FAST-LIVO2" / "Log"
