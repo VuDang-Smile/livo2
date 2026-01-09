@@ -16,6 +16,10 @@
 !**/CMakeLists.txt
 !**/CMakeLists.standalone.txt
 
+# HBA standalone build directory (mỗi máy tự build)
+dependencies/HBA/build_standalone/
+dependencies/HBA/build_standalone/**
+
 # Build artifacts
 **/*.o
 **/*.a
