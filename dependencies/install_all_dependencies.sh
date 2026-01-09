@@ -23,7 +23,7 @@ LIVOX_SCRIPT="${SCRIPT_DIR}/drive_ws/build.sh"
 THETA_SCRIPT="${PROJECT_ROOT}/ws/src/theta_driver/3rd/build.sh"
 CALIBRATION_SCRIPT="${SCRIPT_DIR}/calibration/build.sh"
 SOPHUS_SCRIPT="${SCRIPT_DIR}/livo/Sophus/build.sh"
-HBA_SCRIPT="${PROJECT_ROOT}/scripts/build_hba_standalone.sh"
+HBA_SCRIPT="${SCRIPT_DIR}/HBA/install.sh"
 FIND_BACKEND_SCRIPT="${SCRIPT_DIR}/find_backend_lan.sh"
 
 # Track overall status
