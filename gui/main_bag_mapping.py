@@ -2,12 +2,16 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
 import time
+from pathlib import Path
 
 class BagMappingInterface:
     def __init__(self, root):
         self.root = root
         self.root.title("Bag Mapping System")
         self.root.geometry("1150x850")
+        
+        self.workspace_path = Path(__file__).parent.parent / "ws"
+        self.bag_path = None
 
         # --- Top Menu Bar ---
         # self.menu_bar = tk.Label(root, text="Bag Mapping | Data Processing & Upload", 
@@ -17,12 +21,6 @@ class BagMappingInterface:
         # --- Main Container ---
         self.main_container = tk.Frame(root)
         self.main_container.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-
-        # --- Sidebar ---
-        self.sidebar = tk.Frame(self.main_container, width=280, relief=tk.SUNKEN, bd=1)
-        self.sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
-        self.sidebar.pack_propagate(False)
-        self.setup_sidebar()
 
         # --- Workspace ---
         self.workspace = tk.Frame(self.main_container)
@@ -39,12 +37,6 @@ class BagMappingInterface:
 
         # --- Log Section ---
         self.setup_log_section()
-
-    def setup_sidebar(self):
-        frame = tk.LabelFrame(self.sidebar, text="MAP INFO", padx=10, pady=10)
-        frame.pack(fill=tk.X, pady=5, padx=5)
-        tk.Label(frame, text="⚠ Status: Ready", font=("Arial", 9, "italic")).pack(pady=5)
-        tk.Button(frame, text="Refresh Map Info").pack(fill=tk.X)
 
     def setup_control_card(self):
         card = tk.LabelFrame(self.workspace, text="Execution Control", padx=15, pady=10)
@@ -163,10 +155,20 @@ class BagMappingInterface:
             messagebox.showinfo("Success", "All map data has been uploaded to the server!")
 
     def browse_file(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Bag files", "*.bag")])
-        if file_path:
-            self.bag_path_var.set(file_path)
-            self.add_log(f"FILE: Loaded {file_path}")
+        initial_dir = "/media/an/01DC80D9DB838380/"
+        bag_path = filedialog.askdirectory(
+            title="Chọn Bag Folder",
+            initialdir=initial_dir
+        )
+        
+        if bag_path:
+            bag_path_obj = Path(bag_path)
+            if bag_path_obj.exists():
+                self.bag_path_var.set(str(bag_path_obj))
+                self.bag_path = str(bag_path_obj)
+                self.add_log(f"✅ Đã chọn bag: {bag_path_obj.name}")
+            else:
+                messagebox.showerror("Lỗi", f"Bag folder không tồn tại: {bag_path}")
 
     def launch_rviz_cmd(self):
         self.add_log("SYSTEM: Launching RViz2...")
