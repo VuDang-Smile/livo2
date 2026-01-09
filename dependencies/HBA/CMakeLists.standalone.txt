@@ -16,13 +16,31 @@ add_definitions(${PCL_DEFINITIONS})
 find_package(Eigen3 REQUIRED)
 include_directories(${EIGEN3_INCLUDE_DIR})
 
-# Find GTSAM (pointing to the local build in dependencies/calibration)
-set(GTSAM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../gtsam/build")
+# Find GTSAM (pointing to the local build in dependencies/calibration or project root)
+if(NOT GTSAM_DIR)
+    find_path(GTSAM_LOCAL_DIR NAMES gtsam/base/Vector.h
+        PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../calibration/gtsam"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../gtsam"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../../dependencies/calibration/gtsam"
+    )
+    if(GTSAM_LOCAL_DIR)
+        set(GTSAM_DIR "${GTSAM_LOCAL_DIR}/build")
+    endif()
+endif()
 find_package(GTSAM REQUIRED QUIET)
 include_directories(${GTSAM_INCLUDE_DIR})
 
-# Find Ceres (pointing to the local build in dependencies/calibration)
-set(Ceres_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ceres-solver/build")
+# Find Ceres (pointing to the local build in dependencies/calibration or project root)
+if(NOT Ceres_DIR)
+    find_path(CERES_LOCAL_DIR NAMES ceres/ceres.h
+        PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../calibration/ceres-solver"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../ceres-solver"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../../dependencies/calibration/ceres-solver"
+    )
+    if(CERES_LOCAL_DIR)
+        set(Ceres_DIR "${CERES_LOCAL_DIR}/build")
+    endif()
+endif()
 find_package(Ceres REQUIRED)
 include_directories(${CERES_INCLUDE_DIRS})
 
