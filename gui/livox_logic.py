@@ -337,28 +337,42 @@ class LivoxTab(ttk.Frame):
             return True
             
         except Exception as e:
+
             error_msg = f"Không thể start {process_name}: {e}"
+            print(error_msg)
             self.log(f"Lỗi: {error_msg}")
             messagebox.showerror("Lỗi", error_msg)
             return False
     
     def start_livox_driver(self):
         """Start Livox MID 360 driver"""
-        workspace_path = Path(__file__).parent.parent / "dependencies" / "drive_ws"
-        launch_file = Path("src/livox_ros_driver2/launch_ROS2/msg_MID360_launch.py")
-        
-        if self._start_ros2_process(
-            workspace_path,
-            launch_file,
-            "Livox MID 360 driver",
-            "livox_driver_process",
-            self.monitor_livox_driver_output,
-            "Livox Driver đang chạy"
-        ):
-            self.start_driver_btn.config(state=tk.DISABLED)
-            self.stop_driver_btn.config(state=tk.NORMAL)
-            self.start_subscriber_btn.config(state=tk.NORMAL)
+        self.log("Bắt đầu Livox MID 360 driver...")
+        print("Bắt đầu Livox MID 360 driver...")
+        try:
+            workspace_path = Path(__file__).parent.parent / "dependencies" / "drive_ws"
+            launch_file = Path("src/livox_ros_driver2/launch_ROS2/msg_MID360_launch.py")
+            print("Bắt đầu Livox MID 360 driver line 2")
+            
+            if self._start_ros2_process(
+                workspace_path,
+                launch_file,
+                "Livox MID 360 driver",
+                "livox_driver_process",
+                self.monitor_livox_driver_output,
+                "Livox Driver đang chạy"
+            ):
+                print("Bắt đầu Livox MID 360 driver line 3")
+                
+                self.start_driver_btn.config(state=tk.DISABLED)
+                self.stop_driver_btn.config(state=tk.NORMAL)
+                self.start_subscriber_btn.config(state=tk.NORMAL)
             # Converter button đã enable từ đầu, không cần enable lại
+        except Exception as e:
+            print(f"Livox MID 360 driver... error {e}")
+
+        # print("Bắt đầu Livox MID 360 driver...")
+
+        self.log("Ket thuc Livox MID 360 driver...")
     
     def _monitor_process_output(self, process, process_name, stopped_handler):
         """Helper function để monitor output từ process"""
@@ -379,6 +393,7 @@ class LivoxTab(ttk.Frame):
                     else:
                         self.log(f"{process_name}: {line}")
         except Exception as e:
+            print(f"Lỗi khi đọc output từ {process_name}: {e}")
             self.log(f"Lỗi khi đọc output từ {process_name}: {e}")
         
         # Kiểm tra exit code
@@ -452,6 +467,7 @@ class LivoxTab(ttk.Frame):
     
     def start_ros_subscriber(self):
         """Bắt đầu ROS subscriber cho livox topics"""
+        self.log("Bắt đầu ROS subscriber cho Livox...")
         if self.is_ros_running:
             return
         
@@ -552,6 +568,7 @@ class LivoxTab(ttk.Frame):
             import traceback
             traceback.print_exc()
             messagebox.showerror("Lỗi", error_msg)
+        self.log("Kết thúc ROS subscriber cho Livox...")
     
     def ros_spin(self):
         """Spin ROS node trong thread riêng"""
@@ -661,6 +678,7 @@ class LivoxTab(ttk.Frame):
     
     def start_converter(self):
         """Start Livox Message Converter node (độc lập, không phụ thuộc vào driver)"""
+        self.log("Bắt đầu Livox Message Converter...")
         workspace_path = Path(__file__).parent.parent / "ws"
         launch_file = Path("src/livox_msg_converter/launch/livox_msg_converter.launch.py")
         
@@ -697,6 +715,7 @@ class LivoxTab(ttk.Frame):
                 self.log("Đang restart subscriber để subscribe /livox/points2...")
                 self.stop_ros_subscriber()
                 self.after(1000, self.start_ros_subscriber)
+        self.log("Ket thuc Livox Message Converter...")
     
     def monitor_converter_output(self):
         """Monitor output từ converter process"""

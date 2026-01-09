@@ -65,12 +65,13 @@ class LivoxApp:
         
         # Dictionary để lưu checkbox variables
         self.topic_vars = {}
-        self.recorder = Recorder(log_callback=self.log)
-        self.theta_driver = ThetaDriver(log_callback=self.log)
-        self.livox_tab = LivoxTab(log_callback=self.log, update_label_livo_connected=self.update_label_livo_connected)
+        
         
         self.is_recording = False
         self._setup_layout()
+        self.recorder = Recorder(log_callback=self.log)
+        self.theta_driver = ThetaDriver(log_callback=self.log, update_ui_theta_connected = self.update_ui_theta_connected, canvas = self.canvas)
+        self.livox_tab = LivoxTab(log_callback=self.log, update_label_livo_connected=self.update_label_livo_connected)
 
     def update_label_livo_connected(self, is_running):
         pass
@@ -205,15 +206,17 @@ class LivoxApp:
         self.btn_record = tk.Button(self.ctrl_frame, text="● " + translator.get("button.start"), 
                                     font=("Arial", 10, "bold"), fg="red", command=self.toggle_recording)
         self.btn_record.pack(side="left", padx=10)
-
-        self.btn_upload = tk.Button(self.ctrl_frame, text="↑ " + translator.get("button.upload"), command=self.start_upload_thread)
         
         self.lbl_status = tk.Label(self.ctrl_frame, text=translator.get("label.status") + ": " + translator.get("status.ready"))
         self.lbl_status.pack(side="left", padx=20)
 
-        self.lbl_percent = tk.Label(self.ctrl_frame, text="0%")
-
-        self.progress = ttk.Progressbar(self.workspace, orient="horizontal", mode="determinate")
+        # Image canvas
+        self.canvas = tk.Canvas(
+            self.workspace,
+            bg="black",
+            highlightthickness=0
+        )
+        self.canvas.pack(fill=tk.BOTH, expand=True)
 
        # 4. Log Panel (Dưới cùng)
         self.log_header_frame = tk.Frame(self.root)
@@ -246,8 +249,8 @@ class LivoxApp:
 
     def open_rviz(self):
         """Mở RViz2 trực tiếp bằng subprocess"""
-        rviz_config_file = os.path.join(get_package_share_directory("fast_livo"), "rviz_cfg", "fast_livo2.rviz")
-        self.log("🚀 Đang khởi động RViz2...")
+        rviz_config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.rviz")
+        self.log(f"🚀 Đang khởi động RViz2... {rviz_config_file}")
         
         # Kiểm tra xem file có tồn tại không để tránh lỗi im lặng
         if not os.path.exists(rviz_config_file):
@@ -610,7 +613,10 @@ class LivoxApp:
             self.theta_driver.launch_theta_driver()
             self.theta_driver.launch_camera_info_publisher()
             self.livox_tab.start_livox_driver()
+            # self.after(2000,  self.livox_tab.start_converter())
             self.livox_tab.start_converter()
+            # self.after(4000,  self.livox_tab.start_ros_subscriber())
+
             self.livox_tab.start_ros_subscriber()
         except Exception as e:
             self.log(f"❌ Lỗi khi khởi động Livox Driver 2 và Theta Driver: {e}")
