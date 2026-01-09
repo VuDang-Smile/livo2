@@ -1,6 +1,7 @@
 {
     "title": {
-        "livox_panel": "Livox control panel"
+        "livox_panel": "Livox control panel",
+        "bag_mapping_system": "Bag Mapping System"
     },
     "label": {
         "livox_driver_2": "LIVOX DRIVER 2",
@@ -15,21 +16,46 @@
         "theta_driver": "Theta Driver",
         "livox_driver": "Livox Driver",
         "slam": "SLAM",
-        "camera": "Camera"
+        "camera": "Camera",
+        "execution_control": "Execution Control",
+        "select_bag_file": "Select Bag File:",
+        "visualization_preview": "Visualization Preview",
+        "use_rviz2_external_view": "Use RViz2 External View",
+        "internal_viewport_active": "INTERNAL VIEWPORT ACTIVE",
+        "rviz2_redirect_active": "RViz2 REDIRECT ACTIVE",
+        "server_synchronization": "Server Synchronization",
+        "waiting": "Waiting...",
+        "system_log": "SYSTEM LOG",
+        "status_ready": "Status: Ready",
+        "status_mapping": "Status: Mapping...",
+        "status_map_created": "Status: Map Created",
+        "status_stopped": "Status: Stopped",
+        "ready_to_upload": "Ready to upload",
+        "uploading": "Uploading: {val}%",
+        "upload_done": "100% - Done"
     },
     "message": {
         "select_output_dir": "Please select an output directory for recordings.",
         "recording_started": "Recording has started.",
         "recording_stopped": "Recording has stopped.",
         "cannot_launch_theta_driver": "Cannot launch theta_driver",
-        "cannot_launch_camera_info_publisher": "Cannot launch camera_info_publisher"
+        "cannot_launch_camera_info_publisher": "Cannot launch camera_info_publisher",
+        "select_bag_file_first": "Please select a bag file first!",
+        "bag_folder_not_exists": "Bag folder does not exist: {path}",
+        "all_map_data_uploaded": "All map data has been uploaded to the server!",
+        "bag_selected": "Bag selected: {name}",
+        "default_config_selected": "Default config selected: {name}",
+        "default_config_not_found": "Default config not found: {name}"
     },
     "button": {
         "browse": "Browse",
         "start": "Start",
         "stop": "Stop",
         "clear_log": "Clear Log",
-        "launch_rviz2": "Launch RViz2"
+        "launch_rviz2": "Launch RViz2",
+        "start_mapping": "🚀 START MAPPING",
+        "stop_process": "■ STOP",
+        "upload_to_server": "☁ UPLOAD TO SERVER"
     },
     "status": {
         "ready": "Ready",
@@ -39,5 +65,21 @@
         "connected": "Connected",
         "running": "Running",
         "not_running": "not running"
+    },
+    "log": {
+        "config_rviz2_mode": "CONFIG: Visualization mode set to RViz2.",
+        "config_internal_mode": "CONFIG: Visualization mode set to Internal.",
+        "mapping_started": "MAPPING: Fast-Livo2 algorithm started...",
+        "mapping_complete": "SUCCESS: Mapping complete. Ready for server upload.",
+        "server_sync_started": "SERVER: Beginning data synchronization...",
+        "server_upload_success": "SERVER: Upload successful. Data stored in cloud.",
+        "system_launching_rviz2": "SYSTEM: Launching RViz2...",
+        "process_terminated": "PROCESS: Mapping and Upload terminated."
+    },
+    "dialog": {
+        "choose_bag_folder": "Choose Bag Folder",
+        "warning": "Warning",
+        "error": "Error",
+        "success": "Success"
     }
 }

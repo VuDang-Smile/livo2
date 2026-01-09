@@ -1,6 +1,7 @@
 {
     "title": {
-        "livox_panel": "Livox コントロールパネル"
+        "livox_panel": "Livox コントロールパネル",
+        "bag_mapping_system": "Bag Mapping システム"
     },
     "label": {
         "livox_driver_2": "LIVOX DRIVER 2",
@@ -15,22 +16,46 @@
         "theta_driver": "Theta ドライバー",
         "livox_driver": "Livox ドライバー",
         "slam": "SLAM",
-        "camera": "Camera"
-
+        "camera": "Camera",
+        "execution_control": "実行制御",
+        "select_bag_file": "Bag ファイルを選択:",
+        "visualization_preview": "可視化プレビュー",
+        "use_rviz2_external_view": "RViz2 外部ビューを使用",
+        "internal_viewport_active": "内部ビューポート有効",
+        "rviz2_redirect_active": "RViz2 リダイレクト有効",
+        "server_synchronization": "サーバー同期",
+        "waiting": "待機中...",
+        "system_log": "システムログ",
+        "status_ready": "ステータス: 準備完了",
+        "status_mapping": "ステータス: マッピング中...",
+        "status_map_created": "ステータス: マップ作成済み",
+        "status_stopped": "ステータス: 停止",
+        "ready_to_upload": "アップロード準備完了",
+        "uploading": "アップロード中: {val}%",
+        "upload_done": "100% - 完了"
     },
     "message": {
         "select_output_dir": "録画の出力ディレクトリを選択してください。",
         "recording_started": "録画を開始しました。",
         "recording_stopped": "録画を停止しました。",
         "cannot_launch_theta_driver": "theta_driver を起動できません",
-        "cannot_launch_camera_info_publisher": "camera_info_publisher を起動できません"
+        "cannot_launch_camera_info_publisher": "camera_info_publisher を起動できません",
+        "select_bag_file_first": "まず Bag ファイルを選択してください！",
+        "bag_folder_not_exists": "Bag フォルダが存在しません: {path}",
+        "all_map_data_uploaded": "すべてのマップデータがサーバーにアップロードされました！",
+        "bag_selected": "Bag を選択しました: {name}",
+        "default_config_selected": "デフォルト設定を選択しました: {name}",
+        "default_config_not_found": "デフォルト設定が見つかりません: {name}"
     },
     "button": {
         "browse": "参照",
         "start": "開始",
         "stop": "停止",
         "clear_log": "ログを消去",
-        "launch_rviz2": "RViz2 を起動"
+        "launch_rviz2": "RViz2 を起動",
+        "start_mapping": "🚀 マッピング開始",
+        "stop_process": "■ 停止",
+        "upload_to_server": "☁ サーバーにアップロード"
     },
     "status": {
         "ready": "準備完了",
@@ -40,5 +65,21 @@
         "connected": "接続済み",
         "running": "実行中",
         "not_running": "実行されていません"
+    },
+    "log": {
+        "config_rviz2_mode": "CONFIG: 可視化モードを RViz2 に設定しました。",
+        "config_internal_mode": "CONFIG: 可視化モードを内部に設定しました。",
+        "mapping_started": "MAPPING: Fast-Livo2 アルゴリズムを開始しました...",
+        "mapping_complete": "SUCCESS: マッピングが完了しました。サーバーアップロードの準備ができました。",
+        "server_sync_started": "SERVER: データ同期を開始しています...",
+        "server_upload_success": "SERVER: アップロードが成功しました。データがクラウドに保存されました。",
+        "system_launching_rviz2": "SYSTEM: RViz2 を起動しています...",
+        "process_terminated": "PROCESS: マッピングとアップロードを終了しました。"
+    },
+    "dialog": {
+        "choose_bag_folder": "Bag フォルダを選択",
+        "warning": "警告",
+        "error": "エラー",
+        "success": "成功"
     }
 }
