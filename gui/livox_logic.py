@@ -366,6 +366,7 @@ class LivoxTab(ttk.Frame):
                 self.start_driver_btn.config(state=tk.DISABLED)
                 self.stop_driver_btn.config(state=tk.NORMAL)
                 self.start_subscriber_btn.config(state=tk.NORMAL)
+                self.start_converter()
             # Converter button đã enable từ đầu, không cần enable lại
         except Exception as e:
             print(f"Livox MID 360 driver... error {e}")
@@ -467,6 +468,7 @@ class LivoxTab(ttk.Frame):
     
     def start_ros_subscriber(self):
         """Bắt đầu ROS subscriber cho livox topics"""
+        print("Bắt đầu ROS subscriber cho Livox...")
         self.log("Bắt đầu ROS subscriber cho Livox...")
         if self.is_ros_running:
             return
@@ -714,6 +716,7 @@ class LivoxTab(ttk.Frame):
             # Nếu subscriber đang chạy, cần restart để subscribe /livox/points2
             if self.is_ros_running:
                 self.log("Đang restart subscriber để subscribe /livox/points2...")
+                print("Đang restart subscriber để subscribe /livox/points2...")
                 self.stop_ros_subscriber()
                 self.after(1000, self.start_ros_subscriber)
         self.log("Ket thuc Livox Message Converter...")

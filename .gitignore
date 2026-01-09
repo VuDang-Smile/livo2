@@ -1,4 +1,25 @@
 /calibration_data
 /recordings
+/example
 /output
 /backend/uploads
+
+# CMake build files
+**/build/
+**/build_*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/CMakeConfigureLog.yaml
+**/Makefile
+**/*.cmake
+!**/CMakeLists.txt
+!**/CMakeLists.standalone.txt
+
+# Build artifacts
+**/*.o
+**/*.a
+**/*.so
+**/*.dylib
+**/*.dll
+**/*.exe

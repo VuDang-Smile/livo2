@@ -617,10 +617,10 @@ class LivoxApp:
             self.theta_driver.launch_camera_info_publisher()
             self.livox_tab.start_livox_driver()
             # self.after(2000,  self.livox_tab.start_converter())
-            self.livox_tab.start_converter()
+            # self.livox_tab.start_converter()
             # self.after(4000,  self.livox_tab.start_ros_subscriber())
 
-            self.livox_tab.start_ros_subscriber()
+            # self.livox_tab.start_ros_subscriber()
         except Exception as e:
             self.log(f"❌ Lỗi khi khởi động Livox Driver 2 và Theta Driver: {e}")
             

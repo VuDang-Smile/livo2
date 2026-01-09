@@ -8,10 +8,12 @@ import PCDMap, { PointCloudBounds } from '../components/PCDMap';
 import { PCDClipControls } from '../components/PCDClipControls';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { useMapImage } from '../hooks/useMapImage';
-import { MAP_2D_IMAGE_URL } from '../constants/mapConfig';
+import { MAP_2D_IMAGE_URL, getCurrentMap, getMapImageUrl, getMapMetadataUrl } from '../constants/mapConfig';
 import { getVehicle2DPosition } from '../utils/vehicle2DHelper';
+import { MapMetadata, Pose3D } from '../types/mapMetadata';
+import { transformPoseToPixel } from '../utils/coordinateTransform';
 
-// Gán hàm mock lên window để trang Upload có thể sử dụng chung
+// Assign mock function to window so Upload page can use it
 declare global {
   interface Window {
     __getMockVehiclePositions?: typeof getMockVehiclePositions;
@@ -291,13 +293,24 @@ const Map2D: React.FC<{
   vehicles: VehiclePosition[];
   selectedVehicleId: string | null;
   onVehicleSelect: (id: string) => void;
-}> = ({ vehicles, selectedVehicleId, onVehicleSelect }) => {
+  view?: 'top' | 'side_x' | 'side_y';
+  mapMetadata?: MapMetadata | null;
+  uploadId?: string | null;
+}> = ({ vehicles, selectedVehicleId, onVehicleSelect, view = 'top', mapMetadata, uploadId }) => {
   const { t } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hoveredVehicle, setHoveredVehicle] = useState<string | null>(null);
   
+  // Determine image URL
+  const imageUrl = useMemo(() => {
+    if (uploadId && mapMetadata) {
+      return getMapImageUrl(uploadId, view);
+    }
+    return MAP_2D_IMAGE_URL; // Fallback to default
+  }, [uploadId, view, mapMetadata]);
+  
   // Load map image với proper cleanup
-  const { image: mapImage, error: imageError } = useMapImage(MAP_2D_IMAGE_URL);
+  const { image: mapImage, error: imageError } = useMapImage(imageUrl);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -356,8 +369,47 @@ const Map2D: React.FC<{
       const isSelected = vehicle.id === selectedVehicleId;
       const isHovered = vehicle.id === hoveredVehicle;
       
-      // Get 2D position using helper function (uses position2D if available, otherwise falls back to center)
-      const { x, y } = getVehicle2DPosition(vehicle, canvas.width, canvas.height);
+      // Get 2D position - use transform if metadata available, otherwise fallback
+      let x: number, y: number;
+      if (mapMetadata && vehicle.position) {
+        // Convert 3D pose to 2D pixel using coordinateTransform
+        const pose3D: Pose3D = {
+          position: {
+            x: vehicle.position[0],
+            y: vehicle.position[1],
+            z: vehicle.position[2]
+          },
+          orientation: {
+            x: 0, y: 0, z: 0, w: 1 // Default orientation (can be enhanced later)
+          }
+        };
+        
+        const pixel = transformPoseToPixel(pose3D, mapMetadata, view, false);
+        if (pixel && mapImage && mapImage.complete && mapImage.naturalWidth > 0 && mapImage.naturalHeight > 0) {
+          // Scale pixel coordinates to canvas size
+          const scale = Math.min(
+            canvas.width / mapImage.naturalWidth,
+            canvas.height / mapImage.naturalHeight
+          );
+          const scaledWidth = mapImage.naturalWidth * scale;
+          const scaledHeight = mapImage.naturalHeight * scale;
+          const offsetX = (canvas.width - scaledWidth) / 2;
+          const offsetY = (canvas.height - scaledHeight) / 2;
+          
+          x = offsetX + (pixel.pixel_x / mapImage.naturalWidth) * scaledWidth;
+          y = offsetY + (pixel.pixel_y / mapImage.naturalHeight) * scaledHeight;
+        } else {
+          // Fallback to helper function
+          const pos = getVehicle2DPosition(vehicle, canvas.width, canvas.height);
+          x = pos.x;
+          y = pos.y;
+        }
+      } else {
+        // Fallback to helper function
+        const pos = getVehicle2DPosition(vehicle, canvas.width, canvas.height);
+        x = pos.x;
+        y = pos.y;
+      }
       
       // Vehicle color based on status
       let color = '#95a5a6';
@@ -387,7 +439,7 @@ const Map2D: React.FC<{
         ctx.fillText(vehicle.licensePlate, x, y - 15);
       }
     });
-  }, [vehicles, selectedVehicleId, hoveredVehicle, mapImage, imageError]);
+  }, [vehicles, selectedVehicleId, hoveredVehicle, mapImage, imageError, mapMetadata, view]);
 
   const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -487,6 +539,10 @@ const VehicleMap: React.FC = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [viewMode, setViewMode] = useState<'2D' | '3D'>('3D');
+  const [selectedView, setSelectedView] = useState<'top' | 'side_x' | 'side_y'>('top');
+  const [mapMetadata, setMapMetadata] = useState<MapMetadata | null>(null);
+  const [uploadId, setUploadId] = useState<string | null>(null);
+  const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
   const [filters, setFilters] = useState({
     status: 'all',
     vehicleType: 'all',
@@ -495,6 +551,35 @@ const VehicleMap: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchInputValue, setSearchInputValue] = useState<string>('');
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Load map metadata when component mounts
+  useEffect(() => {
+    const loadMapMetadata = async () => {
+      setIsLoadingMetadata(true);
+      try {
+        const currentMap = await getCurrentMap();
+        if (currentMap && currentMap.upload_id) {
+          setUploadId(currentMap.upload_id);
+          
+          // Load metadata JSON
+          const metadataUrl = getMapMetadataUrl(currentMap.upload_id);
+          const response = await fetch(metadataUrl);
+          if (response.ok) {
+            const metadata = await response.json();
+            setMapMetadata(metadata);
+          } else {
+            console.warn('Failed to load map metadata');
+          }
+        }
+      } catch (error) {
+        console.error('Error loading map metadata:', error);
+      } finally {
+        setIsLoadingMetadata(false);
+      }
+    };
+    
+    loadMapMetadata();
+  }, []);
   
   // PCD Clipping state
   const [pcdBounds, setPcdBounds] = useState<PointCloudBounds | null>(null);
@@ -826,7 +911,15 @@ const VehicleMap: React.FC = () => {
                   vehicles={filteredVehicles}
                   selectedVehicleId={selectedVehicleId}
                   onVehicleSelect={handleVehicleSelect}
+                  view={selectedView}
+                  mapMetadata={mapMetadata}
+                  uploadId={uploadId}
                 />
+                {isLoadingMetadata && (
+                  <div className="absolute top-4 right-4 bg-white bg-opacity-90 p-2 rounded-lg shadow-sm">
+                    <span className="text-sm text-gray-600">Loading map metadata...</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
