@@ -2,11 +2,11 @@
 Utility to generate 3 floorplan views (top, side_x, side_y) and rich metadata
 from a PCD point cloud.
 
-Được GUI sử dụng thông qua hàm `pcd_to_3_views` trong `bag_mapping_tab.py`.
+Used by GUI through function `pcd_to_3_views` in `bag_mapping_tab.py`.
 
 Output:
-- 3 file PNG: <stem>_top.png, <stem>_side_x.png, <stem>_side_y.png
-- 1 file JSON metadata: <stem>_metadata.json (format khớp với frontend MapMetadata)
+- 3 PNG files: <stem>_top.png, <stem>_side_x.png, <stem>_side_y.png
+- 1 JSON metadata file: <stem>_metadata.json (format matches frontend MapMetadata)
 """
 
 from __future__ import annotations
@@ -21,16 +21,16 @@ try:
     import open3d as o3d
 except ImportError as e:  # pragma: no cover - sẽ được log ở GUI
     raise ImportError(
-        "Module 'open3d' chưa được cài đặt. "
-        "Vui lòng chạy: pip install open3d"
+        "Module 'open3d' is not installed. "
+        "Please run: pip install open3d"
     ) from e
 
 try:
     from PIL import Image
 except ImportError as e:  # pragma: no cover
     raise ImportError(
-        "Module 'Pillow' chưa được cài đặt. "
-        "Vui lòng chạy: pip install pillow"
+        "Module 'Pillow' is not installed. "
+        "Please run: pip install pillow"
     ) from e
 
 
@@ -205,15 +205,15 @@ def pcd_to_3_views(
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
     if not input_pcd_path.exists():
-        raise FileNotFoundError(f"PCD file không tồn tại: {input_pcd_path}")
+        raise FileNotFoundError(f"PCD file does not exist: {input_pcd_path}")
 
     cloud = o3d.io.read_point_cloud(str(input_pcd_path))
     if cloud.is_empty():
-        raise ValueError(f"PCD file rỗng: {input_pcd_path}")
+        raise ValueError(f"PCD file is empty: {input_pcd_path}")
 
     pts = np.asarray(cloud.points, dtype=np.float32)
     if pts.shape[1] != 3:
-        raise ValueError("PCD không phải point cloud 3D hợp lệ (cần Nx3)")
+        raise ValueError("PCD is not a valid 3D point cloud (needs Nx3)")
 
     # Bounds trước khi lọc
     x_min, x_max, y_min, y_max, z_min, z_max = _compute_bounds(pts)
