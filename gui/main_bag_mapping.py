@@ -21,7 +21,11 @@ class BagMappingInterface:
         
         self.mapping_process = None
         self.is_mapping_running = False
+        # Thêm process cho ros2 bag play
+        self.bag_process = None
+        self.is_bag_playing = False
         self.use_rviz = False
+        # Bag rate mặc định, dùng cho ros2 bag play
         self.bag_rate = 0.5
         
         self.translator = Translator('en')
@@ -254,6 +258,14 @@ class BagMappingInterface:
             self.add_log(self.translator.get('log.mapping_already_running', '⚠️ Mapping is already running'))
             return
         
+        # Yêu cầu chọn bag trước, vì nút này sẽ vừa start mapping vừa play bag
+        if not self.bag_path:
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                self.translator.get('message.select_bag_first', 'Please select bag folder before starting mapping & playback.')
+            )
+            return
+        
         ws_setup = self.workspace_path / "install" / "setup.sh"
         if not ws_setup.exists():
             messagebox.showerror(
@@ -364,11 +376,112 @@ class BagMappingInterface:
             self.add_log(self.translator.get('log.mapping_node_ready', '✅ Mapping node is ready!'))
             self.add_log("=" * 60)
             
+            # Sau khi mapping node sẵn sàng thì tự động play bag
+            self.add_log("▶️ Auto-starting bag playback...")
+            self.start_bag_playback()
+            
         except Exception as e:
             error_msg = f"{self.translator.get('message.cannot_start_mapping', 'Cannot start mapping')}: {e}"
             self.add_log(f"❌ {error_msg}")
             messagebox.showerror(self.translator.get('dialog.error', 'Error'), error_msg)
             self.cleanup_processes()
+
+    def start_bag_playback(self):
+        """Bắt đầu play bag sau khi mapping node đã chạy"""
+        if self.is_bag_playing:
+            self.add_log("⚠️ Bag is already playing")
+            return
+        
+        if not self.is_mapping_running:
+            self.add_log("⚠️ Mapping node is not running. Cannot start bag playback.")
+            return
+        
+        if not self.bag_path:
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                self.translator.get('message.select_bag_first', 'Please select bag folder before starting mapping & playback.')
+            )
+            return
+        
+        bag_path_obj = Path(self.bag_path)
+        if not bag_path_obj.exists():
+            error_msg = self.translator.get('message.bag_folder_not_exists', 'Bag folder does not exist: {path}').replace('{path}', self.bag_path)
+            messagebox.showerror(self.translator.get('dialog.error', 'Error'), error_msg)
+            return
+        
+        ws_setup = self.workspace_path / "install" / "setup.sh"
+        if not ws_setup.exists():
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                f"Workspace setup not found at: {ws_setup}\n"
+                f"{self.translator.get('message.build_workspace_first', 'Please build workspace first.')}"
+            )
+            return
+        
+        drive_ws_setup = self.drive_ws_path / "install" / "setup.sh"
+        use_drive_ws = drive_ws_setup.exists()
+        
+        try:
+            ros2_setup = "/opt/ros/jazzy/setup.bash"
+            
+            # Dùng self.bag_rate (mặc định 0.5x)
+            try:
+                bag_rate_value = float(self.bag_rate)
+            except ValueError:
+                bag_rate_value = 0.5
+                self.add_log("⚠️ Invalid bag rate, fallback to 0.5x")
+            
+            bag_play_cmd = f"ros2 bag play {self.bag_path} --rate {bag_rate_value}"
+            
+            env = os.environ.copy()
+            env['PYTHONUNBUFFERED'] = '1'
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
+            self.add_log("=" * 60)
+            self.add_log("▶️ Starting Bag Playback")
+            self.add_log(f"📁 Bag: {bag_path_obj.name}")
+            self.add_log(f"📁 Bag path: {self.bag_path}")
+            self.add_log(f"⚡ Rate: {bag_rate_value}x")
+            self.add_log("=" * 60)
+            
+            if use_drive_ws:
+                bag_cmd = (
+                    f"source {ros2_setup} && "
+                    f"source {drive_ws_setup} && "
+                    f"source {ws_setup} && "
+                    f"{bag_play_cmd}"
+                )
+            else:
+                bag_cmd = (
+                    f"source {ros2_setup} && "
+                    f"source {ws_setup} && "
+                    f"{bag_play_cmd}"
+                )
+            
+            self.add_log("▶️ Launching ros2 bag play...")
+            self.bag_process = subprocess.Popen(
+                bag_cmd,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True,
+                env=env,
+                preexec_fn=os.setsid if hasattr(os, 'setsid') else None
+            )
+            
+            self.is_bag_playing = True
+            self.add_log("✅ Bag playback started")
+            
+            threading.Thread(target=self.monitor_bag_process, daemon=True).start()
+            
+        except Exception as e:
+            error_msg = f"Cannot start bag playback: {e}"
+            self.add_log(f"❌ {error_msg}")
+            messagebox.showerror(self.translator.get('dialog.error', 'Error'), error_msg)
 
     def start_upload(self):
         self.btn_upload.config(state=tk.DISABLED)
@@ -459,7 +572,59 @@ class BagMappingInterface:
             if self.is_mapping_running:
                 self.add_log(f"⚠️ {self.translator.get('log.error_reading_mapping_output', 'Error reading mapping output')}: {e}")
     
+    def monitor_bag_process(self):
+        """Theo dõi output của ros2 bag play"""
+        if not self.bag_process:
+            return
+        
+        try:
+            for line in iter(self.bag_process.stdout.readline, ''):
+                if not line:
+                    break
+                if self.is_bag_playing:
+                    if 'paused' in line.lower() or 'playing' in line.lower():
+                        self.add_log(f"[Bag] {line.strip()}")
+                else:
+                    break
+            
+            if self.is_bag_playing:
+                self.add_log("✅ Bag playback finished")
+                self.is_bag_playing = False
+        except Exception as e:
+            if self.is_bag_playing:
+                self.add_log(f"⚠️ Error reading bag output: {e}")
+    
     def cleanup_processes(self):
+        # Dừng bag play trước
+        if self.bag_process:
+            try:
+                self.add_log("Stopping bag playback...")
+                if hasattr(os, 'setsid'):
+                    try:
+                        os.killpg(os.getpgid(self.bag_process.pid), signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    self.bag_process.terminate()
+                
+                try:
+                    self.bag_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    if hasattr(os, 'setsid'):
+                        try:
+                            os.killpg(os.getpgid(self.bag_process.pid), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    else:
+                        self.bag_process.kill()
+                    self.bag_process.wait()
+            except Exception as e:
+                self.add_log(f"⚠️ Error stopping bag process: {e}")
+            finally:
+                self.bag_process = None
+                self.is_bag_playing = False
+        
+        # Sau đó dừng mapping node
         if self.mapping_process:
             try:
                 self.add_log(self.translator.get('log.stopping_mapping_node', 'Stopping mapping node...'))
