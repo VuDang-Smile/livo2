@@ -4,6 +4,10 @@ from datetime import datetime
 import time
 from pathlib import Path
 import sys
+import subprocess
+import os
+import threading
+import signal
 sys.path.insert(0, str(Path(__file__).parent.parent / "languages"))
 from translate_engine import Translator
 
@@ -11,8 +15,14 @@ class BagMappingInterface:
     def __init__(self, root):
         self.root = root
         self.workspace_path = Path(__file__).parent.parent / "ws"
+        self.drive_ws_path = Path(__file__).parent.parent / "dependencies" / "drive_ws"
         self.bag_path = None
         self.config_path = None
+        
+        self.mapping_process = None
+        self.is_mapping_running = False
+        self.use_rviz = False
+        self.bag_rate = 0.5
         
         self.translator = Translator('en')
         self.current_lang = 'en'
@@ -99,11 +109,13 @@ class BagMappingInterface:
         
         if hasattr(self, 'status_label'):
             current_status = self.status_label.cget('text')
-            if 'Mapping' in current_status:
+            if 'Mapping node running' in current_status or 'マッピングノード実行中' in current_status:
+                self.status_label.config(text=self.translator.get('label.status_mapping_running', 'Status: 📡 Mapping node running'))
+            elif 'Mapping' in current_status and 'node' not in current_status:
                 self.status_label.config(text=self.translator.get('label.status_mapping', 'Status: Mapping...'))
-            elif 'Map Created' in current_status:
+            elif 'Map Created' in current_status or 'マップ作成済み' in current_status:
                 self.status_label.config(text=self.translator.get('label.status_map_created', 'Status: Map Created'))
-            elif 'Stopped' in current_status:
+            elif 'Stopped' in current_status or '停止' in current_status:
                 self.status_label.config(text=self.translator.get('label.status_stopped', 'Status: Stopped'))
             else:
                 self.status_label.config(text=self.translator.get('label.status_ready', 'Status: Ready'))
@@ -225,7 +237,8 @@ class BagMappingInterface:
 
     # --- Logic ---
     def update_preview_mode(self):
-        if self.rviz_var.get():
+        self.use_rviz = self.rviz_var.get()
+        if self.use_rviz:
             self.preview_container.config(bg="#f0f0f0")
             self.preview_label.config(text=self.translator.get('label.rviz2_redirect_active', 'RViz2 REDIRECT ACTIVE'), fg="blue", bg="#f0f0f0")
             self.btn_open_rviz.config(state=tk.NORMAL)
@@ -237,24 +250,125 @@ class BagMappingInterface:
             self.add_log(self.translator.get('log.config_internal_mode', 'CONFIG: Visualization mode set to Internal.'))
 
     def start_mapping(self):
-        if not self.bag_path_var.get():
-            messagebox.showwarning(
-                self.translator.get('dialog.warning', 'Warning'),
-                self.translator.get('message.select_bag_file_first', 'Please select a bag file first!')
+        if self.is_mapping_running:
+            self.add_log(self.translator.get('log.mapping_already_running', '⚠️ Mapping is already running'))
+            return
+        
+        ws_setup = self.workspace_path / "install" / "setup.sh"
+        if not ws_setup.exists():
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                f"Workspace setup not found at: {ws_setup}\n"
+                f"{self.translator.get('message.build_workspace_first', 'Please build workspace first.')}"
             )
             return
         
-        self.add_log(self.translator.get('log.mapping_started', 'MAPPING: Fast-Livo2 algorithm started...'))
-        self.status_label.config(text=self.translator.get('label.status_mapping', 'Status: Mapping...'))
-        self.btn_start.config(state=tk.DISABLED)
+        drive_ws_setup = self.drive_ws_path / "install" / "setup.sh"
+        use_drive_ws = drive_ws_setup.exists()
         
-        self.root.after(2000, self.on_mapping_complete)
-
-    def on_mapping_complete(self):
-        self.add_log(self.translator.get('log.mapping_complete', 'SUCCESS: Mapping complete. Ready for server upload.'))
-        self.status_label.config(text=self.translator.get('label.status_map_created', 'Status: Map Created'))
-        self.btn_upload.config(state=tk.NORMAL)
-        self.upload_stat.config(text=self.translator.get('label.ready_to_upload', 'Ready to upload'))
+        if not self.config_path:
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                self.translator.get('message.select_config_first', 'Please select config file before starting mapping.')
+            )
+            return
+        
+        config_path_obj = Path(self.config_path)
+        if not config_path_obj.exists():
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                f"{self.translator.get('message.config_not_exists', 'Config file does not exist')}: {self.config_path}\n"
+                f"{self.translator.get('message.select_config_again', 'Please select config file again.')}"
+            )
+            return
+        
+        try:
+            ros2_setup = "/opt/ros/jazzy/setup.bash"
+            rviz_arg = "True" if self.use_rviz else "False"
+            launch_file = "mapping_mid360_equirectangular.launch.py"
+            config_name = config_path_obj.name
+            
+            if use_drive_ws:
+                mapping_cmd = (
+                    f"source {ros2_setup} && "
+                    f"source {drive_ws_setup} && "
+                    f"source {ws_setup} && "
+                    f"ros2 launch fast_livo {launch_file} "
+                    f"use_rviz:={rviz_arg} "
+                    f"params_file:={self.config_path}"
+                )
+                self.add_log(self.translator.get('log.source_drive_ws', '✅ Will source: ROS2 base -> drive_ws -> ws'))
+            else:
+                mapping_cmd = (
+                    f"source {ros2_setup} && "
+                    f"source {ws_setup} && "
+                    f"ros2 launch fast_livo {launch_file} "
+                    f"use_rviz:={rviz_arg} "
+                    f"params_file:={self.config_path}"
+                )
+                self.add_log(self.translator.get('log.source_ws_only', '⚠️ Will source: ROS2 base -> ws (no drive_ws)'))
+            
+            env = os.environ.copy()
+            env['PYTHONUNBUFFERED'] = '1'
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
+            self.add_log("=" * 60)
+            self.add_log(self.translator.get('log.starting_mapping_node', '🚀 Starting Mapping Node'))
+            self.add_log(f"{self.translator.get('log.config_file', '📋 Config file')}: {config_name}")
+            self.add_log(f"{self.translator.get('log.config_path', '📁 Config path')}: {self.config_path}")
+            self.add_log(f"{self.translator.get('log.launch_file', '🎯 Launch file')}: {launch_file}")
+            rviz_text = self.translator.get('log.rviz_enabled', 'Yes') if self.use_rviz else self.translator.get('log.rviz_disabled', 'No')
+            self.add_log(f"{self.translator.get('log.rviz2', '👁️ RViz2')}: {rviz_text}")
+            self.add_log("=" * 60)
+            
+            self.add_log(self.translator.get('log.starting_mapping_node_process', '📡 Starting mapping node...'))
+            self.mapping_process = subprocess.Popen(
+                mapping_cmd,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True,
+                env=env,
+                preexec_fn=os.setsid if hasattr(os, 'setsid') else None
+            )
+            
+            time.sleep(3)
+            
+            if self.mapping_process.poll() is not None:
+                error_output = self.mapping_process.stdout.read() if self.mapping_process.stdout else self.translator.get('log.no_output', 'No output')
+                self.add_log(f"❌ {self.translator.get('log.mapping_process_exited', 'Mapping process exited immediately with code')}: {self.mapping_process.returncode}")
+                self.add_log(f"{self.translator.get('log.output', 'Output')}: {error_output[:500]}")
+                messagebox.showerror(
+                    self.translator.get('dialog.error', 'Error'),
+                    self.translator.get('message.mapping_exited_immediately', 'Mapping process exited immediately. Check log for details.')
+                )
+                self.mapping_process = None
+                return
+            
+            self.is_mapping_running = True
+            self.add_log(self.translator.get('log.mapping_node_started', '✅ Mapping node started successfully'))
+            
+            self.btn_start.config(state=tk.DISABLED)
+            self.status_label.config(
+                text=self.translator.get('label.status_mapping_running', 'Status: 📡 Mapping node running'),
+                foreground="orange"
+            )
+            
+            threading.Thread(target=self.monitor_mapping_process, daemon=True).start()
+            
+            self.add_log("=" * 60)
+            self.add_log(self.translator.get('log.mapping_node_ready', '✅ Mapping node is ready!'))
+            self.add_log("=" * 60)
+            
+        except Exception as e:
+            error_msg = f"{self.translator.get('message.cannot_start_mapping', 'Cannot start mapping')}: {e}"
+            self.add_log(f"❌ {error_msg}")
+            messagebox.showerror(self.translator.get('dialog.error', 'Error'), error_msg)
+            self.cleanup_processes()
 
     def start_upload(self):
         self.btn_upload.config(state=tk.DISABLED)
@@ -327,7 +441,56 @@ class BagMappingInterface:
         else:
             self.add_log_warning('message.default_config_not_found', name='mid360_equirectangular_stable.yaml')
 
+    def monitor_mapping_process(self):
+        if not self.mapping_process:
+            return
+        
+        try:
+            for line in iter(self.mapping_process.stdout.readline, ''):
+                if not line:
+                    break
+                if self.is_mapping_running:
+                    line_lower = line.lower()
+                    if any(keyword in line_lower for keyword in ['error', 'warning', 'started', 'ready', 'failed']):
+                        self.add_log(f"[Mapping] {line.strip()}")
+                else:
+                    break
+        except Exception as e:
+            if self.is_mapping_running:
+                self.add_log(f"⚠️ {self.translator.get('log.error_reading_mapping_output', 'Error reading mapping output')}: {e}")
+    
+    def cleanup_processes(self):
+        if self.mapping_process:
+            try:
+                self.add_log(self.translator.get('log.stopping_mapping_node', 'Stopping mapping node...'))
+                if hasattr(os, 'setsid'):
+                    try:
+                        os.killpg(os.getpgid(self.mapping_process.pid), signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    self.mapping_process.terminate()
+                
+                try:
+                    self.mapping_process.wait(timeout=10)
+                    self.add_log(self.translator.get('log.mapping_node_stopped', '✅ Mapping node stopped gracefully'))
+                except subprocess.TimeoutExpired:
+                    if hasattr(os, 'setsid'):
+                        try:
+                            os.killpg(os.getpgid(self.mapping_process.pid), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    else:
+                        self.mapping_process.kill()
+                    self.mapping_process.wait()
+            except Exception as e:
+                self.add_log(f"⚠️ {self.translator.get('log.error_stopping_mapping', 'Error stopping mapping process')}: {e}")
+            finally:
+                self.mapping_process = None
+                self.is_mapping_running = False
+    
     def stop_process(self):
+        self.cleanup_processes()
         self.btn_start.config(state=tk.NORMAL)
         self.btn_upload.config(state=tk.DISABLED)
         self.progress['value'] = 0

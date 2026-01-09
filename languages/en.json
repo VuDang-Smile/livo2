@@ -30,6 +30,7 @@
         "status_mapping": "Status: Mapping...",
         "status_map_created": "Status: Map Created",
         "status_stopped": "Status: Stopped",
+        "status_mapping_running": "Status: 📡 Mapping node running",
         "ready_to_upload": "Ready to upload",
         "uploading": "Uploading: {val}%",
         "upload_done": "100% - Done"
@@ -45,7 +46,13 @@
         "all_map_data_uploaded": "All map data has been uploaded to the server!",
         "bag_selected": "Bag selected: {name}",
         "default_config_selected": "Default config selected: {name}",
-        "default_config_not_found": "Default config not found: {name}"
+        "default_config_not_found": "Default config not found: {name}",
+        "build_workspace_first": "Please build workspace first.",
+        "select_config_first": "Please select config file before starting mapping.",
+        "config_not_exists": "Config file does not exist",
+        "select_config_again": "Please select config file again.",
+        "cannot_start_mapping": "Cannot start mapping",
+        "mapping_exited_immediately": "Mapping process exited immediately. Check log for details."
     },
     "button": {
         "browse": "Browse",
@@ -74,7 +81,27 @@
         "server_sync_started": "SERVER: Beginning data synchronization...",
         "server_upload_success": "SERVER: Upload successful. Data stored in cloud.",
         "system_launching_rviz2": "SYSTEM: Launching RViz2...",
-        "process_terminated": "PROCESS: Mapping and Upload terminated."
+        "process_terminated": "PROCESS: Mapping and Upload terminated.",
+        "mapping_already_running": "⚠️ Mapping is already running",
+        "source_drive_ws": "✅ Will source: ROS2 base -> drive_ws -> ws",
+        "source_ws_only": "⚠️ Will source: ROS2 base -> ws (no drive_ws)",
+        "starting_mapping_node": "🚀 Starting Mapping Node",
+        "config_file": "📋 Config file",
+        "config_path": "📁 Config path",
+        "launch_file": "🎯 Launch file",
+        "rviz2": "👁️ RViz2",
+        "rviz_enabled": "Yes",
+        "rviz_disabled": "No",
+        "starting_mapping_node_process": "📡 Starting mapping node...",
+        "no_output": "No output",
+        "mapping_process_exited": "Mapping process exited immediately with code",
+        "output": "Output",
+        "mapping_node_started": "✅ Mapping node started successfully",
+        "mapping_node_ready": "✅ Mapping node is ready!",
+        "stopping_mapping_node": "Stopping mapping node...",
+        "mapping_node_stopped": "✅ Mapping node stopped gracefully",
+        "error_stopping_mapping": "Error stopping mapping process",
+        "error_reading_mapping_output": "Error reading mapping output"
     },
     "dialog": {
         "choose_bag_folder": "Choose Bag Folder",

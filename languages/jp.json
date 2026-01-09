@@ -30,6 +30,7 @@
         "status_mapping": "ステータス: マッピング中...",
         "status_map_created": "ステータス: マップ作成済み",
         "status_stopped": "ステータス: 停止",
+        "status_mapping_running": "ステータス: 📡 マッピングノード実行中",
         "ready_to_upload": "アップロード準備完了",
         "uploading": "アップロード中: {val}%",
         "upload_done": "100% - 完了"
@@ -45,7 +46,13 @@
         "all_map_data_uploaded": "すべてのマップデータがサーバーにアップロードされました！",
         "bag_selected": "Bag を選択しました: {name}",
         "default_config_selected": "デフォルト設定を選択しました: {name}",
-        "default_config_not_found": "デフォルト設定が見つかりません: {name}"
+        "default_config_not_found": "デフォルト設定が見つかりません: {name}",
+        "build_workspace_first": "まずワークスペースをビルドしてください。",
+        "select_config_first": "マッピングを開始する前に設定ファイルを選択してください。",
+        "config_not_exists": "設定ファイルが存在しません",
+        "select_config_again": "設定ファイルを再度選択してください。",
+        "cannot_start_mapping": "マッピングを開始できません",
+        "mapping_exited_immediately": "マッピングプロセスがすぐに終了しました。詳細はログを確認してください。"
     },
     "button": {
         "browse": "参照",
@@ -74,7 +81,27 @@
         "server_sync_started": "SERVER: データ同期を開始しています...",
         "server_upload_success": "SERVER: アップロードが成功しました。データがクラウドに保存されました。",
         "system_launching_rviz2": "SYSTEM: RViz2 を起動しています...",
-        "process_terminated": "PROCESS: マッピングとアップロードを終了しました。"
+        "process_terminated": "PROCESS: マッピングとアップロードを終了しました。",
+        "mapping_already_running": "⚠️ マッピングは既に実行中です",
+        "source_drive_ws": "✅ ソース: ROS2 base -> drive_ws -> ws",
+        "source_ws_only": "⚠️ ソース: ROS2 base -> ws (drive_ws なし)",
+        "starting_mapping_node": "🚀 マッピングノードを開始しています",
+        "config_file": "📋 設定ファイル",
+        "config_path": "📁 設定パス",
+        "launch_file": "🎯 起動ファイル",
+        "rviz2": "👁️ RViz2",
+        "rviz_enabled": "はい",
+        "rviz_disabled": "いいえ",
+        "starting_mapping_node_process": "📡 マッピングノードを起動しています...",
+        "no_output": "出力なし",
+        "mapping_process_exited": "マッピングプロセスがすぐに終了しました。コード",
+        "output": "出力",
+        "mapping_node_started": "✅ マッピングノードが正常に起動しました",
+        "mapping_node_ready": "✅ マッピングノードの準備ができました！",
+        "stopping_mapping_node": "マッピングノードを停止しています...",
+        "mapping_node_stopped": "✅ マッピングノードが正常に停止しました",
+        "error_stopping_mapping": "マッピングプロセスの停止中にエラーが発生しました",
+        "error_reading_mapping_output": "マッピング出力の読み取り中にエラーが発生しました"
     },
     "dialog": {
         "choose_bag_folder": "Bag フォルダを選択",
