@@ -27,6 +27,12 @@ fi
 
 cp CMakeLists.standalone.txt CMakeLists.txt
 
+# Xóa build directory cũ để tránh lỗi CMakeCache.txt với đường dẫn khác
+if [ -d "build_standalone" ]; then
+    echo "Cleaning old build directory..."
+    rm -rf build_standalone
+fi
+
 mkdir -p build_standalone
 cd build_standalone
 
