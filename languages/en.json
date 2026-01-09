@@ -15,6 +15,7 @@
         "theta_driver": "Theta Driver",
         "livox_driver": "Livox Driver",
         "slam": "SLAM",
+        "livox_360": "Livox 360",
         "camera": "Camera"
     },
     "message": {

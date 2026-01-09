@@ -143,7 +143,7 @@ class LivoxApp:
 
         self.label_slam_usb = tk.Label(
             self.sidebar, 
-            text="● " + translator.get("label.slam") + ": " + translator.get("status.disconnected")
+            text="● " + translator.get("label.livox_360") + ": " + translator.get("status.disconnected")
         )
         self.label_slam_usb.pack(anchor="w", pady=5)
         
@@ -163,13 +163,7 @@ class LivoxApp:
         # Một đường kẻ ngang nhẹ để phân cách (tùy chọn)
         # tk.Frame(self.sidebar, height=1, bg="grey").pack(fill="x", pady=5)
 
-        self.btn_rviz = tk.Button(
-            self.sidebar, 
-            text="📊 " + translator.get("button.launch_rviz2"), 
-            command=self.open_rviz,
-            width=10
-        )
-        self.btn_rviz.pack(side="right", pady=10)   
+         
 
         # tk.Label(self.sidebar, text="● " + translator.get("label.theta_driver") + ": " + translator.get("status.disconnected")).pack(anchor="w", pady=5)
         # tk.Label(self.sidebar, text="● " + translator.get("label.livox_driver") + ": " + translator.get("status.disconnected")).pack(anchor="w")
@@ -209,6 +203,15 @@ class LivoxApp:
         
         self.lbl_status = tk.Label(self.ctrl_frame, text=translator.get("label.status") + ": " + translator.get("status.ready"))
         self.lbl_status.pack(side="left", padx=20)
+
+        self.btn_rviz = tk.Button(
+            self.ctrl_frame, 
+            text="📊 " + translator.get("button.launch_rviz2"), 
+            command=self.open_rviz,
+            width=10
+        )
+        self.btn_rviz.pack(side="right", pady=10)  
+
 
         # Image canvas
         self.canvas = tk.Canvas(
@@ -538,33 +541,33 @@ class LivoxApp:
             if success:
                 self.btn_record.config(text="■ STOP RECORDING")
                 self.lbl_status.config(text="Status: Recording...", fg="red")
-                self.btn_upload.pack_forget()
+                # self.btn_upload.pack_forget()
         else:
             # Gọi logic stop từ file riêng
             saved_path = self.recorder.stop()
             self.btn_record.config(text="● START RECORDING")
             self.lbl_status.config(text=f"Status: Saved", fg="green")
-            self.btn_upload.pack(side="left", padx=10)
+            # self.btn_upload.pack(side="left", padx=10)
             self.log(f"✅ Đã lưu tại: {saved_path}")
 
-    def start_upload_thread(self):
-        self.btn_upload.config(state="disabled")
-        self.progress.pack(fill="x", padx=20, pady=5)
-        self.lbl_percent.pack(side="right", padx=20)
-        threading.Thread(target=self.simulate_upload, daemon=True).start()
+    # def start_upload_thread(self):
+    #     self.btn_upload.config(state="disabled")
+    #     self.progress.pack(fill="x", padx=20, pady=5)
+    #     self.lbl_percent.pack(side="right", padx=20)
+    #     threading.Thread(target=self.simulate_upload, daemon=True).start()
 
-    def simulate_upload(self):
-        self.log("Starting upload to server...")
-        for i in range(101):
-            time.sleep(0.04)
-            self.progress['value'] = i
-            self.lbl_percent.config(text=f"Uploading: {i}%")
+    # def simulate_upload(self):
+    #     self.log("Starting upload to server...")
+    #     for i in range(101):
+    #         time.sleep(0.04)
+    #         self.progress['value'] = i
+    #         self.lbl_percent.config(text=f"Uploading: {i}%")
         
-        self.log("SUCCESS: Upload complete.")
-        self.btn_upload.config(state="normal")
-        time.sleep(1)
-        self.progress.pack_forget()
-        self.lbl_percent.pack_forget()
+    #     self.log("SUCCESS: Upload complete.")
+    #     self.btn_upload.config(state="normal")
+    #     time.sleep(1)
+    #     self.progress.pack_forget()
+    #     self.lbl_percent.pack_forget()
 
     def check_theta_usb_callback(self, is_connected):
         """Callback để cập nhật UI dựa trên trạng thái kết nối USB của Theta"""
@@ -581,7 +584,7 @@ class LivoxApp:
         color = "green" if is_active_theta else "red"
         
         # Xác định nội dung text dựa trên biến success
-        status_text = translator.get("status.connected") if is_active_theta else translator.get("status.disconnected")
+        status_text = translator.get("status.running") if is_active_theta else translator.get("status.not_running")
 
         print(f"UI cập nhật: is_active_theta={is_active_theta}")
         

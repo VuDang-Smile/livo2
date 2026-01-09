@@ -564,6 +564,7 @@ class LivoxTab(ttk.Frame):
             
         except Exception as e:
             error_msg = f"Không thể start subscriber: {e}"
+            print(error_msg)
             self.log(f"✗ Lỗi: {error_msg}")
             import traceback
             traceback.print_exc()

@@ -115,6 +115,7 @@ class ThetaDriver(ttk.Frame):
         self.camera_info_publisher_process = None
         self.is_camera_connected = False
         self.is_active_theta = False
+        self.is_running = False
         self.create_control_panel()
     
     def create_control_panel(self):
@@ -220,7 +221,6 @@ class ThetaDriver(ttk.Frame):
             
             self.log("✓ theta_driver process start_subscriber")
             self.start_subscriber()
-
             
             if self.update_ui_theta_connected:
                 self.update_ui_theta_connected(self.is_active_theta)
@@ -232,6 +232,7 @@ class ThetaDriver(ttk.Frame):
             self.after(2000, self.check_theta_driver_process())
             
         except Exception as e:
+            print(f"✗ theta_driver failed to start: {e}")
             messagebox.showerror("Lỗi", translator.get("message.cannot_launch_theta_driver"))
     
     def check_theta_usb_connection(self, check_theta_usb_callback=None):
@@ -490,8 +491,8 @@ class ThetaDriver(ttk.Frame):
             self.frame_count += 1
             
             # Debug: log mỗi 30 frame
-            if self.frame_count % 30 == 0:
-                self.log(f"✓ Equirectangular: Đã nhận {self.frame_count} frames")
+            # if self.frame_count % 30 == 0:
+            #     self.log(f"✓ Equirectangular: Đã nhận {self.frame_count} frames")
             
             # Cập nhật UI trong main thread
             self.after(0, self.update_image_display, cv_image)
