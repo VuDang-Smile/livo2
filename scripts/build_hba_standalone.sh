@@ -27,16 +27,31 @@ fi
 
 cp CMakeLists.standalone.txt CMakeLists.txt
 
-# Xóa build directory cũ để tránh lỗi CMakeCache.txt với đường dẫn khác
-if [ -d "build_standalone" ]; then
-    echo "Cleaning old build directory..."
-    rm -rf build_standalone
-fi
-
+# Tạo build directory nếu chưa có
 mkdir -p build_standalone
 cd build_standalone
 
+# Kiểm tra CMakeCache.txt có đường dẫn khác không
+NEED_CLEAN=false
+if [ -f "CMakeCache.txt" ]; then
+    # Đọc đường dẫn source từ CMakeCache.txt
+    CACHED_SOURCE=$(grep "^CMAKE_SOURCE_DIR:" CMakeCache.txt 2>/dev/null | cut -d "=" -f2 | tr -d ' ')
+    CURRENT_SOURCE=$(cd .. && pwd)
+    
+    if [ -n "$CACHED_SOURCE" ] && [ "$CACHED_SOURCE" != "$CURRENT_SOURCE" ]; then
+        echo "Warning: CMakeCache.txt has different source path:"
+        echo "  Cached: $CACHED_SOURCE"
+        echo "  Current: $CURRENT_SOURCE"
+        echo "Cleaning CMakeCache.txt to avoid path mismatch..."
+        rm -f CMakeCache.txt
+        NEED_CLEAN=true
+    fi
+fi
+
+# Chạy cmake (sẽ tự động tạo CMakeCache.txt nếu chưa có hoặc đã bị xóa)
 cmake .. -DCMAKE_BUILD_TYPE=Release
+
+# Build
 make -j$(nproc)
 
 echo "HBA build successful! Binary located at $BUILD_DIR/hba_standalone"
