@@ -15,13 +15,15 @@ class StorageService:
     def __init__(self):
         self.upload_dir = Path(settings.UPLOAD_DIR)
         self.processed_dir = Path(settings.PROCESSED_DIR)
+        self.storage_dir = Path(settings.STORAGE_DIR)
         self._ensure_directories()
     
     def _ensure_directories(self):
         """Ensure upload and processed directories exist."""
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.processed_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Storage directories initialized: upload={self.upload_dir}, processed={self.processed_dir}")
+        self.ensure_storage_directories()
+        logger.info(f"Storage directories initialized: upload={self.upload_dir}, processed={self.processed_dir}, storage={self.storage_dir}")
     
     def get_upload_path(self, filename: str) -> Path:
         """Get full path for uploaded file."""
@@ -30,6 +32,36 @@ class StorageService:
     def get_processed_path(self, *paths: str) -> Path:
         """Get full path in processed directory."""
         return self.processed_dir / Path(*paths)
+    
+    def get_storage_path(self, *paths: str) -> Path:
+        """Get full path in storage directory."""
+        return self.storage_dir / Path(*paths)
+    
+    def ensure_storage_directories(self):
+        """Ensure storage subdirectories exist."""
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
+        (self.storage_dir / "merged_map").mkdir(exist_ok=True)
+        (self.storage_dir / "fastloc_map").mkdir(exist_ok=True)
+        (self.storage_dir / "floorplan_2d").mkdir(exist_ok=True)
+        logger.debug(f"Storage subdirectories ensured: {self.storage_dir}")
+    
+    def cleanup_storage(self) -> bool:
+        """Cleanup all files in storage directory."""
+        try:
+            if self.storage_dir.exists():
+                for item in self.storage_dir.iterdir():
+                    if item.is_file():
+                        item.unlink()
+                        logger.info(f"Deleted file from storage: {item}")
+                    elif item.is_dir():
+                        shutil.rmtree(item)
+                        logger.info(f"Deleted directory from storage: {item}")
+                # Recreate subdirectories
+                self.ensure_storage_directories()
+            return True
+        except Exception as e:
+            logger.error(f"Error cleaning up storage: {e}")
+            return False
     
     def save_file(self, file_content: bytes, filename: str) -> Path:
         """Save file to upload directory."""

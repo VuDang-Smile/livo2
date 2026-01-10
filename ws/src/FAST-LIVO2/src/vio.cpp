@@ -343,7 +343,13 @@ void VIOManager::warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, c
         continue;
       }
       
-      if (px[0] < 0 || px[1] < 0 || px[0] >= img_ref.cols - 1 || px[1] >= img_ref.rows - 1)
+      // interpolateMat_8u accesses pixels at (x, y), (x+1, y), (x, y+1), and (x+1, y+1)
+      // where x = floor(px[0]) and y = floor(px[1])
+      // For safe access, we need: floor(px[0]) >= 0, floor(px[0]) + 1 < img_ref.cols
+      //                          floor(px[1]) >= 0, floor(px[1]) + 1 < img_ref.rows
+      // Since floor rounds down, this means: px[0] >= 0, px[0] < img_ref.cols - 1
+      //                                       px[1] >= 0, px[1] < img_ref.rows - 1
+      if (px[0] < 0.0f || px[1] < 0.0f || px[0] >= static_cast<float>(img_ref.cols - 1) || px[1] >= static_cast<float>(img_ref.rows - 1))
         patch_ptr[index] = 0;
       else
         patch_ptr[index] = (float)vk::interpolateMat_8u(img_ref, px[0], px[1]);
@@ -1268,6 +1274,11 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
           Vector2f px_patch(x - patch_size / 2, y - patch_size / 2);
           px_patch *= (1 << search_level);
           const Vector2f px_ref(px_patch + ref_ftr->px_.cast<float>());
+          
+          // Bounds check for interpolateMat_8u (needs access to px_ref+1, py_ref+1)
+          if (px_ref[0] < 0.0f || px_ref[1] < 0.0f || px_ref[0] >= static_cast<float>(img_ref.cols - 1) || px_ref[1] >= static_cast<float>(img_ref.rows - 1))
+            continue;
+          
           uint8_t pixel_value = (uint8_t)vk::interpolateMat_8u(img_ref, px_ref[0], px_ref[1]);
 
           const Vector2f px(A_cur_ref.cast<float>() * px_patch + pc.cast<float>());
@@ -1317,8 +1328,12 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
               px_patch[1] > (-patch_size / 2 * (1 << search_level)) && px_patch[1] < (patch_size / 2 * (1 << search_level)))
           {
             const Vector2f px_ref(px_patch + ref_ftr->px_.cast<float>());
-            uint8_t pixel_value = (uint8_t)vk::interpolateMat_8u(img_ref, px_ref[0], px_ref[1]);
-            it_normal[width * j + i] = pixel_value;
+            // Bounds check for interpolateMat_8u (needs access to px_ref+1, py_ref+1)
+            if (px_ref[0] >= 0.0f && px_ref[1] >= 0.0f && px_ref[0] < static_cast<float>(img_ref.cols - 1) && px_ref[1] < static_cast<float>(img_ref.rows - 1))
+            {
+              uint8_t pixel_value = (uint8_t)vk::interpolateMat_8u(img_ref, px_ref[0], px_ref[1]);
+              it_normal[width * j + i] = pixel_value;
+            }
           }
         }
       }
@@ -1350,6 +1365,11 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
         Vector2f px_patch(x - patch_size / 2, y - patch_size / 2);
         px_patch *= (1 << search_level);
         const Vector2f px_ref(px_patch + ref_ftr->px_.cast<float>());
+        
+        // Bounds check for interpolateMat_8u (needs access to px_ref+1, py_ref+1)
+        if (px_ref[0] < 0.0f || px_ref[1] < 0.0f || px_ref[0] >= static_cast<float>(img_ref.cols - 1) || px_ref[1] >= static_cast<float>(img_ref.rows - 1))
+          continue;
+        
         uint8_t pixel_value = (uint8_t)vk::interpolateMat_8u(img_ref, px_ref[0], px_ref[1]);
 
         const Vector2f px(A_cur_ref.cast<float>() * px_patch + pc.cast<float>());

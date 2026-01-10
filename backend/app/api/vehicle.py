@@ -11,6 +11,7 @@ from app.models.vehicle import (
     VehicleListItem,
     VehicleRegisterRequest,
     VehicleRegisterResponse,
+    VehicleStatusUpdateRequest,
     Pose,
     Position,
     Orientation
@@ -57,6 +58,7 @@ async def register_vehicle(vehicle_request: VehicleRegisterRequest):
             "name": vehicle_request.name,
             "description": vehicle_request.description,
             "vehicle_type": vehicle_request.vehicle_type,
+            "status": vehicle_request.status or "active",
             "metadata": vehicle_request.metadata or {},
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
@@ -162,6 +164,11 @@ async def get_vehicle(vehicle_id: str):
                 orientation=Orientation(**latest_pose["orientation"]),
                 timestamp=latest_pose["timestamp"]
             ),
+            name=vehicle.get("name"),
+            description=vehicle.get("description"),
+            vehicle_type=vehicle.get("vehicle_type"),
+            status=vehicle.get("status", "active"),
+            metadata=vehicle.get("metadata"),
             created_at=vehicle.get("created_at", datetime.utcnow()),
             updated_at=vehicle.get("updated_at", datetime.utcnow())
         )
@@ -197,6 +204,9 @@ async def get_all_vehicles():
                         orientation=Orientation(**latest_pose["orientation"]),
                         timestamp=latest_pose["timestamp"]
                     ),
+                    name=vehicle.get("name"),
+                    vehicle_type=vehicle.get("vehicle_type"),
+                    status=vehicle.get("status", "active"),
                     updated_at=vehicle.get("updated_at", datetime.utcnow())
                 )
             )
@@ -228,5 +238,41 @@ async def get_pose_history(
         return {"vehicle_id": vehicle_id, "poses": poses, "count": len(poses)}
     except Exception as e:
         logger.error(f"Error getting pose history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/{vehicle_id}/status")
+async def update_vehicle_status(
+    vehicle_id: str,
+    status_request: VehicleStatusUpdateRequest
+):
+    """Update vehicle status."""
+    try:
+        # Check if vehicle exists
+        vehicle = await database_service.get_vehicle(vehicle_id)
+        if not vehicle:
+            raise HTTPException(status_code=404, detail="Vehicle not found")
+        
+        # Update status
+        success = await database_service.update_vehicle_status(vehicle_id, status_request.status)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update vehicle status")
+        
+        # Publish MQTT event
+        mqtt_service.publish_map_event("vehicle.status.updated", {
+            "vehicle_id": vehicle_id,
+            "status": status_request.status
+        })
+        
+        return {
+            "success": True,
+            "vehicle_id": vehicle_id,
+            "status": status_request.status,
+            "message": "Vehicle status updated successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating vehicle status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     # File storage
     UPLOAD_DIR: str = "./uploads"
     PROCESSED_DIR: str = "./processed"
+    STORAGE_DIR: str = "./storage"
     MAX_UPLOAD_SIZE: int = 2 * 1024 * 1024 * 1024  # 2GB
     SINGLE_VERSION_MODE: bool = True
     

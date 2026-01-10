@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Chuẩn hóa bản đồ bằng HBA và gộp lại thành merge_all_hba.pcd.
+Normalize map using HBA and merge into merge_all_hba.pcd.
 """
 
 import argparse
@@ -35,7 +35,7 @@ def get_transformation_matrix(t, q):
     return T
 
 def find_hba_binary(project_root):
-    """Tìm binary hba_standalone trong project_root"""
+    """Find hba_standalone binary in project_root"""
     print(f"[INFO] Searching for hba_standalone binary in {project_root}...")
     # Thử tìm trong các vị trí phổ biến
     search_paths = [
@@ -48,7 +48,7 @@ def find_hba_binary(project_root):
         if path.exists():
             return path
             
-    # Nếu không thấy, dùng lệnh find
+    # If not found, use find command
     try:
         result = subprocess.run(
             ["find", str(project_root), "-name", "hba_standalone", "-type", "f", "-not", "-path", "*/.*"],
