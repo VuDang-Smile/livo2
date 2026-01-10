@@ -226,7 +226,10 @@
         "qr_code_updated": "🔄 QRコード更新: {code}",
         "error_reading_qr_json": "⚠️ QR_detect.json読み込みエラー: {error}",
         "qr_detect_json_saved": "💾 QR_detect.json保存: {count} QRコード",
-        "error_saving_qr_detect_json": "❌ QR_detect.json保存エラー: {error}"
+        "error_saving_qr_detect_json": "❌ QR_detect.json保存エラー: {error}",
+         "starting_livox_theta_drivers": "🚀 Starting Livox Driver 2 and Theta Driver...",
+        "error_starting_livox_theta_drivers": "❌ Error starting Livox Driver 2 and Theta Driver:",
+        "error_reading_output": "Error reading output"
     },
     "dialog": {
         "choose_bag_folder": "Bag フォルダを選択",

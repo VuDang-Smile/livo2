@@ -583,6 +583,26 @@ class ThetaDriver(ttk.Frame):
             if self.update_ui_theta_connected:
                 self.update_ui_theta_connected(self.is_active_theta)
         
+
+        self.is_running = False
+        if self.ros_executor:
+            try:
+                self.ros_executor.shutdown()
+            except:
+                pass
+            self.ros_executor = None
+        
+        if self.ros_node:
+            try:
+                self.ros_node.destroy_node()
+            except:
+                pass
+            self.ros_node = None
+        
+        self.canvas.delete("all")
+        self.frame_count = 0
+
+
         # self.status_label.config(
         #     text="Trạng thái: Đã dừng",
         #     foreground="red"

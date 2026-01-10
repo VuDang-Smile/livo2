@@ -226,7 +226,12 @@
         "qr_code_updated": "🔄 QR Code updated: {code}",
         "error_reading_qr_json": "⚠️ Error reading QR_detect.json: {error}",
         "qr_detect_json_saved": "💾 QR_detect.json saved: {count} QR codes",
-        "error_saving_qr_detect_json": "❌ Error saving QR_detect.json: {error}"
+        "error_saving_qr_detect_json": "❌ Error saving QR_detect.json: {error}",
+
+
+        "starting_livox_theta_drivers": "🚀 Starting Livox Driver 2 and Theta Driver...",
+        "error_starting_livox_theta_drivers": "❌ Error starting Livox Driver 2 and Theta Driver:",
+        "error_reading_output": "Error reading output"
     },
     "dialog": {
         "choose_bag_folder": "Choose Bag Folder",

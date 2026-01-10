@@ -72,13 +72,12 @@ class LivoxApp:
         self.recorder = Recorder(log_callback=self.log)
         self.theta_driver = ThetaDriver(log_callback=self.log, update_ui_theta_connected = self.update_ui_theta_connected, canvas = self.canvas)
         self.livox_tab = LivoxTab(log_callback=self.log, update_label_livo_connected=self.update_label_livo_connected)
+        self.mid360_ip_var = None
+
+        self.mid360_ip_var = tk.StringVar(value="192.168.1.109")
 
     def update_label_livo_connected(self, is_running):
         if is_running:
-            self.label_slam_usb.config(
-                text="● " + translator.get("label.slam_usb") + ": " + translator.get("status.connected"),
-                fg="green"
-            )
             self.label_livox.config(
                 text="● " + translator.get("label.livox_driver") + ": " + translator.get("status.running"),
                 fg="green"
@@ -86,10 +85,6 @@ class LivoxApp:
         else:
             self.label_livox.config(
                 text="● " + translator.get("label.livox_driver") + ": " + translator.get("status.not_running"),
-                fg="red"
-            )
-            self.label_slam_usb.config(
-                text="● " + translator.get("label.slam_usb") + ": " + translator.get("status.disconnected"),
                 fg="red"
             )
 
@@ -568,24 +563,46 @@ class LivoxApp:
             # self.btn_upload.pack(side="left", padx=10)
             self.log(f"✅ Đã lưu tại: {saved_path}")
 
-    # def start_upload_thread(self):
-    #     self.btn_upload.config(state="disabled")
-    #     self.progress.pack(fill="x", padx=20, pady=5)
-    #     self.lbl_percent.pack(side="right", padx=20)
-    #     threading.Thread(target=self.simulate_upload, daemon=True).start()
-
-    # def simulate_upload(self):
-    #     self.log("Starting upload to server...")
-    #     for i in range(101):
-    #         time.sleep(0.04)
-    #         self.progress['value'] = i
-    #         self.lbl_percent.config(text=f"Uploading: {i}%")
+    def check_mid360_connection(self):
+        """Kiểm tra kết nối và lưu vào biến self.is_mid360_connected"""
+        ip = self.mid360_ip_var.get().strip()
+        # Khởi tạo biến trạng thái mặc định là False
+        self.is_mid360_connected = False 
         
-    #     self.log("SUCCESS: Upload complete.")
-    #     self.btn_upload.config(state="normal")
-    #     time.sleep(1)
-    #     self.progress.pack_forget()
-    #     self.lbl_percent.pack_forget()
+        if not ip:
+            self.log("❌ No IP")
+            return
+
+        def check():
+            try:
+                # Ping nhanh (1 gói tin, chờ 1 giây)
+                # Dùng 'n' cho Windows, 'c' cho Linux
+                param = '-n' if subprocess.os.name == 'nt' else '-c'
+                result = subprocess.run(['ping', param, '1', '-W', '1', ip], 
+                                    capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    self.is_mid360_connected = True
+                    self.label_slam_usb.config(
+                        text="● " + translator.get("label.livox_360") + ": " + translator.get("status.connected"),
+                        fg="green"
+                    )
+                    self.log("✅ Livox mid360 Connected")
+
+                else:
+                    self.is_mid360_connected = False
+                    self.label_slam_usb.config(
+                        text="● " + translator.get("label.livox_360") + ": " + translator.get("status.disconnected"),
+                        fg="red"
+                    )
+                    self.log("❌ Livox mid360 Disconnected")
+            except Exception:
+                self.is_mid360_connected = False
+                self.log("⚠️ Livox mid360 Error")
+
+
+        # Chạy ngầm để không treo giao diện (GUI)
+        threading.Thread(target=check, daemon=True).start()
 
     def check_theta_usb_callback(self, is_connected):
         """Callback để cập nhật UI dựa trên trạng thái kết nối USB của Theta"""
@@ -596,8 +613,6 @@ class LivoxApp:
     
     def update_ui_theta_connected(self, is_active_theta):
         """Hàm này chuyên trách việc đổi màu/text trên giao diện"""
-        # self.label_theta.config(text="● " + translator.get("label.theta_driver") + ": " + translator.get("status.connected"), fg="green")
-        # self.label_livox.config(text="● " + translator.get("label.livox_driver") + ": " + translator.get("status.connected"), fg="green")
         # Xác định màu sắc dựa trên biến success
         color = "green" if is_active_theta else "red"
         
@@ -608,7 +623,6 @@ class LivoxApp:
         
         # Cập nhật UI Theta
         full_text_theta = f"● {translator.get('label.theta_driver')}: {status_text}"
-        full_text_livox = f"● {translator.get('label.livox_driver')}: {status_text}"
 
         self.label_theta.config(text=full_text_theta, fg=color)
         if is_active_theta:
@@ -628,8 +642,9 @@ class LivoxApp:
     
     def start_livox_driver(self):
         try:
-            self.log("🚀 Đang khởi động Livox Driver 2 và Theta Driver...")
+            self.log(translator.get("log.starting_livox_theta_drivers"))
             # Kiểm tra kết nối USB của Theta trước
+            self.check_mid360_connection()
             self.theta_driver.check_theta_usb_connection(self.check_theta_usb_callback)
             self.theta_driver.launch_theta_driver()
             self.theta_driver.launch_camera_info_publisher()
@@ -641,7 +656,7 @@ class LivoxApp:
 
             # self.livox_tab.start_ros_subscriber()
         except Exception as e:
-            self.log(f"❌ Lỗi khi khởi động Livox Driver 2 và Theta Driver: {e}")
+            self.log(f"{translator.get('log.error_starting_livox_theta_drivers')} {e}")
             
     def monitor_record_process(self):
         """Monitor record process output"""
@@ -664,7 +679,7 @@ class LivoxApp:
                         if any(keyword in line.lower() for keyword in ['recording', 'bag', 'topic', 'message']):
                             self.log(line)
         except Exception as e:
-            self.log(f"Lỗi khi đọc output: {e}")
+            self.log(f"{translator.get("log.error_reading_output")} {e}")
         
         # Kiểm tra exit code
         # if self.record_process.poll() is not None:
