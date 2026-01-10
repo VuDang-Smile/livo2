@@ -45,6 +45,58 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to connect to MQTT (will retry): {e}")
     
+    # Auto-extract current map on startup if storage is empty
+    try:
+        from app.services.map_processor import MapProcessor
+        from app.services.storage_service import storage_service
+        from pathlib import Path
+        
+        # Check if storage is empty
+        storage_dir = storage_service.storage_dir
+        has_storage_files = False
+        if storage_dir.exists():
+            for folder in ["merged_map", "fastloc_map", "floorplan_2d"]:
+                folder_path = storage_dir / folder
+                if folder_path.exists() and any(folder_path.iterdir()):
+                    has_storage_files = True
+                    break
+            if not has_storage_files:
+                qr_file = storage_dir / "QR_detect.json"
+                if qr_file.exists():
+                    has_storage_files = True
+        
+        if not has_storage_files:
+            logger.info("=" * 60)
+            logger.info("🔄 AUTO-EXTRACTION: Storage is empty, checking for uploaded map...")
+            logger.info("=" * 60)
+            
+            # Get current map from database
+            current_map = await database_service.get_current_map()
+            if current_map and current_map.get("file_path"):
+                map_file = Path(current_map["file_path"])
+                if map_file.exists() and map_file.name.endswith('.zip'):
+                    logger.info(f"📦 Found map file: {map_file.name}")
+                    logger.info("🔄 Auto-extracting to storage (extraction only, no metadata update)...")
+                    
+                    # Use extract_zip_to_storage to avoid deleting old map
+                    map_processor = MapProcessor()
+                    result = await map_processor.extract_zip_to_storage(map_file)
+                    
+                    if result and result.get("storage_paths"):
+                        logger.info("✅ Auto-extraction completed successfully!")
+                        logger.info(f"   Extracted {len(result['storage_paths'])} items")
+                    else:
+                        logger.warning("⚠️ Auto-extraction failed or returned no results")
+                else:
+                    logger.info("ℹ️ Current map is not a ZIP file or file not found")
+            else:
+                logger.info("ℹ️ No current map found in database")
+            
+            logger.info("=" * 60)
+    except Exception as e:
+        logger.warning(f"Auto-extraction on startup failed: {e}")
+        # Don't fail startup if auto-extraction fails
+    
     yield
     
     # Shutdown

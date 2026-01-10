@@ -72,6 +72,11 @@ class VehicleDocument:
         self,
         vehicle_id: str,
         latest_pose: Dict[str, Any],
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        vehicle_type: Optional[str] = None,
+        status: Optional[str] = "active",
+        metadata: Optional[Dict[str, Any]] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
         _id: Optional[ObjectId] = None
@@ -79,6 +84,11 @@ class VehicleDocument:
         self._id = _id or ObjectId()
         self.vehicle_id = vehicle_id
         self.latest_pose = latest_pose
+        self.name = name
+        self.description = description
+        self.vehicle_type = vehicle_type
+        self.status = status
+        self.metadata = metadata or {}
         self.created_at = created_at or datetime.utcnow()
         self.updated_at = updated_at or datetime.utcnow()
     
@@ -88,6 +98,11 @@ class VehicleDocument:
             "_id": self._id,
             "vehicle_id": self.vehicle_id,
             "latest_pose": self.latest_pose,
+            "name": self.name,
+            "description": self.description,
+            "vehicle_type": self.vehicle_type,
+            "status": self.status,
+            "metadata": self.metadata,
             "created_at": self.created_at,
             "updated_at": self.updated_at
         }
@@ -99,6 +114,11 @@ class VehicleDocument:
             _id=data.get("_id"),
             vehicle_id=data["vehicle_id"],
             latest_pose=data["latest_pose"],
+            name=data.get("name"),
+            description=data.get("description"),
+            vehicle_type=data.get("vehicle_type"),
+            status=data.get("status", "active"),
+            metadata=data.get("metadata", {}),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at")
         )
