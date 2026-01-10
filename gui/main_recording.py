@@ -72,8 +72,6 @@ class LivoxApp:
         self.recorder = Recorder(log_callback=self.log)
         self.theta_driver = ThetaDriver(log_callback=self.log, update_ui_theta_connected = self.update_ui_theta_connected, canvas = self.canvas)
         self.livox_tab = LivoxTab(log_callback=self.log, update_label_livo_connected=self.update_label_livo_connected)
-        self.mid360_ip_var = None
-
         self.mid360_ip_var = tk.StringVar(value="192.168.1.109")
 
     def update_label_livo_connected(self, is_running):
@@ -174,12 +172,6 @@ class LivoxApp:
 
         # --- THÊM NÚT RVIZ TẠI ĐÂY ---
         # Một đường kẻ ngang nhẹ để phân cách (tùy chọn)
-        # tk.Frame(self.sidebar, height=1, bg="grey").pack(fill="x", pady=5)
-
-         
-
-        # tk.Label(self.sidebar, text="● " + translator.get("label.theta_driver") + ": " + translator.get("status.disconnected")).pack(anchor="w", pady=5)
-        # tk.Label(self.sidebar, text="● " + translator.get("label.livox_driver") + ": " + translator.get("status.disconnected")).pack(anchor="w")
 
         # 3. Workspace (Phải)
         self.workspace = tk.Frame(self.main_container)
