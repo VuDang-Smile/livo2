@@ -1,16 +1,18 @@
-# constants.py
+"""
+API Configuration Constants
+"""
+import os
 
-# Địa chỉ Server API
-BASE_URL = "http://localhost:8000/api/v1"
+# Backend API endpoint - có thể override bằng environment variable
+BACKEND_HOST = os.getenv("BACKEND_HOST", os.getenv("LIVO_BACKEND_URL", "http://backend.lidar.tm"))
+VEHICLE_ENDPOINT = f"{BACKEND_HOST}/api/v1/vehicles"
 
-# Các Endpoint
-VEHICLE_ENDPOINT = f"{BASE_URL}/vehicles/"
+# API timeout (seconds)
+API_TIMEOUT = int(os.getenv("API_TIMEOUT", "5"))
 
-# Timeout cho API (giây)
-API_TIMEOUT = 5
-
-# Các cấu hình khác nếu cần
+# Default headers for API requests
 HEADERS = {
     'accept': 'application/json',
     'Content-Type': 'application/json'
 }
+

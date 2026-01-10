@@ -12,6 +12,7 @@ from app.models.vehicle import (
     VehicleRegisterRequest,
     VehicleRegisterResponse,
     VehicleStatusUpdateRequest,
+    VehicleStatus,
     Pose,
     Position,
     Orientation
@@ -58,7 +59,7 @@ async def register_vehicle(vehicle_request: VehicleRegisterRequest):
             "name": vehicle_request.name,
             "description": vehicle_request.description,
             "vehicle_type": vehicle_request.vehicle_type,
-            "status": vehicle_request.status or "active",
+            "status": (vehicle_request.status or VehicleStatus.OFFLINE).value,
             "metadata": vehicle_request.metadata or {},
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
@@ -153,6 +154,13 @@ async def get_vehicle(vehicle_id: str):
                 "timestamp": datetime.utcnow()
             }
         
+        # Convert status string to enum
+        status_str = vehicle.get("status", "offline")
+        try:
+            status = VehicleStatus(status_str)
+        except ValueError:
+            status = VehicleStatus.OFFLINE
+        
         return VehicleResponse(
             vehicle_id=vehicle["vehicle_id"],
             name=vehicle.get("name", ""),
@@ -167,7 +175,7 @@ async def get_vehicle(vehicle_id: str):
             name=vehicle.get("name"),
             description=vehicle.get("description"),
             vehicle_type=vehicle.get("vehicle_type"),
-            status=vehicle.get("status", "active"),
+            status=status,
             metadata=vehicle.get("metadata"),
             created_at=vehicle.get("created_at", datetime.utcnow()),
             updated_at=vehicle.get("updated_at", datetime.utcnow())
@@ -196,6 +204,13 @@ async def get_all_vehicles():
                     "timestamp": datetime.utcnow()
                 }
             
+            # Convert status string to enum
+            status_str = vehicle.get("status", "offline")
+            try:
+                status = VehicleStatus(status_str)
+            except ValueError:
+                status = VehicleStatus.OFFLINE
+            
             vehicle_items.append(
                 VehicleListItem(
                     vehicle_id=vehicle["vehicle_id"],
@@ -206,7 +221,7 @@ async def get_all_vehicles():
                     ),
                     name=vehicle.get("name"),
                     vehicle_type=vehicle.get("vehicle_type"),
-                    status=vehicle.get("status", "active"),
+                    status=status,
                     updated_at=vehicle.get("updated_at", datetime.utcnow())
                 )
             )
@@ -253,21 +268,22 @@ async def update_vehicle_status(
         if not vehicle:
             raise HTTPException(status_code=404, detail="Vehicle not found")
         
-        # Update status
-        success = await database_service.update_vehicle_status(vehicle_id, status_request.status)
+        # Update status (convert enum to string for database)
+        status_value = status_request.status.value
+        success = await database_service.update_vehicle_status(vehicle_id, status_value)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update vehicle status")
         
         # Publish MQTT event
         mqtt_service.publish_map_event("vehicle.status.updated", {
             "vehicle_id": vehicle_id,
-            "status": status_request.status
+            "status": status_value
         })
         
         return {
             "success": True,
             "vehicle_id": vehicle_id,
-            "status": status_request.status,
+            "status": status_value,
             "message": "Vehicle status updated successfully"
         }
     except HTTPException:
