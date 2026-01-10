@@ -3,6 +3,7 @@
 /example
 /output
 /backend/uploads
+/backend/storage
 
 # CMake build files
 **/build/

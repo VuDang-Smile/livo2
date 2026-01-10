@@ -177,6 +177,146 @@ class MapProcessor:
             logger.error(f"Error extracting floorplan files: {e}")
             return None
     
+    async def extract_zip_to_storage(self, zip_file_path: Path) -> Optional[Dict[str, Any]]:
+        """
+        Extract ZIP file directly to storage without processing metadata.
+        Used for auto-extraction on startup or manual extraction.
+        """
+        try:
+            if not zip_file_path.exists():
+                logger.error(f"ZIP file not found: {zip_file_path}")
+                return None
+            
+            if not zip_file_path.name.endswith('.zip'):
+                logger.error(f"File is not a ZIP: {zip_file_path.name}")
+                return None
+            
+            logger.info("=" * 60)
+            logger.info(f"📦 EXTRACTING ZIP TO STORAGE: {zip_file_path.name}")
+            logger.info("=" * 60)
+            
+            # Extract to temp first
+            temp_dir = self._extract_zip(zip_file_path)
+            if not temp_dir:
+                logger.error("Failed to extract ZIP to temp directory")
+                return None
+            
+            # Extract to storage
+            try:
+                storage_paths = self._extract_to_storage(temp_dir)
+                if not storage_paths:
+                    logger.error("No files extracted to storage")
+                    if temp_dir:
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                    return None
+                
+                logger.info(f"✅ Successfully extracted {len(storage_paths)} items to storage")
+                return {"storage_paths": storage_paths}
+            finally:
+                # Cleanup temp
+                if temp_dir:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    
+        except Exception as e:
+            logger.error(f"Error extracting ZIP to storage: {e}", exc_info=True)
+            return None
+    
+    def _extract_to_storage(self, temp_dir: Path) -> Dict[str, Any]:
+        """Extract folders/files from temp to storage directory."""
+        storage_paths = {}
+        
+        try:
+            logger.info(f"Starting extraction to storage from temp directory: {temp_dir}")
+            
+            # Cleanup old storage first
+            logger.info("Cleaning up old storage...")
+            storage_service.cleanup_storage()
+            
+            # Ensure storage directories exist
+            storage_service.ensure_storage_directories()
+            
+            # Copy merged_map
+            merged_map_source = None
+            # Try root first
+            if (temp_dir / "merged_map").exists():
+                merged_map_source = temp_dir / "merged_map"
+                logger.info(f"Found merged_map at root: {merged_map_source}")
+            # Try Log/merged_map
+            elif (temp_dir / "Log" / "merged_map").exists():
+                merged_map_source = temp_dir / "Log" / "merged_map"
+                logger.info(f"Found merged_map in Log/: {merged_map_source}")
+            
+            if merged_map_source:
+                merged_map_dest = storage_service.get_storage_path("merged_map")
+                if merged_map_dest.exists():
+                    shutil.rmtree(merged_map_dest)
+                shutil.copytree(merged_map_source, merged_map_dest, dirs_exist_ok=True)
+                storage_paths['merged_map'] = str(merged_map_dest)
+                logger.info(f"✅ Copied merged_map to storage: {merged_map_dest}")
+            else:
+                logger.warning("⚠️ merged_map not found in ZIP")
+            
+            # Copy fastloc_map
+            fastloc_map_source = None
+            if (temp_dir / "fastloc_map").exists():
+                fastloc_map_source = temp_dir / "fastloc_map"
+                logger.info(f"Found fastloc_map at root: {fastloc_map_source}")
+            elif (temp_dir / "Log" / "fastloc_map").exists():
+                fastloc_map_source = temp_dir / "Log" / "fastloc_map"
+                logger.info(f"Found fastloc_map in Log/: {fastloc_map_source}")
+            
+            if fastloc_map_source:
+                fastloc_map_dest = storage_service.get_storage_path("fastloc_map")
+                if fastloc_map_dest.exists():
+                    shutil.rmtree(fastloc_map_dest)
+                shutil.copytree(fastloc_map_source, fastloc_map_dest, dirs_exist_ok=True)
+                storage_paths['fastloc_map'] = str(fastloc_map_dest)
+                logger.info(f"✅ Copied fastloc_map to storage: {fastloc_map_dest}")
+            else:
+                logger.warning("⚠️ fastloc_map not found in ZIP")
+            
+            # Copy floorplan_2d
+            floorplan_source = None
+            if (temp_dir / "floorplan_2d").exists():
+                floorplan_source = temp_dir / "floorplan_2d"
+                logger.info(f"Found floorplan_2d at root: {floorplan_source}")
+            elif (temp_dir / "Log" / "floorplan_2d").exists():
+                floorplan_source = temp_dir / "Log" / "floorplan_2d"
+                logger.info(f"Found floorplan_2d in Log/: {floorplan_source}")
+            
+            if floorplan_source:
+                floorplan_dest = storage_service.get_storage_path("floorplan_2d")
+                if floorplan_dest.exists():
+                    shutil.rmtree(floorplan_dest)
+                shutil.copytree(floorplan_source, floorplan_dest, dirs_exist_ok=True)
+                storage_paths['floorplan_2d'] = str(floorplan_dest)
+                logger.info(f"✅ Copied floorplan_2d to storage: {floorplan_dest}")
+            else:
+                logger.warning("⚠️ floorplan_2d not found in ZIP")
+            
+            # Copy QR_detect.json
+            qr_source = None
+            if (temp_dir / "QR_detect.json").exists():
+                qr_source = temp_dir / "QR_detect.json"
+                logger.info(f"Found QR_detect.json at root: {qr_source}")
+            elif (temp_dir / "Log" / "QR_detect.json").exists():
+                qr_source = temp_dir / "Log" / "QR_detect.json"
+                logger.info(f"Found QR_detect.json in Log/: {qr_source}")
+            
+            if qr_source:
+                qr_dest = storage_service.get_storage_path("QR_detect.json")
+                shutil.copy2(qr_source, qr_dest)
+                storage_paths['qr_detect'] = str(qr_dest)
+                logger.info(f"✅ Copied QR_detect.json to storage: {qr_dest}")
+            else:
+                logger.warning("⚠️ QR_detect.json not found in ZIP")
+            
+            logger.info(f"✅ Extraction to storage completed. Extracted {len(storage_paths)} items: {list(storage_paths.keys())}")
+            return storage_paths
+        except Exception as e:
+            logger.error(f"❌ Error extracting to storage: {e}", exc_info=True)
+            raise  # Re-raise to fail the upload if extraction fails
+    
     async def process_upload(
         self,
         file_content: bytes,
@@ -220,6 +360,9 @@ class MapProcessor:
                         old_metadata_path = storage_service.get_processed_path(old_metadata["metadata_path"])
                         storage_service.delete_file(old_metadata_path)
                     
+                    # Cleanup old storage (will be done in _extract_to_storage, but doing it here too for safety)
+                    storage_service.cleanup_storage()
+                    
                     # Delete old map from database
                     await database_service.delete_current_map()
             
@@ -232,49 +375,92 @@ class MapProcessor:
             upload_id = str(uuid4())
             temp_dir = None
             map_result = None
+            storage_paths = {}
             
             if filename.endswith('.zip'):
-                logger.info(f"Extracting ZIP file: {filename}")
+                logger.info("=" * 60)
+                logger.info(f"📦 PROCESSING ZIP FILE: {filename}")
+                logger.info("=" * 60)
                 
                 # Extract ZIP to temp directory
+                logger.info("Step 1/2: Extracting ZIP to temporary directory...")
                 temp_dir = self._extract_zip(file_path)
                 if not temp_dir:
-                    logger.error("Failed to extract ZIP file")
+                    logger.error("❌ FAILED: Could not extract ZIP file to temp directory")
                     storage_service.delete_file(file_path)
                     return None
+                logger.info(f"✅ ZIP extracted to temp: {temp_dir}")
                 
-                # Find PCD file
-                pcd_path = self._find_pcd_in_extracted(temp_dir)
-                if not pcd_path:
-                    logger.error("Failed to find PCD file in ZIP")
+                # Extract to storage directory (REQUIRED - must succeed)
+                logger.info("=" * 60)
+                logger.info("Step 2/2: EXTRACTING FILES TO STORAGE (REQUIRED)")
+                logger.info("=" * 60)
+                try:
+                    storage_paths = self._extract_to_storage(temp_dir)
+                    if not storage_paths:
+                        logger.error("❌ FAILED: No files extracted to storage!")
+                        logger.error("   This means the ZIP file structure is invalid or extraction failed.")
+                        storage_service.delete_file(file_path)
+                        if temp_dir:
+                            shutil.rmtree(temp_dir, ignore_errors=True)
+                        return None
+                    
+                    # Verify at least one folder was extracted
+                    required_folders = ["merged_map", "fastloc_map", "floorplan_2d"]
+                    extracted_folders = [k for k in storage_paths.keys() if k in required_folders]
+                    if not extracted_folders:
+                        logger.error("❌ FAILED: No required folders (merged_map, fastloc_map, floorplan_2d) were extracted!")
+                        storage_service.delete_file(file_path)
+                        if temp_dir:
+                            shutil.rmtree(temp_dir, ignore_errors=True)
+                        return None
+                    
+                    logger.info("=" * 60)
+                    logger.info(f"✅ SUCCESS: Extracted {len(storage_paths)} items to storage")
+                    logger.info(f"   Folders: {', '.join(extracted_folders)}")
+                    logger.info("=" * 60)
+                except Exception as e:
+                    logger.error("=" * 60)
+                    logger.error(f"❌ FAILED: Exception during storage extraction: {e}")
+                    logger.error("=" * 60)
+                    import traceback
+                    logger.error(traceback.format_exc())
                     storage_service.delete_file(file_path)
                     if temp_dir:
                         shutil.rmtree(temp_dir, ignore_errors=True)
                     return None
                 
-                # Find floorplan files
+                # Get PCD file from storage (no longer copy to processed)
+                pcd_path = None
+                merged_pcd = storage_service.get_storage_path("merged_map", "merged_all.pcd")
+                if merged_pcd.exists():
+                    pcd_path = merged_pcd
+                    logger.info(f"Using merged_all.pcd from storage: {pcd_path}")
+                else:
+                    logger.warning("No merged_all.pcd found in storage")
+                
+                # Find floorplan files (for backward compatibility with old format)
                 logger.info("Looking for floorplan files in ZIP...")
                 floorplan_info = self._find_floorplan_in_zip(temp_dir)
                 
-                if not floorplan_info:
-                    logger.error("ZIP does not contain floorplan files. Please regenerate ZIP with floorplan.")
-                    storage_service.delete_file(file_path)
-                    storage_service.delete_file(pcd_path)
-                    if temp_dir:
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                    return None
-                
-                # Extract floorplan files to processed directory
-                logger.info("Extracting floorplan files...")
-                map_result = self._extract_floorplan_files(floorplan_info, upload_id)
-                
-                if not map_result:
-                    logger.error("Failed to extract floorplan files")
-                    storage_service.delete_file(file_path)
-                    storage_service.delete_file(pcd_path)
-                    if temp_dir:
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                    return None
+                # Extract floorplan files to processed directory (for backward compatibility)
+                map_result = None
+                if floorplan_info:
+                    logger.info("Extracting floorplan files to processed directory...")
+                    map_result = self._extract_floorplan_files(floorplan_info, upload_id)
+                else:
+                    # Try to find floorplan_2d in storage
+                    floorplan_2d_dir = storage_service.get_storage_path("floorplan_2d")
+                    if floorplan_2d_dir.exists():
+                        logger.info("Found floorplan_2d in storage, using it...")
+                        # Create minimal map_result for backward compatibility
+                        map_result = {
+                            'image_paths': {},
+                            'metadata_path': None,
+                            'map_metadata': {}
+                        }
+                    else:
+                        logger.warning("No floorplan files found in ZIP or storage")
                 
                 # Cleanup temp directory
                 if temp_dir:
@@ -296,11 +482,30 @@ class MapProcessor:
             # Prepare metadata
             metadata = {
                 "size": file_size,
-                "pcd_path": str(pcd_path),
-                "image_paths": map_result["image_paths"],
-                "metadata_path": map_result["metadata_path"],
-                "map_metadata": map_result["map_metadata"]  # Full metadata JSON
+                "pcd_path": str(pcd_path) if pcd_path else None,
+                "image_paths": map_result["image_paths"] if map_result else {},
+                "metadata_path": map_result["metadata_path"] if map_result else None,
+                "map_metadata": map_result["map_metadata"] if map_result else {},  # Full metadata JSON
+                "storage_paths": storage_paths if filename.endswith('.zip') else {}  # Storage paths for new structure
             }
+            
+            # Log storage extraction summary
+            if filename.endswith('.zip') and storage_paths:
+                logger.info("=" * 60)
+                logger.info("📦 STORAGE EXTRACTION SUMMARY")
+                logger.info("=" * 60)
+                for key, path in storage_paths.items():
+                    storage_path_obj = Path(path)
+                    if storage_path_obj.exists():
+                        if storage_path_obj.is_file():
+                            size = storage_path_obj.stat().st_size
+                            logger.info(f"✅ {key}: {path} ({size / 1024 / 1024:.2f} MB)")
+                        else:
+                            file_count = len(list(storage_path_obj.rglob("*")))
+                            logger.info(f"✅ {key}: {path} ({file_count} files)")
+                    else:
+                        logger.warning(f"⚠️ {key}: {path} (NOT FOUND)")
+                logger.info("=" * 60)
             
             # Create map document
             map_data = {
