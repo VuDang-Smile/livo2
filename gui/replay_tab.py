@@ -189,7 +189,7 @@ class ReplayTab(ttk.Frame):
     
     def browse_bag_folder(self):
         """Browse cho bag folder"""
-        initial_dir = "/media/an/ANHSON"
+        initial_dir = "/media/an/01DC80D9DB838380"
         if not Path(initial_dir).exists():
             initial_dir = str(self.workspace_path)
             

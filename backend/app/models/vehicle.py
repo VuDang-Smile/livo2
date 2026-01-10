@@ -2,6 +2,13 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, List
+from enum import Enum
+
+
+class VehicleStatus(str, Enum):
+    """Vehicle status enum."""
+    ONLINE = "online"
+    OFFLINE = "offline"
 
 
 class Position(BaseModel):
@@ -47,7 +54,7 @@ class VehicleResponse(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     vehicle_type: Optional[str] = None
-    status: Optional[str] = "active"
+    status: VehicleStatus = VehicleStatus.OFFLINE
     metadata: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
@@ -59,7 +66,7 @@ class VehicleListItem(BaseModel):
     latest_pose: Pose
     name: Optional[str] = None
     vehicle_type: Optional[str] = None
-    status: Optional[str] = "active"
+    status: VehicleStatus = VehicleStatus.OFFLINE
     updated_at: datetime
 
 
@@ -75,7 +82,7 @@ class VehicleRegisterRequest(BaseModel):
     name: Optional[str] = Field(None, description="Vehicle name")
     description: Optional[str] = Field(None, description="Vehicle description")
     vehicle_type: Optional[str] = Field(None, description="Vehicle type (e.g., robot, drone, car)")
-    status: Optional[str] = Field("active", description="Vehicle status (e.g., active, inactive, maintenance)")
+    status: Optional[VehicleStatus] = Field(VehicleStatus.OFFLINE, description="Vehicle status: online or offline")
     metadata: Optional[dict] = Field(None, description="Additional metadata")
 
 
@@ -89,5 +96,5 @@ class VehicleRegisterResponse(BaseModel):
 
 class VehicleStatusUpdateRequest(BaseModel):
     """Request model for updating vehicle status."""
-    status: str = Field(..., description="Vehicle status (e.g., active, inactive, maintenance)")
+    status: VehicleStatus = Field(..., description="Vehicle status: online or offline")
 
