@@ -12,6 +12,7 @@ import shutil
 import json
 import signal
 from pathlib import Path
+from datetime import timezone
 
 # Thêm project root vào sys.path để có thể import các module
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,6 +21,76 @@ if project_root not in sys.path:
 
 from languages.translate_engine import translator
 from contants.API import VEHICLE_ENDPOINT, API_TIMEOUT, HEADERS, BACKEND_HOST
+
+# ROS2 imports (optional)
+try:
+    import rclpy
+    from rclpy.node import Node
+    from rclpy.executors import SingleThreadedExecutor
+    from nav_msgs.msg import Odometry
+    ROS2_AVAILABLE = True
+except ImportError:
+    ROS2_AVAILABLE = False
+    print("Warning: ROS2 not available. Pose publishing will be disabled.")
+
+
+class PoseSubscriber(Node):
+    """ROS2 Node để subscribe pose và gửi lên backend"""
+    
+    def __init__(self, callback_func, node_name='pose_publisher_subscriber'):
+        super().__init__(node_name)
+        self.callback_func = callback_func
+        
+        # Subscribe vào topic /localization (Odometry từ transform_fusion)
+        # Fallback về /Odometry nếu không có
+        self.subscription = self.create_subscription(
+            Odometry,
+            '/localization',
+            self.pose_callback,
+            10
+        )
+        
+        # Thử subscribe thêm /Odometry làm backup
+        self.subscription_odom = self.create_subscription(
+            Odometry,
+            '/Odometry',
+            self.pose_callback,
+            10
+        )
+        
+        self.get_logger().info('Pose subscriber đã subscribe vào /localization và /Odometry')
+    
+    def pose_callback(self, msg):
+        """Callback khi nhận được pose mới"""
+        try:
+            # Extract position và orientation
+            position = {
+                "x": float(msg.pose.pose.position.x),
+                "y": float(msg.pose.pose.position.y),
+                "z": float(msg.pose.pose.position.z)
+            }
+            
+            orientation = {
+                "x": float(msg.pose.pose.orientation.x),
+                "y": float(msg.pose.pose.orientation.y),
+                "z": float(msg.pose.pose.orientation.z),
+                "w": float(msg.pose.pose.orientation.w)
+            }
+            
+            # Convert timestamp từ ROS2 time sang datetime object (UTC)
+            ros_time = msg.header.stamp
+            # ROS2 time có sec và nanosec
+            timestamp_sec = ros_time.sec + ros_time.nanosec / 1e9
+            timestamp_dt = datetime.fromtimestamp(timestamp_sec, tz=timezone.utc)
+            # Backend expect ISO format string
+            timestamp_iso = timestamp_dt.isoformat()
+            
+            # Gọi callback để gửi lên backend
+            if self.callback_func:
+                self.callback_func(position, orientation, timestamp_iso)
+                
+        except Exception as e:
+            self.get_logger().error(f'Lỗi xử lý pose: {e}')
 
 
 class WorkerInterface:
@@ -40,6 +111,15 @@ class WorkerInterface:
         # Localization process
         self.loc_process = None
         self.is_localization_running = False
+        
+        # Pose publishing
+        self.pose_subscriber = None
+        self.pose_executor = None
+        self.pose_thread = None
+        self.vehicle_id = None
+        self.is_pose_publishing = False
+        self.pose_counter = 0  # Đếm số lần nhận pose
+        self.pose_send_interval = 20  # Gửi lên backend mỗi 20 lần
 
         # --- Main Container ---
         self.main_container = tk.Frame(root)
@@ -59,12 +139,21 @@ class WorkerInterface:
         self.setup_options()
         self.setup_vehicle_info()
         self.setup_map_info()
+        self.setup_pose_display()
 
         # Cài đặt phần Log bên phải
         self.setup_log_area()
         
+        # Cập nhật trạng thái vehicle thành online khi khởi động
+        # Gọi sau khi setup_vehicle_info để có vehicle_id
+        if self.vehicle_id:
+            self.update_vehicle_status("online", refresh_info=True)
+        
         # Tự động tải map và QR khi khởi động
         self.download_map_and_qr()
+        
+        # Thêm handler khi đóng cửa sổ
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def setup_movement_control(self):
         frame = tk.LabelFrame(self.sidebar, text="Movement Control", padx=10, pady=10)
@@ -231,34 +320,232 @@ class WorkerInterface:
             self.log(f"⚠️ Lỗi khi kill node: {e}")
         
         self.is_localization_running = False
-
+    
+    def start_pose_publishing(self):
+        """Khởi động ROS2 subscriber để publish pose lên backend"""
+        if not ROS2_AVAILABLE:
+            self.log("⚠️ ROS2 không khả dụng, không thể publish pose")
+            return
+        
+        if self.is_pose_publishing:
+            return
+        
+        if not self.vehicle_id:
+            self.log("⚠️ Vehicle ID chưa có, không thể publish pose")
+            return
+        
+        try:
+            # Khởi tạo ROS2 nếu chưa có
+            if not rclpy.ok():
+                rclpy.init()
+            
+            # Tạo subscriber node
+            self.pose_subscriber = PoseSubscriber(
+                callback_func=self.pose_callback_handler,
+                node_name='pose_publisher_node'
+            )
+            
+            # Tạo executor
+            self.pose_executor = SingleThreadedExecutor()
+            self.pose_executor.add_node(self.pose_subscriber)
+            
+            # Chạy executor trong background thread
+            self.is_pose_publishing = True
+            self.pose_thread = threading.Thread(
+                target=self._run_pose_executor,
+                daemon=True
+            )
+            self.pose_thread.start()
+            
+            self.log("✅ Đã khởi động pose publisher")
+            
+        except Exception as e:
+            self.log(f"❌ Lỗi khi khởi động pose publisher: {e}")
+            self.is_pose_publishing = False
+    
+    def _run_pose_executor(self):
+        """Chạy ROS2 executor trong background thread"""
+        try:
+            while self.is_pose_publishing and rclpy.ok():
+                self.pose_executor.spin_once(timeout_sec=0.1)
+        except Exception as e:
+            self.log(f"❌ Lỗi trong pose executor: {e}")
+        finally:
+            if self.pose_subscriber:
+                self.pose_subscriber.destroy_node()
+            if not rclpy.ok():
+                rclpy.shutdown()
+    
+    def stop_pose_publishing(self):
+        """Dừng pose publishing"""
+        if not self.is_pose_publishing:
+            return
+        
+        self.is_pose_publishing = False
+        
+        if self.pose_executor:
+            try:
+                if self.pose_subscriber:
+                    self.pose_executor.remove_node(self.pose_subscriber)
+                    self.pose_subscriber.destroy_node()
+            except:
+                pass
+        
+        if self.pose_thread and self.pose_thread.is_alive():
+            # Đợi thread kết thúc
+            self.pose_thread.join(timeout=2)
+        
+        self.log("🛑 Đã dừng pose publisher")
+    
+    def pose_callback_handler(self, position, orientation, timestamp):
+        """Xử lý pose callback và gửi lên backend"""
+        if not self.vehicle_id:
+            return
+        
+        # Cập nhật UI (chạy trong main thread) - luôn cập nhật để hiển thị real-time
+        self.root.after(0, lambda: self.update_pose_display(position, orientation, timestamp))
+        
+        # Đếm số lần nhận pose
+        self.pose_counter += 1
+        
+        # Chỉ gửi lên backend mỗi 20 lần
+        if self.pose_counter >= self.pose_send_interval:
+            self.pose_counter = 0  # Reset counter
+            # Gửi lên backend trong background thread để không block
+            threading.Thread(
+                target=self.send_pose_to_backend,
+                args=(position, orientation, timestamp),
+                daemon=True
+            ).start()
+    
+    def send_pose_to_backend(self, position, orientation, timestamp):
+        """Gửi pose lên backend API"""
+        try:
+            url = f"{self.backend_base_url}/api/v1/vehicles/{self.vehicle_id}/pose"
+            
+            payload = {
+                "position": position,
+                "orientation": orientation,
+                "timestamp": timestamp
+            }
+            
+            # API sử dụng POST method, không phải PUT
+            response = requests.post(
+                url,
+                json=payload,
+                headers=HEADERS,
+                timeout=API_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                # Không log mỗi lần thành công để tránh spam
+                pass
+            elif response.status_code == 405:
+                # Method not allowed - log chi tiết để debug
+                if not hasattr(self, '_last_pose_error_code') or self._last_pose_error_code != response.status_code:
+                    try:
+                        error_detail = response.text[:200]
+                    except:
+                        error_detail = "Không thể đọc error detail"
+                    self.log(f"⚠️ Lỗi HTTP 405 (Method Not Allowed)")
+                    self.log(f"   URL: {url}")
+                    self.log(f"   Method: POST")
+                    self.log(f"   Response: {error_detail}")
+                    self._last_pose_error_code = response.status_code
+            else:
+                # Chỉ log lỗi một lần để tránh spam
+                if not hasattr(self, '_last_pose_error_code') or self._last_pose_error_code != response.status_code:
+                    try:
+                        error_detail = response.text[:200]
+                    except:
+                        error_detail = ""
+                    self.log(f"⚠️ Lỗi khi gửi pose: HTTP {response.status_code} - {error_detail}")
+                    self._last_pose_error_code = response.status_code
+                
+        except requests.exceptions.RequestException as e:
+            # Chỉ log lỗi, không spam log
+            if not hasattr(self, '_last_pose_error') or (datetime.now() - self._last_pose_error).seconds > 10:
+                self.log(f"⚠️ Lỗi kết nối khi gửi pose: {e}")
+                self._last_pose_error = datetime.now()
+        except Exception as e:
+            if not hasattr(self, '_last_pose_error') or (datetime.now() - self._last_pose_error).seconds > 10:
+                self.log(f"⚠️ Lỗi khi gửi pose: {e}")
+                self._last_pose_error = datetime.now()
+    
     def setup_vehicle_info(self):
         device_id = self.get_mac_address()
-        vehicle_id = device_id.lower().replace(':', '')[:12]
+        self.vehicle_id = device_id.lower().replace(':', '')[:12]
+        vehicle_id = self.vehicle_id
         print("Vehicle ID:", vehicle_id)
 
-        frame = tk.LabelFrame(self.sidebar, text="Vehicle Information", padx=10, pady=10)
-        frame.pack(fill=tk.X, pady=5, padx=5)
-        url = f'{VEHICLE_ENDPOINT}/{vehicle_id}'
-        headers = {
-            'accept': 'application/json'
-        }
-        response = requests.get(url, headers=headers, timeout=5)
-        data = response.json()
-
-        info = [
-            ("Device ID:", device_id),
-            ("Vehicle ID:", vehicle_id),
-            ("name:", data.get("name", "N/A")),
-            ("type:", data.get("type", "N/A")),
-            ("status:", data.get("status", "N/A")),
-        ]
-
-        for label, value in info:
-            row = tk.Frame(frame)
+        self.vehicle_info_frame = tk.LabelFrame(self.sidebar, text="Vehicle Information", padx=10, pady=10)
+        self.vehicle_info_frame.pack(fill=tk.X, pady=5, padx=5)
+        
+        # Lưu reference đến các label để có thể cập nhật lại
+        self.vehicle_info_labels = {}
+        
+        # Tạo các label ban đầu
+        info_keys = ["device_id", "vehicle_id", "name", "type", "status"]
+        for key in info_keys:
+            row = tk.Frame(self.vehicle_info_frame)
             row.pack(fill=tk.X, pady=2)
-            tk.Label(row, text=label, fg="grey", font=("Arial", 8)).pack(side=tk.LEFT)
-            tk.Label(row, text=value, font=("Arial", 9, "bold")).pack(side=tk.RIGHT)
+            label_text = key.replace("_", " ").title() + ":"
+            tk.Label(row, text=label_text, fg="grey", font=("Arial", 8)).pack(side=tk.LEFT)
+            value_label = tk.Label(row, text="--", font=("Arial", 9, "bold"))
+            value_label.pack(side=tk.RIGHT)
+            self.vehicle_info_labels[key] = value_label
+        
+        # Load thông tin ban đầu
+        self.refresh_vehicle_info()
+    
+    def refresh_vehicle_info(self):
+        """Refresh thông tin vehicle từ API và cập nhật UI"""
+        if not self.vehicle_id:
+            return
+        
+        try:
+            url = f'{self.backend_base_url}/api/v1/vehicles/{self.vehicle_id}'
+            headers = {
+                'accept': 'application/json'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+            else:
+                # Nếu không tìm thấy, sử dụng giá trị mặc định
+                data = {}
+        except Exception as e:
+            self.log(f"⚠️ Lỗi khi lấy thông tin vehicle: {e}")
+            data = {}
+
+        # Xử lý name: nếu null hoặc None thì hiển thị "not given"
+        name = data.get("name")
+        if name is None or name == "":
+            name = "not given"
+        
+        # Xử lý type: nếu null hoặc None thì hiển thị "not given"
+        vehicle_type = data.get("vehicle_type") or data.get("type")
+        if vehicle_type is None or vehicle_type == "":
+            vehicle_type = "not given"
+        
+        # Xử lý status: lấy từ API, nếu không có thì dùng "N/A"
+        status = data.get("status") or "N/A"
+        
+        # Lấy device_id
+        device_id = self.get_mac_address()
+
+        # Cập nhật các label
+        if "device_id" in self.vehicle_info_labels:
+            self.vehicle_info_labels["device_id"].config(text=device_id)
+        if "vehicle_id" in self.vehicle_info_labels:
+            self.vehicle_info_labels["vehicle_id"].config(text=self.vehicle_id)
+        if "name" in self.vehicle_info_labels:
+            self.vehicle_info_labels["name"].config(text=name)
+        if "type" in self.vehicle_info_labels:
+            self.vehicle_info_labels["type"].config(text=vehicle_type)
+        if "status" in self.vehicle_info_labels:
+            self.vehicle_info_labels["status"].config(text=status)
     
     def setup_map_info(self):
         """Thiết lập phần hiển thị thông tin bản đồ"""
@@ -337,6 +624,108 @@ class WorkerInterface:
             
             self.map_info_label.config(text=f"✅ Bản đồ hợp lệ: {num_tiles} tiles", foreground="green")
             self.map_detail_label.config(text=detail_text)
+    
+    def setup_pose_display(self):
+        """Thiết lập phần hiển thị pose và orientation"""
+        frame = tk.LabelFrame(self.sidebar, text="Pose & Orientation", padx=10, pady=10)
+        frame.pack(fill=tk.X, pady=5, padx=5)
+        
+        # Position section
+        pos_label = tk.Label(frame, text="Position:", font=("Arial", 8, "bold"), fg="gray")
+        pos_label.pack(anchor=tk.W, pady=(0, 2))
+        
+        self.pos_x_label = tk.Label(frame, text="X: --", font=("Arial", 8), fg="black")
+        self.pos_x_label.pack(anchor=tk.W, padx=10)
+        
+        self.pos_y_label = tk.Label(frame, text="Y: --", font=("Arial", 8), fg="black")
+        self.pos_y_label.pack(anchor=tk.W, padx=10)
+        
+        self.pos_z_label = tk.Label(frame, text="Z: --", font=("Arial", 8), fg="black")
+        self.pos_z_label.pack(anchor=tk.W, padx=10)
+        
+        # Separator
+        separator = tk.Frame(frame, height=1, bg="gray")
+        separator.pack(fill=tk.X, pady=5)
+        
+        # Orientation section
+        orient_label = tk.Label(frame, text="Orientation:", font=("Arial", 8, "bold"), fg="gray")
+        orient_label.pack(anchor=tk.W, pady=(5, 2))
+        
+        self.orient_x_label = tk.Label(frame, text="X: --", font=("Arial", 8), fg="black")
+        self.orient_x_label.pack(anchor=tk.W, padx=10)
+        
+        self.orient_y_label = tk.Label(frame, text="Y: --", font=("Arial", 8), fg="black")
+        self.orient_y_label.pack(anchor=tk.W, padx=10)
+        
+        self.orient_z_label = tk.Label(frame, text="Z: --", font=("Arial", 8), fg="black")
+        self.orient_z_label.pack(anchor=tk.W, padx=10)
+        
+        self.orient_w_label = tk.Label(frame, text="W: --", font=("Arial", 8), fg="black")
+        self.orient_w_label.pack(anchor=tk.W, padx=10)
+        
+        # Status
+        self.pose_status_label = tk.Label(
+            frame,
+            text="Chưa có dữ liệu",
+            font=("Arial", 7),
+            fg="gray"
+        )
+        self.pose_status_label.pack(anchor=tk.W, pady=(5, 0))
+    
+    def update_pose_display(self, position, orientation, timestamp):
+        """Cập nhật hiển thị pose và orientation"""
+        try:
+            # Cập nhật position
+            self.pos_x_label.config(text=f"X: {position['x']:.3f}")
+            self.pos_y_label.config(text=f"Y: {position['y']:.3f}")
+            self.pos_z_label.config(text=f"Z: {position['z']:.3f}")
+            
+            # Cập nhật orientation
+            self.orient_x_label.config(text=f"X: {orientation['x']:.4f}")
+            self.orient_y_label.config(text=f"Y: {orientation['y']:.4f}")
+            self.orient_z_label.config(text=f"Z: {orientation['z']:.4f}")
+            self.orient_w_label.config(text=f"W: {orientation['w']:.4f}")
+            
+            # Cập nhật timestamp (chỉ hiển thị thời gian, không hiển thị ngày)
+            try:
+                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                time_str = dt.strftime("%H:%M:%S.%f")[:-3]  # Hiển thị đến millisecond
+                self.pose_status_label.config(
+                    text=f"Cập nhật: {time_str}",
+                    fg="green"
+                )
+            except:
+                self.pose_status_label.config(
+                    text="Đang cập nhật...",
+                    fg="green"
+                )
+        except Exception as e:
+            self.pose_status_label.config(
+                text=f"Lỗi: {e}",
+                fg="red"
+            )
+    
+    def reset_pose_display(self):
+        """Reset pose và orientation về giá trị mặc định"""
+        try:
+            # Reset position
+            self.pos_x_label.config(text="X: --")
+            self.pos_y_label.config(text="Y: --")
+            self.pos_z_label.config(text="Z: --")
+            
+            # Reset orientation
+            self.orient_x_label.config(text="X: --")
+            self.orient_y_label.config(text="Y: --")
+            self.orient_z_label.config(text="Z: --")
+            self.orient_w_label.config(text="W: --")
+            
+            # Reset status
+            self.pose_status_label.config(
+                text="Chưa có dữ liệu",
+                fg="gray"
+            )
+        except Exception as e:
+            pass  # Ignore errors khi reset
 
     def setup_log_area(self):
         # Tiêu đề của Log
@@ -429,6 +818,9 @@ class WorkerInterface:
             self.is_running = True
             threading.Thread(target=self.monitor_localization_process, daemon=True).start()
             
+            # Bắt đầu publish pose lên backend
+            self.start_pose_publishing()
+            
             # Cập nhật UI
             self.btn_start.config(text="■ STOP MOVEMENT", state=tk.NORMAL)
             self.btn_stop.config(state=tk.NORMAL)
@@ -442,11 +834,17 @@ class WorkerInterface:
 
     def stop_system(self):
         """Dừng localization node"""
+        self.stop_pose_publishing()
         self.stop_localization()
         self.is_running = False
         self.btn_start.config(text="▶ START MOVING", state=tk.NORMAL)
         self.btn_stop.config(state=tk.DISABLED)
         self.status_text.config(text="System: Đã dừng")
+        # Reset pose display
+        self.reset_pose_display()
+        # Cập nhật trạng thái vehicle thành offline
+        if self.vehicle_id:
+            self.update_vehicle_status("offline")
         self.log("COMMAND: Stop localization requested.")
     
     def download_map_and_qr(self):
@@ -567,6 +965,50 @@ class WorkerInterface:
         # Enable nút START MOVING
         self.btn_start.config(state=tk.NORMAL)
         self.status_text.config(text="System: Sẵn sàng khởi động")
+    
+    def update_vehicle_status(self, status, refresh_info=False):
+        """Cập nhật trạng thái vehicle lên backend"""
+        if not self.vehicle_id:
+            return
+        
+        try:
+            url = f"{self.backend_base_url}/api/v1/vehicles/{self.vehicle_id}/status"
+            payload = {
+                "status": status
+            }
+            
+            response = requests.patch(
+                url,
+                json=payload,
+                headers=HEADERS,
+                timeout=API_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                self.log(f"✅ Đã cập nhật trạng thái vehicle: {status}")
+                # Chỉ refresh vehicle info khi status là "online" và refresh_info=True
+                if status == "online" and refresh_info:
+                    self.root.after(0, self.refresh_vehicle_info)
+            else:
+                self.log(f"⚠️ Không thể cập nhật trạng thái vehicle: HTTP {response.status_code}")
+                
+        except requests.exceptions.RequestException as e:
+            self.log(f"⚠️ Lỗi kết nối khi cập nhật trạng thái: {e}")
+        except Exception as e:
+            self.log(f"⚠️ Lỗi khi cập nhật trạng thái: {e}")
+    
+    def on_closing(self):
+        """Xử lý khi đóng cửa sổ"""
+        # Cập nhật trạng thái vehicle thành offline
+        if self.vehicle_id:
+            self.update_vehicle_status("offline")
+        
+        # Dừng tất cả các process đang chạy
+        if self.is_running:
+            self.stop_system()
+        
+        # Đóng cửa sổ
+        self.root.destroy()
 
 if __name__ == "__main__":
     root = tk.Tk()
