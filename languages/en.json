@@ -33,7 +33,8 @@
         "status_mapping_running": "Status: 📡 Mapping node running",
         "ready_to_upload": "Ready to upload",
         "uploading": "Uploading: {val}%",
-        "upload_done": "100% - Done"
+        "upload_done": "100% - Done",
+        "qr_codes_detected": "QR Codes Detected"
     },
     "message": {
         "select_output_dir": "Please select an output directory for recordings.",
@@ -62,7 +63,8 @@
         "launch_rviz2": "Launch RViz2",
         "start_mapping": "🚀 START MAPPING",
         "stop_process": "■ STOP",
-        "upload_to_server": "☁ UPLOAD TO SERVER"
+        "upload_to_server": "☁ UPLOAD TO SERVER",
+        "clear_qr_codes": "Clear QR Codes"
     },
     "status": {
         "ready": "Ready",
@@ -110,8 +112,9 @@
         "step_hba": "Step 2/6: Running HBA Optimize...",
         "step_sc": "Step 3/6: Running ScanContext Tiling...",
         "step_floorplan": "Step 4/6: Generating floorplan...",
-        "step_zip": "Step 5/6: Compressing files (Zip)...",
-        "step_upload": "Step 6/6: Uploading to backend...",
+        "step_save_qr": "Step 5/7: Saving QR codes...",
+        "step_zip": "Step 6/7: Compressing files (Zip)...",
+        "step_upload": "Step 7/7: Uploading to backend...",
         "pipeline_stopped_merge": "❌ Pipeline stopped at Merge PCD step.",
         "pipeline_stopped_hba": "❌ Pipeline stopped at HBA step.",
         "pipeline_stopped_sc": "❌ Pipeline stopped at ScanContext step.",
@@ -197,7 +200,24 @@
         "floorplan_missing_files": "❌ Missing floorplan files: {files}",
         "floorplan_import_error": "❌ Failed to import pcd_to_floorplan: {error}",
         "floorplan_check_path": "   Check path: {path}",
-        "floorplan_generation_error": "❌ Error generating floorplan: {error}"
+        "floorplan_generation_error": "❌ Error generating floorplan: {error}",
+        "qr_code_detected": "✅ QR Code detected: {code}",
+        "qr_codes_cleared": "✅ QR codes list cleared",
+        "qr_codes_saved": "✅ QR codes saved to: {path}",
+        "no_qr_codes_to_save": "⚠️ No QR codes to save",
+        "error_saving_qr": "❌ Error saving QR codes: {error}",
+        "qr_scanner_not_available": "⚠️ QR scanner is not available. Please install pyzbar and geometry_utils.",
+        "error_scanning_qr": "❌ Error scanning QR from image: {error}",
+        "ros2_not_available": "⚠️ ROS2 not available. QR scanning from bag disabled.",
+        "starting_qr_subscriber": "🔍 Starting QR code scanning subscriber...",
+        "qr_subscriber_started": "✅ QR scanning subscriber started",
+        "error_starting_qr_subscriber": "❌ Error starting QR subscriber: {error}",
+        "error_qr_ros_spin": "⚠️ Error in QR ROS spin: {error}",
+        "error_qr_image_callback": "⚠️ Error in QR image callback: {error}",
+        "qr_code_updated": "🔄 QR Code updated: {code}",
+        "error_reading_qr_json": "⚠️ Error reading QR_detect.json: {error}",
+        "qr_detect_json_saved": "💾 QR_detect.json saved: {count} QR codes",
+        "error_saving_qr_detect_json": "❌ Error saving QR_detect.json: {error}"
     },
     "dialog": {
         "choose_bag_folder": "Choose Bag Folder",

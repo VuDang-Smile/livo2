@@ -9,8 +9,34 @@ import os
 import threading
 import signal
 import zipfile
+import json
+import numpy as np
+import cv2
+from concurrent.futures import ThreadPoolExecutor
+import contextlib
+import io
+import warnings
 sys.path.insert(0, str(Path(__file__).parent.parent / "languages"))
 from translate_engine import Translator
+
+# Try to import pyzbar for QR code scanning
+try:
+    from pyzbar import pyzbar
+    PYZBAR_AVAILABLE = True
+except ImportError:
+    PYZBAR_AVAILABLE = False
+    print("Warning: pyzbar not available. QR code scanning will be disabled.")
+
+# Import geometry utils for equirectangular to perspective conversion
+try:
+    from geometry_utils import (
+        get_camera_matrix, get_extrinsic_matrix, 
+        camera_to_world, cartesian_to_spherical, spherical2equirect
+    )
+    GEOMETRY_UTILS_AVAILABLE = True
+except ImportError:
+    GEOMETRY_UTILS_AVAILABLE = False
+    print("Warning: geometry_utils not available. QR code scanning will be disabled.")
 
 # Try to import requests for backend upload
 try:
@@ -18,6 +44,257 @@ try:
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
+
+# Try to import ROS2 for image subscription during bag playback
+try:
+    import rclpy
+    from rclpy.node import Node
+    from rclpy.executors import SingleThreadedExecutor
+    from sensor_msgs.msg import Image
+    from nav_msgs.msg import Odometry
+    from cv_bridge import CvBridge
+    ROS2_AVAILABLE = True
+except ImportError:
+    ROS2_AVAILABLE = False
+    print("Warning: ROS2 not available. QR code scanning from bag will be disabled.")
+
+class QRScanner:
+    """Class để quét QR code từ ảnh equirectangular"""
+    
+    def __init__(self, perspec_size=600, max_workers=4):
+        self.perspec_size = perspec_size
+        self.max_workers = max_workers
+        self._remap_cache = {}
+        
+        if not PYZBAR_AVAILABLE or not GEOMETRY_UTILS_AVAILABLE:
+            self.enabled = False
+        else:
+            self.enabled = True
+    
+    def Equirec2Perspec(self, img: np.ndarray,
+                     FOV: float,
+                     THETA: float,
+                     PHI: float,
+                     height: int,
+                     width: int) -> np.ndarray:
+        """
+        Convert equirectangular image to perspective view with caching for speed.
+        """
+        key = (THETA, PHI, FOV, height, width)
+        if key in self._remap_cache:
+            XY = self._remap_cache[key]
+        else:
+            # Convert angles to radians
+            FOV_rad = np.deg2rad(FOV)
+            THETA_rad = np.deg2rad(THETA)
+            PHI_rad = np.deg2rad(PHI)
+
+            img_height, img_width = img.shape[:2]
+            K = get_camera_matrix(FOV_rad, width, height)
+            R = get_extrinsic_matrix(THETA_rad, PHI_rad)
+
+            # Image grid
+            x, y = np.meshgrid(np.arange(width), np.arange(height))
+            z = np.ones_like(x)
+            xyz = np.stack([x, y, z], axis=-1)
+
+            world_coords = camera_to_world(xyz, K, R)
+            sp_coords = cartesian_to_spherical(world_coords)
+            XY = spherical2equirect(sp_coords, img_width, img_height)
+
+            self._remap_cache[key] = XY  # cache for speed
+
+        persp = cv2.remap(img, XY[..., 0], XY[..., 1], cv2.INTER_CUBIC, borderMode=cv2.BORDER_WRAP)
+        return persp
+
+    def scan_qr_codes(self, frame):
+        """Quét QR code từ ảnh equirectangular - Logic từ nhánh khanhbv/feature/merge_code_scan_qr"""
+        if not self.enabled:
+            return []
+        
+        try:
+            # --- Vòng 1: 6 view, zoom cao để quét QR gần ---
+            views_round1 = [
+                (0, 0),      # front
+                (180, 0),    # back
+                (90, 0),     # right
+                (-90, 0),    # left
+                (0, 90),     # up
+                (0, -90),    # down
+            ]
+            zoom_round1 = [90, 70, 50]
+
+            # --- Vòng 2: 12 view, zoom thấp để quét QR xa ---
+            views_round2 = [
+                (0, 0), (180, 0), (90, 0), (-90, 0),
+                (0, 90), (0, -90),
+                (45, 0), (-45, 0), (0, 45), (0, -45),
+                (135, 0), (-135, 0)
+            ]
+            zoom_round2 = [30, 15, 7, 5]
+
+            rounds = [
+                (views_round1, zoom_round1),
+                (views_round2, zoom_round2)
+            ]
+
+            all_results = []
+            debug_view = None
+
+            for views, zoom_levels in rounds:
+                for fov in zoom_levels:
+                    if all_results:  # dừng nếu đã quét QR
+                        break
+
+                    def process_view(args):
+                        theta, phi = args
+                        persp = self.Equirec2Perspec(frame, fov, theta, phi,
+                                                    self.perspec_size, self.perspec_size)
+                        gray = cv2.cvtColor(persp, cv2.COLOR_BGR2GRAY)
+                        # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+                        # gray = clahe.apply(gray)
+                        # gray = cv2.GaussianBlur(gray, (3,3), 0)
+                        
+                        # Suppress zbar warnings và chỉ lấy QR code
+                        # Redirect stderr để suppress zbar warnings
+                        stderr_buffer = io.StringIO()
+                        with contextlib.redirect_stderr(stderr_buffer):
+                            try:
+                                decoded_objects = pyzbar.decode(gray)
+                            except Exception:
+                                decoded_objects = []
+                        
+                        # Chỉ lấy QR code, bỏ qua DataBar và các loại barcode khác
+                        qr_codes = [obj for obj in decoded_objects if obj.type == 'QRCODE']
+                        
+                        results = []
+                        debug_img = None
+
+                        for qr in qr_codes:
+                            results.append({
+                                "data": qr.data.decode('utf-8'),
+                                "rect": {
+                                    "left": qr.rect.left,
+                                    "top": qr.rect.top,
+                                    "width": qr.rect.width,
+                                    "height": qr.rect.height
+                                },
+                                "view": (theta, phi),
+                                "zoom": fov
+                            })
+
+                            # Tạo debug image nếu cần (giống logic từ nhánh)
+                            x, y, w, h = qr.rect.left, qr.rect.top, qr.rect.width, qr.rect.height
+                            debug_img = persp.copy()
+                            cv2.rectangle(debug_img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                            cv2.putText(debug_img, qr.data.decode('utf-8'), (x, y - 10),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+                        return results, debug_img  # trả về debug image
+
+                    with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                        futures = executor.map(process_view, views)
+                        for r, dbg in futures:
+                            all_results.extend(r)
+                            if dbg is not None and debug_view is None:
+                                debug_view = dbg  # main thread quyết định hiển thị
+
+                    # Hiển thị GUI chỉ trong main thread (có thể bật nếu cần debug)
+                    # if debug_view is not None:
+                    #      cv2.imshow("QR Debug View", debug_view)
+                    #      cv2.waitKey(1)
+
+                if all_results:  # dừng vòng nếu đã quét QR
+                    break
+
+            return all_results
+
+        except Exception as e:
+            print(f'Error scanning QR codes: {str(e)}')
+            import traceback
+            traceback.print_exc()
+            return []
+
+
+class QRImageSubscriberNode(Node):
+    """ROS2 Node để subscribe image topic và odometry cho QR scanning"""
+    
+    def __init__(self, image_topic, odom_topic, image_callback, odom_callback, node_name='qr_image_subscriber'):
+        super().__init__(node_name)
+        
+        # Đảm bảo topic name có / prefix
+        if not image_topic.startswith('/'):
+            image_topic = '/' + image_topic
+        if not odom_topic.startswith('/'):
+            odom_topic = '/' + odom_topic
+        
+        # Subscribe image topic
+        self.image_subscription = self.create_subscription(
+            Image,
+            image_topic,
+            self.image_callback,
+            10
+        )
+        
+        # Subscribe odometry topic
+        self.odom_subscription = self.create_subscription(
+            Odometry,
+            odom_topic,
+            self.odom_callback,
+            10
+        )
+        
+        self.bridge = CvBridge()
+        self.image_callback_func = image_callback
+        self.odom_callback_func = odom_callback
+        self.image_topic_name = image_topic
+        self.odom_topic_name = odom_topic
+        self.get_logger().info(f'QR Scanner subscribed to image topic {image_topic} and odom topic {odom_topic}')
+    
+    def image_callback(self, msg):
+        """Callback when receiving image"""
+        try:
+            # Handle JPEG compressed images
+            if msg.encoding.lower() in ['jpeg', 'jpg']:
+                # Decode JPEG data directly from compressed format
+                jpeg_data = np.frombuffer(msg.data, dtype=np.uint8)
+                cv_image = cv2.imdecode(jpeg_data, cv2.IMREAD_COLOR)
+                if cv_image is None:
+                    raise ValueError("Failed to decode JPEG image")
+                # Convert BGR to RGB
+                cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+            else:
+                # Use cv_bridge for standard encodings
+                cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
+            
+            # Gọi callback với ảnh đã decode
+            if self.image_callback_func:
+                self.image_callback_func(cv_image)
+            
+        except Exception as e:
+            error_msg = f'Error processing image from {self.image_topic_name}: {e}'
+            self.get_logger().error(error_msg)
+            print(f'[QRImageSubscriberNode] ERROR: {error_msg}')
+    
+    def odom_callback(self, msg):
+        """Callback when receiving odometry"""
+        try:
+            # Extract position [x, y, z]
+            position = [
+                msg.pose.pose.position.x,
+                msg.pose.pose.position.y,
+                msg.pose.pose.position.z
+            ]
+            
+            # Gọi callback với position
+            if self.odom_callback_func:
+                self.odom_callback_func(position)
+            
+        except Exception as e:
+            error_msg = f'Error processing odometry from {self.odom_topic_name}: {e}'
+            self.get_logger().error(error_msg)
+            print(f'[QRImageSubscriberNode] ERROR: {error_msg}')
+
 
 class BagMappingInterface:
     def __init__(self, root):
@@ -37,6 +314,25 @@ class BagMappingInterface:
         self.bag_rate = 0.5
         # Backend URL for map upload
         self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.tm")
+        
+        # QR code scanning
+        self.qr_scanner = QRScanner() if (PYZBAR_AVAILABLE and GEOMETRY_UTILS_AVAILABLE) else None
+        self.detected_qr_codes = []  # List of detected QR codes
+        self.qr_codes_lock = threading.Lock()  # Lock for thread-safe access
+        
+        # ROS2 subscriber for QR scanning during bag playback
+        self.qr_scan_enabled = True  # Enable QR scanning during bag playback
+        self.qr_scan_frame_interval = 10  # Scan QR every N frames (default: every 10 frames)
+        self.qr_image_subscriber = None
+        self.qr_ros_node = None
+        self.qr_ros_executor = None
+        self.qr_ros_thread = None
+        self.qr_frame_count = 0
+        
+        # Current device position for QR detection
+        self.current_position = None  # [x, y, z]
+        self.position_lock = threading.Lock()  # Lock for thread-safe access
+        self.qr_detect_json_path = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "QR_detect.json"
         
         self.translator = Translator('en')
         self.current_lang = 'en'
@@ -164,6 +460,10 @@ class BagMappingInterface:
         
         if hasattr(self, 'clear_log_btn'):
             self.clear_log_btn.config(text=self.translator.get('button.clear_log', 'Clear Log'))
+        
+        if hasattr(self, 'qr_listbox'):
+            # QR codes section sẽ được cập nhật tự động khi có QR codes mới
+            pass
 
     def setup_control_card(self):
         self.control_card = tk.LabelFrame(self.workspace, text=self.translator.get('label.execution_control', 'Execution Control'), padx=15, pady=10)
@@ -239,6 +539,37 @@ class BagMappingInterface:
         # Separator để tách biệt progress và log
         separator2 = ttk.Separator(self.preview_card, orient=tk.HORIZONTAL)
         separator2.pack(fill=tk.X, pady=(0, 10))
+        
+        # 2.5. QR Code section - đặt giữa progress và log
+        qr_frame = tk.Frame(self.preview_card)
+        qr_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        qr_label = tk.Label(qr_frame, text=self.translator.get('label.qr_codes_detected', 'QR Codes Detected'), font=("Arial", 9, "bold"))
+        qr_label.pack(anchor=tk.W, pady=(0, 5))
+        
+        qr_controls = tk.Frame(qr_frame)
+        qr_controls.pack(fill=tk.X)
+        
+        # QR codes listbox với scrollbar
+        qr_list_frame = tk.Frame(qr_controls)
+        qr_list_frame.pack(fill=tk.BOTH, expand=True)
+        
+        scrollbar_qr = tk.Scrollbar(qr_list_frame)
+        scrollbar_qr.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.qr_listbox = tk.Listbox(qr_list_frame, height=4, yscrollcommand=scrollbar_qr.set, 
+                                     font=("Consolas", 9))
+        self.qr_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar_qr.config(command=self.qr_listbox.yview)
+        
+        # Button to clear QR codes
+        btn_clear_qr = tk.Button(qr_controls, text=self.translator.get('button.clear_qr_codes', 'Clear QR Codes'), 
+                                 font=("Arial", 7), command=self.clear_qr_codes)
+        btn_clear_qr.pack(side=tk.RIGHT, padx=5)
+        
+        # Separator để tách biệt QR codes và log
+        separator3 = ttk.Separator(self.preview_card, orient=tk.HORIZONTAL)
+        separator3.pack(fill=tk.X, pady=(0, 10))
         
         # 3. Log section - đặt cuối cùng
         log_container = tk.Frame(self.preview_card)
@@ -545,6 +876,10 @@ class BagMappingInterface:
             
             threading.Thread(target=self.monitor_bag_process, daemon=True).start()
             
+            # Start QR code scanning subscriber if enabled
+            if self.qr_scan_enabled and self.qr_scanner:
+                self.start_qr_scanning_subscriber()
+            
         except Exception as e:
             error_msg = f"Cannot start bag playback: {e}"
             self.add_log(f"❌ {error_msg}")
@@ -618,8 +953,18 @@ class BagMappingInterface:
             
             self.root.after(0, lambda: self.progress.config(value=80))
             
-            # 5. Zip files
-            self.add_log(self.translator.get('log.step_zip', 'Step 5/6: Compressing files (Zip)...'))
+            # 5. Save QR codes to JSON
+            self.add_log(self.translator.get('log.step_save_qr', 'Step 5/7: Saving QR codes...'))
+            qr_json_path = self._save_qr_codes_to_json()
+            if qr_json_path:
+                self.add_log(self.translator.get('log.qr_codes_saved', '✅ QR codes saved to: {path}').replace('{path}', str(qr_json_path)))
+            else:
+                self.add_log(self.translator.get('log.no_qr_codes_to_save', '⚠️ No QR codes to save'))
+            
+            self.root.after(0, lambda: self.progress.config(value=75))
+            
+            # 6. Zip files
+            self.add_log(self.translator.get('log.step_zip', 'Step 6/7: Compressing files (Zip)...'))
             zip_path = self._zip_map_folders()
             if not zip_path:
                 self.add_log(self.translator.get('log.pipeline_stopped_zip', '❌ Pipeline stopped at Zip step.'))
@@ -628,8 +973,8 @@ class BagMappingInterface:
             
             self.root.after(0, lambda: self.progress.config(value=90))
             
-            # 6. Upload to backend
-            self.add_log(self.translator.get('log.step_upload', 'Step 6/6: Uploading to backend...'))
+            # 7. Upload to backend
+            self.add_log(self.translator.get('log.step_upload', 'Step 7/7: Uploading to backend...'))
             upload_success, upload_info = self._upload_map_to_backend(zip_path)
             if upload_success:
                 if upload_info:
@@ -706,6 +1051,127 @@ class BagMappingInterface:
         self.log_panel.config(state=tk.NORMAL)
         self.log_panel.delete('1.0', tk.END)
         self.log_panel.config(state=tk.DISABLED)
+    
+    def clear_qr_codes(self):
+        """Xóa danh sách QR codes đã quét"""
+        with self.qr_codes_lock:
+            self.detected_qr_codes = []
+        self.qr_listbox.delete(0, tk.END)
+        self.add_log(self.translator.get('log.qr_codes_cleared', '✅ QR codes list cleared'))
+    
+    def scan_qr_from_image(self, cv_image):
+        """Quét QR code từ một ảnh cụ thể (equirectangular format)"""
+        if not self.qr_scanner:
+            self.add_log(self.translator.get('log.qr_scanner_not_available', '⚠️ QR scanner is not available. Please install pyzbar and geometry_utils.'))
+            return []
+        
+        try:
+            # Chuyển đổi BGR sang RGB nếu cần
+            if len(cv_image.shape) == 3 and cv_image.shape[2] == 3:
+                # Kiểm tra xem có phải BGR không (OpenCV default)
+                # Nếu là RGB thì giữ nguyên, nếu là BGR thì convert
+                rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+            else:
+                rgb_image = cv_image
+            
+            # Quét QR code
+            qr_codes = self.qr_scanner.scan_qr_codes(rgb_image)
+            
+            # Xử lý kết quả
+            if qr_codes:
+                self.on_qr_codes_received(qr_codes)
+            
+            return qr_codes
+        except Exception as e:
+            self.add_log(self.translator.get('log.error_scanning_qr', '❌ Error scanning QR from image: {error}').replace('{error}', str(e)))
+            return []
+    
+    def on_odometry_received(self, position):
+        """Callback khi nhận được odometry - cập nhật vị trí hiện tại"""
+        with self.position_lock:
+            self.current_position = position
+    
+    def on_qr_codes_received(self, qr_codes):
+        """Callback để nhận QR codes (có thể từ theta tab hoặc từ scan_qr_from_image)"""
+        if not qr_codes:
+            return
+        
+        # Lấy vị trí hiện tại
+        with self.position_lock:
+            current_pos = self.current_position.copy() if self.current_position else None
+        
+        with self.qr_codes_lock:
+            for qr in qr_codes:
+                qr_data = qr.get("data", "")
+                
+                # Kiểm tra xem QR code đã tồn tại chưa
+                existing_qr = None
+                for existing in self.detected_qr_codes:
+                    if existing.get("data") == qr_data:
+                        existing_qr = existing
+                        break
+                
+                if existing_qr:
+                    # QR đã tồn tại - replace với vị trí mới
+                    existing_qr["position"] = current_pos if current_pos else [0.0, 0.0, 0.0]
+                    existing_qr["timestamp"] = datetime.now().isoformat()
+                    pos_str = f"[{current_pos[0]:.3f}, {current_pos[1]:.3f}, {current_pos[2]:.3f}]" if current_pos else "unknown"
+                    self.add_log(self.translator.get('log.qr_code_updated', '🔄 QR Code updated: {code}').replace('{code}', qr_data) + f" at position {pos_str}")
+                else:
+                    # QR mới - thêm vào danh sách
+                    qr["position"] = current_pos if current_pos else [0.0, 0.0, 0.0]
+                    qr["timestamp"] = datetime.now().isoformat()
+                    self.detected_qr_codes.append(qr)
+                    # Cập nhật UI trong main thread
+                    self.root.after(0, lambda q=qr_data: self._add_qr_to_listbox(q))
+                    pos_str = f"[{current_pos[0]:.3f}, {current_pos[1]:.3f}, {current_pos[2]:.3f}]" if current_pos else "unknown"
+                    self.add_log(self.translator.get('log.qr_code_detected', '✅ QR Code detected: {code}').replace('{code}', qr_data) + f" at position {pos_str}")
+        
+        # Lưu vào file QR_detect.json ngay lập tức
+        self.save_qr_detect_json()
+    
+    def save_qr_detect_json(self):
+        """Lưu QR codes và tọa độ vào file QR_detect.json"""
+        try:
+            # Tạo thư mục Log nếu chưa có
+            log_dir = self.qr_detect_json_path.parent
+            log_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Đọc file hiện tại nếu có
+            qr_dict = {}
+            if self.qr_detect_json_path.exists():
+                try:
+                    with open(self.qr_detect_json_path, 'r', encoding='utf-8') as f:
+                        qr_dict = json.load(f)
+                except Exception as e:
+                    self.add_log(self.translator.get('log.error_reading_qr_json', '⚠️ Error reading QR_detect.json: {error}').replace('{error}', str(e)))
+                    qr_dict = {}
+            
+            # Cập nhật với QR codes hiện tại
+            with self.qr_codes_lock:
+                for qr in self.detected_qr_codes:
+                    qr_data = qr.get("data", "")
+                    position = qr.get("position", [0.0, 0.0, 0.0])
+                    
+                    # Format: key là nội dung QR, value là tọa độ [x, y, z]
+                    qr_dict[qr_data] = position
+            
+            # Lưu vào file
+            with open(self.qr_detect_json_path, 'w', encoding='utf-8') as f:
+                json.dump(qr_dict, f, indent=2, ensure_ascii=False)
+            
+            self.add_log(self.translator.get('log.qr_detect_json_saved', '💾 QR_detect.json saved: {count} QR codes').replace('{count}', str(len(qr_dict))))
+            
+        except Exception as e:
+            self.add_log(self.translator.get('log.error_saving_qr_detect_json', '❌ Error saving QR_detect.json: {error}').replace('{error}', str(e)))
+            import traceback
+            traceback.print_exc()
+    
+    def _add_qr_to_listbox(self, qr_data):
+        """Thêm QR code vào listbox"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.qr_listbox.insert(tk.END, f"[{timestamp}] {qr_data}")
+        self.qr_listbox.see(tk.END)
 
     def add_log(self, message):
         self.log_panel.config(state=tk.NORMAL)
@@ -774,7 +1240,107 @@ class BagMappingInterface:
             if self.is_bag_playing:
                 self.add_log(self.translator.get('log.error_reading_bag', '⚠️ Error reading bag output: {error}').replace('{error}', str(e)))
     
+    def start_qr_scanning_subscriber(self):
+        """Bắt đầu ROS2 subscriber để quét QR code từ ảnh trong bag"""
+        if not ROS2_AVAILABLE:
+            self.add_log(self.translator.get('log.ros2_not_available', '⚠️ ROS2 not available. QR scanning from bag disabled.'))
+            return
+        
+        if not self.qr_scanner:
+            self.add_log(self.translator.get('log.qr_scanner_not_available', '⚠️ QR scanner is not available. Please install pyzbar and geometry_utils.'))
+            return
+        
+        try:
+            if not rclpy.ok():
+                rclpy.init()
+            
+            self.add_log(self.translator.get('log.starting_qr_subscriber', '🔍 Starting QR code scanning subscriber...'))
+            
+            # Tạo ROS2 node cho QR scanning (subscribe cả image và odometry)
+            self.qr_ros_node = QRImageSubscriberNode(
+                '/image_raw',
+                '/aft_mapped_to_init',
+                self.on_qr_image_received,
+                self.on_odometry_received,
+                'bag_qr_scanner'
+            )
+            
+            # Tạo executor
+            self.qr_ros_executor = SingleThreadedExecutor()
+            self.qr_ros_executor.add_node(self.qr_ros_node)
+            
+            # Khởi động ROS thread
+            self.qr_ros_thread = threading.Thread(target=self.qr_ros_spin, daemon=True)
+            self.qr_ros_thread.start()
+            
+            self.qr_frame_count = 0
+            self.add_log(self.translator.get('log.qr_subscriber_started', '✅ QR scanning subscriber started'))
+            
+        except Exception as e:
+            self.add_log(self.translator.get('log.error_starting_qr_subscriber', '❌ Error starting QR subscriber: {error}').replace('{error}', str(e)))
+            import traceback
+            traceback.print_exc()
+    
+    def qr_ros_spin(self):
+        """Spin ROS node trong thread riêng cho QR scanning"""
+        try:
+            while rclpy.ok() and self.is_bag_playing:
+                if self.qr_ros_executor is not None:
+                    self.qr_ros_executor.spin_once(timeout_sec=0.1)
+                else:
+                    break
+        except Exception as e:
+            if self.is_bag_playing:
+                self.add_log(self.translator.get('log.error_qr_ros_spin', '⚠️ Error in QR ROS spin: {error}').replace('{error}', str(e)))
+    
+    def on_qr_image_received(self, cv_image):
+        """Callback khi nhận được ảnh từ bag để quét QR"""
+        try:
+            self.qr_frame_count += 1
+            
+            # Chỉ quét QR mỗi N frame để tối ưu performance
+            if self.qr_frame_count % self.qr_scan_frame_interval == 0:
+                # Quét QR code trong background thread để không block ROS callback
+                threading.Thread(
+                    target=self._scan_qr_in_background,
+                    args=(cv_image.copy(),),
+                    daemon=True
+                ).start()
+            
+        except Exception as e:
+            self.add_log(self.translator.get('log.error_qr_image_callback', '⚠️ Error in QR image callback: {error}').replace('{error}', str(e)))
+    
+    def _scan_qr_in_background(self, cv_image):
+        """Quét QR code trong background thread"""
+        try:
+            qr_codes = self.scan_qr_from_image(cv_image)
+            # scan_qr_from_image đã tự động gọi on_qr_codes_received nếu tìm thấy QR
+        except Exception as e:
+            # Lỗi đã được log trong scan_qr_from_image
+            pass
+    
+    def stop_qr_scanning_subscriber(self):
+        """Dừng ROS2 subscriber cho QR scanning"""
+        if self.qr_ros_executor:
+            try:
+                self.qr_ros_executor.shutdown()
+            except:
+                pass
+            self.qr_ros_executor = None
+        
+        if self.qr_ros_node:
+            try:
+                self.qr_ros_node.destroy_node()
+            except:
+                pass
+            self.qr_ros_node = None
+        
+        self.qr_ros_thread = None
+        self.qr_frame_count = 0
+    
     def cleanup_processes(self):
+        # Dừng QR scanning subscriber trước
+        self.stop_qr_scanning_subscriber()
         # Dừng bag play trước
         if self.bag_process:
             try:
@@ -1205,8 +1771,54 @@ class BagMappingInterface:
             self.add_log(f"   Details: {traceback.format_exc()}")
             return False
     
+    def _save_qr_codes_to_json(self):
+        """Kiểm tra và đảm bảo QR_detect.json tồn tại"""
+        try:
+            # Kiểm tra file QR_detect.json có tồn tại và có dữ liệu không
+            if self.qr_detect_json_path.exists():
+                try:
+                    with open(self.qr_detect_json_path, 'r', encoding='utf-8') as f:
+                        qr_dict = json.load(f)
+                    
+                    if qr_dict:
+                        self.add_log(f"✅ QR_detect.json exists with {len(qr_dict)} QR codes")
+                        return self.qr_detect_json_path
+                    else:
+                        self.add_log(self.translator.get('log.no_qr_codes_to_save', '⚠️ No QR codes to save'))
+                        return None
+                except Exception as e:
+                    self.add_log(self.translator.get('log.error_reading_qr_json', '⚠️ Error reading QR_detect.json: {error}').replace('{error}', str(e)))
+                    return None
+            else:
+                # Nếu file không tồn tại, thử lấy từ memory và lưu
+                with self.qr_codes_lock:
+                    if not self.detected_qr_codes:
+                        self.add_log(self.translator.get('log.no_qr_codes_to_save', '⚠️ No QR codes to save'))
+                        return None
+                    
+                    # Convert từ memory format sang dict format và lưu
+                    qr_dict = {}
+                    for qr in self.detected_qr_codes:
+                        qr_data = qr.get("data", "")
+                        position = qr.get("position", [0.0, 0.0, 0.0])
+                        qr_dict[qr_data] = position
+                    
+                    # Lưu vào file
+                    log_dir = self.qr_detect_json_path.parent
+                    log_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    with open(self.qr_detect_json_path, 'w', encoding='utf-8') as f:
+                        json.dump(qr_dict, f, indent=2, ensure_ascii=False)
+                    
+                    self.add_log(f"✅ QR_detect.json saved with {len(qr_dict)} QR codes")
+                    return self.qr_detect_json_path
+                    
+        except Exception as e:
+            self.add_log(self.translator.get('log.error_saving_qr', '❌ Error saving QR codes: {error}').replace('{error}', str(e)))
+            return None
+    
     def _zip_map_folders(self):
-        """Zip các folder map: merged_map, hba_map, fastloc_map, floorplan_2d"""
+        """Zip các folder map: merged_map, hba_map, fastloc_map, floorplan_2d và file QR_detect.json"""
         log_root = self.workspace_path / "src" / "FAST-LIVO2" / "Log"
         
         # Các folder cần zip
@@ -1224,7 +1836,11 @@ class BagMappingInterface:
             if folder_path.exists() and any(folder_path.iterdir()):
                 existing_folders.append(folder_name)
         
-        if not existing_folders:
+        # Kiểm tra file QR_detect.json
+        qr_detect_file = log_root / "QR_detect.json"
+        has_qr_file = qr_detect_file.exists() and qr_detect_file.stat().st_size > 0
+        
+        if not existing_folders and not has_qr_file:
             self.add_log(self.translator.get('log.zip_no_folders', '❌ No folders found to zip'))
             return None
         
@@ -1243,10 +1859,14 @@ class BagMappingInterface:
         
         self.add_log("=" * 60)
         self.add_log(self.translator.get('log.zip_creating', '📦 Creating zip file: {filename}').replace('{filename}', zip_path.name))
-        self.add_log(self.translator.get('log.zip_folders', '📁 Folders to zip: {folders}').replace('{folders}', ', '.join(existing_folders)))
+        zip_items = existing_folders.copy()
+        if has_qr_file:
+            zip_items.append("QR_detect.json")
+        self.add_log(self.translator.get('log.zip_folders', '📁 Items to zip: {folders}').replace('{folders}', ', '.join(zip_items)))
         
         try:
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                # Zip các folders
                 for folder_name in existing_folders:
                     folder_path = log_root / folder_name
                     if folder_path.exists():
@@ -1257,6 +1877,11 @@ class BagMappingInterface:
                                 arcname = Path(folder_name) / file_path.relative_to(folder_path)
                                 zipf.write(file_path, arcname)
                                 self.add_log(self.translator.get('log.zip_file_added', '   ✓ Added: {path}').replace('{path}', str(arcname)))
+                
+                # Zip file QR_detect.json nếu có
+                if has_qr_file:
+                    zipf.write(qr_detect_file, "QR_detect.json")
+                    self.add_log(self.translator.get('log.zip_file_added', '   ✓ Added: {path}').replace('{path}', 'QR_detect.json'))
             
             if zip_path.exists():
                 size_mb = zip_path.stat().st_size / (1024 * 1024)

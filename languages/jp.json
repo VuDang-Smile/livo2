@@ -33,7 +33,8 @@
         "status_mapping_running": "ステータス: 📡 マッピングノード実行中",
         "ready_to_upload": "アップロード準備完了",
         "uploading": "アップロード中: {val}%",
-        "upload_done": "100% - 完了"
+        "upload_done": "100% - 完了",
+        "qr_codes_detected": "検出されたQRコード"
     },
     "message": {
         "select_output_dir": "録画の出力ディレクトリを選択してください。",
@@ -62,7 +63,8 @@
         "launch_rviz2": "RViz2 を起動",
         "start_mapping": "🚀 マッピング開始",
         "stop_process": "■ 停止",
-        "upload_to_server": "☁ サーバーにアップロード"
+        "upload_to_server": "☁ サーバーにアップロード",
+        "clear_qr_codes": "QRコードをクリア"
     },
     "status": {
         "ready": "準備完了",
@@ -110,8 +112,9 @@
         "step_hba": "Step 2/6: HBA 最適化を実行しています...",
         "step_sc": "Step 3/6: ScanContext タイリングを実行しています...",
         "step_floorplan": "Step 4/6: フロアプランを生成しています...",
-        "step_zip": "Step 5/6: ファイルを圧縮しています (Zip)...",
-        "step_upload": "Step 6/6: バックエンドにアップロードしています...",
+        "step_save_qr": "Step 5/7: QRコードを保存しています...",
+        "step_zip": "Step 6/7: ファイルを圧縮しています (Zip)...",
+        "step_upload": "Step 7/7: バックエンドにアップロードしています...",
         "pipeline_stopped_merge": "❌ パイプラインが Merge PCD ステップで停止しました。",
         "pipeline_stopped_hba": "❌ パイプラインが HBA ステップで停止しました。",
         "pipeline_stopped_sc": "❌ パイプラインが ScanContext ステップで停止しました。",
@@ -197,7 +200,24 @@
         "floorplan_missing_files": "❌ フロアプランファイルが見つかりません: {files}",
         "floorplan_import_error": "❌ pcd_to_floorplan のインポートに失敗しました: {error}",
         "floorplan_check_path": "   パスを確認: {path}",
-        "floorplan_generation_error": "❌ フロアプラン生成エラー: {error}"
+        "floorplan_generation_error": "❌ フロアプラン生成エラー: {error}",
+        "qr_code_detected": "✅ QRコードを検出: {code}",
+        "qr_codes_cleared": "✅ QRコードリストをクリアしました",
+        "qr_codes_saved": "✅ QRコードを保存しました: {path}",
+        "no_qr_codes_to_save": "⚠️ 保存するQRコードがありません",
+        "error_saving_qr": "❌ QRコードの保存エラー: {error}",
+        "qr_scanner_not_available": "⚠️ QRスキャナーが利用できません。pyzbarとgeometry_utilsをインストールしてください。",
+        "error_scanning_qr": "❌ 画像からのQRスキャンエラー: {error}",
+        "ros2_not_available": "⚠️ ROS2が利用できません。バッグからのQRスキャンが無効です。",
+        "starting_qr_subscriber": "🔍 QRコードスキャンサブスクライバーを開始しています...",
+        "qr_subscriber_started": "✅ QRスキャンサブスクライバーが開始されました",
+        "error_starting_qr_subscriber": "❌ QRサブスクライバーの開始エラー: {error}",
+        "error_qr_ros_spin": "⚠️ QR ROS spinエラー: {error}",
+        "error_qr_image_callback": "⚠️ QR画像コールバックエラー: {error}",
+        "qr_code_updated": "🔄 QRコード更新: {code}",
+        "error_reading_qr_json": "⚠️ QR_detect.json読み込みエラー: {error}",
+        "qr_detect_json_saved": "💾 QR_detect.json保存: {count} QRコード",
+        "error_saving_qr_detect_json": "❌ QR_detect.json保存エラー: {error}"
     },
     "dialog": {
         "choose_bag_folder": "Bag フォルダを選択",
