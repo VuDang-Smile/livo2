@@ -1,9 +1,11 @@
 """Upload API endpoints."""
 import logging
+import zipfile
+import tempfile
+import shutil
 from pathlib import Path
 from uuid import UUID
-from pathlib import Path
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
 from app.models.upload import UploadResponse, CurrentMapResponse, MapMetadata
 from app.services.map_processor import MapProcessor
@@ -56,10 +58,32 @@ async def upload_map(file: UploadFile = File(...)):
                 "reason": "new_map_uploaded"
             })
         
-        # Process upload (save file and metadata)
+        # Process upload (save file, extract to storage, and save metadata)
+        logger.info("=" * 60)
+        logger.info(f"📤 Processing upload: {file.filename} ({file_size / 1024 / 1024:.2f} MB)")
+        logger.info("=" * 60)
         result = await map_processor.process_upload(file_content, file.filename)
         if not result:
-            raise HTTPException(status_code=500, detail="Failed to process upload")
+            logger.error("❌ Upload processing failed - no result returned")
+            raise HTTPException(
+                status_code=500, 
+                detail="Failed to process upload. Check server logs for details."
+            )
+        
+        # Verify extraction was successful
+        logger.info("🔍 Verifying storage extraction...")
+        storage_paths = result.get("metadata", {}).get("storage_paths", {})
+        if storage_paths:
+            logger.info(f"✅ Verified: {len(storage_paths)} items extracted to storage")
+            for key, path in storage_paths.items():
+                logger.info(f"   - {key}: {path}")
+        else:
+            logger.warning("⚠️ No storage_paths in result metadata")
+        
+        logger.info("=" * 60)
+        logger.info(f"✅ Upload and extraction completed successfully!")
+        logger.info(f"   Upload ID: {result['upload_id']}")
+        logger.info("=" * 60)
         
         # Publish MQTT events
         mqtt_service.publish_map_event("map.upload.completed", {
@@ -173,6 +197,9 @@ async def delete_current_map():
             pcd_path = Path(metadata["pcd_path"])
             storage_service.delete_file(pcd_path)
         
+        # Cleanup storage directory
+        storage_service.cleanup_storage()
+        
         # Delete from database
         success = await database_service.delete_current_map()
         if not success:
@@ -186,64 +213,237 @@ async def delete_current_map():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{upload_id}/metadata")
-async def get_map_metadata(upload_id: UUID):
-    """Get map metadata JSON for a specific upload."""
+# ========== Localization APIs ==========
+
+@router.post("/extract")
+async def extract_current_map():
+    """Manually trigger extraction of current map zip file to storage."""
     try:
-        map_doc = await database_service.get_map_by_upload_id(str(upload_id))
-        if not map_doc:
-            raise HTTPException(status_code=404, detail="Map not found")
+        # Get current map
+        map_doc = await database_service.get_current_map()
+        if not map_doc or not map_doc.get("file_path"):
+            raise HTTPException(status_code=404, detail="No map found")
         
-        metadata_path = map_doc.get("metadata", {}).get("metadata_path")
-        if not metadata_path:
-            raise HTTPException(status_code=404, detail="Metadata not found")
+        file_path = Path(map_doc["file_path"])
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Map file not found on disk")
         
-        full_path = storage_service.get_processed_path(metadata_path)
-        if not full_path.exists():
-            raise HTTPException(status_code=404, detail="Metadata file not found")
+        if not file_path.name.endswith('.zip'):
+            raise HTTPException(status_code=400, detail="Current map is not a ZIP file")
         
-        # Read and return JSON
-        import json
-        with open(full_path, 'r') as f:
-            metadata = json.load(f)
+        logger.info("=" * 60)
+        logger.info(f"🔄 MANUAL EXTRACTION TRIGGERED")
+        logger.info(f"   File: {file_path.name}")
+        logger.info("=" * 60)
         
-        return JSONResponse(content=metadata)
+        # Use extract_zip_to_storage to avoid re-processing metadata
+        result = await map_processor.extract_zip_to_storage(file_path)
+        
+        if not result:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to extract map. Check server logs for details."
+            )
+        
+        # Verify extraction
+        storage_paths = result.get("metadata", {}).get("storage_paths", {})
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Map extracted successfully",
+            "upload_id": result["upload_id"],
+            "extracted_items": len(storage_paths),
+            "storage_paths": storage_paths
+        })
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting map metadata: {e}")
+        logger.error(f"Error extracting map: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{upload_id}/images/{view}")
-async def get_map_image(upload_id: UUID, view: str):
-    """Get map image for a specific view (top, side_x, side_y)."""
+@router.get("/storage/status")
+async def get_storage_status():
+    """Check storage status and list extracted files."""
     try:
-        if view not in ['top', 'side_x', 'side_y']:
-            raise HTTPException(status_code=400, detail=f"Invalid view: {view}. Must be 'top', 'side_x', or 'side_y'")
+        status = {
+            "storage_dir": str(storage_service.storage_dir),
+            "exists": storage_service.storage_dir.exists(),
+            "folders": {}
+        }
         
-        map_doc = await database_service.get_map_by_upload_id(str(upload_id))
-        if not map_doc:
-            raise HTTPException(status_code=404, detail="Map not found")
+        if status["exists"]:
+            for folder in ["merged_map", "fastloc_map", "floorplan_2d"]:
+                folder_path = storage_service.get_storage_path(folder)
+                if folder_path.exists():
+                    files = list(folder_path.rglob("*"))
+                    files = [f for f in files if f.is_file()]
+                    status["folders"][folder] = {
+                        "exists": True,
+                        "file_count": len(files),
+                        "files": [f.name for f in files[:10]]  # First 10 files
+                    }
+                else:
+                    status["folders"][folder] = {"exists": False, "file_count": 0}
+            
+            qr_file = storage_service.get_storage_path("QR_detect.json")
+            status["qr_detect"] = {
+                "exists": qr_file.exists(),
+                "path": str(qr_file) if qr_file.exists() else None
+            }
         
-        image_paths = map_doc.get("metadata", {}).get("image_paths", {})
-        if view not in image_paths:
-            raise HTTPException(status_code=404, detail=f"Image for view '{view}' not found")
-        
-        rel_path = image_paths[view]
-        full_path = storage_service.get_processed_path(rel_path)
-        
-        if not full_path.exists():
-            raise HTTPException(status_code=404, detail="Image file not found")
+        return JSONResponse(content=status)
+    except Exception as e:
+        logger.error(f"Error getting storage status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/localization/qr")
+async def download_qr_code():
+    """Download QR_detect.json for localization."""
+    try:
+        qr_path = storage_service.get_storage_path("QR_detect.json")
+        if not qr_path.exists():
+            raise HTTPException(status_code=404, detail="QR_detect.json not found")
         
         return FileResponse(
-            path=str(full_path),
-            media_type="image/png",
-            filename=f"{upload_id}_{view}.png"
+            path=str(qr_path),
+            filename="QR_detect.json",
+            media_type="application/json"
         )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting map image: {e}")
+        logger.error(f"Error downloading QR code: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/localization/fastloc/download")
+async def download_fastloc_folder(background_tasks: BackgroundTasks):
+    """Download entire fastloc_map folder as zip file."""
+    temp_zip_path = None
+    try:
+        fastloc_dir = storage_service.get_storage_path("fastloc_map")
+        if not fastloc_dir.exists():
+            raise HTTPException(status_code=404, detail="fastloc_map folder not found")
+        
+        # Check if folder has any files
+        files = list(fastloc_dir.iterdir())
+        if not files or all(f.is_dir() for f in files):
+            raise HTTPException(status_code=404, detail="fastloc_map folder is empty")
+        
+        # Create temporary zip file
+        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+        temp_zip_path = Path(temp_zip.name)
+        temp_zip.close()
+        
+        # Create zip file
+        with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for file_path in fastloc_dir.rglob('*'):
+                if file_path.is_file():
+                    # Get relative path from fastloc_dir
+                    arcname = file_path.relative_to(fastloc_dir)
+                    zipf.write(file_path, arcname)
+                    logger.debug(f"Added to zip: {arcname}")
+        
+        # Schedule cleanup after response
+        background_tasks.add_task(cleanup_temp_file, temp_zip_path)
+        
+        # Return zip file
+        return FileResponse(
+            path=str(temp_zip_path),
+            filename="fastloc_map.zip",
+            media_type="application/zip"
+        )
+    except HTTPException:
+        if temp_zip_path and temp_zip_path.exists():
+            temp_zip_path.unlink()
+        raise
+    except Exception as e:
+        if temp_zip_path and temp_zip_path.exists():
+            temp_zip_path.unlink()
+        logger.error(f"Error downloading fastloc folder: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========== Web PCD APIs ==========
+
+@router.get("/web/merged")
+async def download_merged_pcd():
+    """Download merged_all.pcd for web viewer."""
+    try:
+        merged_pcd = storage_service.get_storage_path("merged_map", "merged_all.pcd")
+        if not merged_pcd.exists():
+            raise HTTPException(status_code=404, detail="merged_all.pcd not found")
+        
+        return FileResponse(
+            path=str(merged_pcd),
+            filename="merged_all.pcd",
+            media_type="application/octet-stream"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading merged PCD: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========== Floorplan 2D APIs ==========
+
+@router.get("/floorplan/download")
+async def download_floorplan_folder(background_tasks: BackgroundTasks):
+    """Download entire floorplan_2d folder as zip file."""
+    temp_zip_path = None
+    try:
+        floorplan_dir = storage_service.get_storage_path("floorplan_2d")
+        if not floorplan_dir.exists():
+            raise HTTPException(status_code=404, detail="floorplan_2d folder not found")
+        
+        # Check if folder has any files
+        files = list(floorplan_dir.iterdir())
+        if not files or all(f.is_dir() for f in files):
+            raise HTTPException(status_code=404, detail="floorplan_2d folder is empty")
+        
+        # Create temporary zip file
+        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+        temp_zip_path = Path(temp_zip.name)
+        temp_zip.close()
+        
+        # Create zip file
+        with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for file_path in floorplan_dir.rglob('*'):
+                if file_path.is_file():
+                    # Get relative path from floorplan_dir
+                    arcname = file_path.relative_to(floorplan_dir)
+                    zipf.write(file_path, arcname)
+                    logger.debug(f"Added to zip: {arcname}")
+        
+        # Schedule cleanup after response
+        background_tasks.add_task(cleanup_temp_file, temp_zip_path)
+        
+        # Return zip file
+        return FileResponse(
+            path=str(temp_zip_path),
+            filename="floorplan_2d.zip",
+            media_type="application/zip"
+        )
+    except HTTPException:
+        if temp_zip_path and temp_zip_path.exists():
+            temp_zip_path.unlink()
+        raise
+    except Exception as e:
+        if temp_zip_path and temp_zip_path.exists():
+            temp_zip_path.unlink()
+        logger.error(f"Error downloading floorplan folder: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def cleanup_temp_file(file_path: Path):
+    """Cleanup temporary file."""
+    try:
+        if file_path.exists():
+            file_path.unlink()
+            logger.debug(f"Cleaned up temporary file: {file_path}")
+    except Exception as e:
+        logger.warning(f"Error cleaning up temporary file {file_path}: {e}")
 

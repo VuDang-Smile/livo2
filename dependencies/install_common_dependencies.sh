@@ -33,11 +33,13 @@ DEPENDENCIES=(
     "libpcl-dev"
     "libgoogle-glog-dev"
     "python3-pip"
+    "libzbar0"
 )
 
 # Python packages to install via pip
 PYTHON_PACKAGES=(
     "open3d>=0.17.0"
+    "pyzbar"
 )
 
 # Print functions
@@ -207,11 +209,12 @@ install_python_packages() {
         # Method 2: Try importing in Python (more reliable for --user installs)
         if [ "$already_installed" = false ]; then
             local import_name="${package_name}"
-            case "${package_name}" in
-                "opencv-python") import_name="cv2" ;;
-                "Pillow") import_name="PIL" ;;
-                "PyYAML") import_name="yaml" ;;
-            esac
+                case "${package_name}" in
+                    "opencv-python") import_name="cv2" ;;
+                    "Pillow") import_name="PIL" ;;
+                    "PyYAML") import_name="yaml" ;;
+                    "pyzbar") import_name="pyzbar" ;;
+                esac
             
             if python3 -c "import ${import_name}" 2>/dev/null; then
                 already_installed=true
@@ -333,6 +336,7 @@ verify_installation() {
                     "opencv-python") import_name="cv2" ;;
                     "Pillow") import_name="PIL" ;;
                     "PyYAML") import_name="yaml" ;;
+                    "pyzbar") import_name="pyzbar" ;;
                 esac
                 
                 if python3 -c "import ${import_name}" 2>/dev/null; then

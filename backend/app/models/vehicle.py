@@ -44,6 +44,11 @@ class VehicleResponse(BaseModel):
     """Response model for vehicle info."""
     vehicle_id: str
     latest_pose: Pose
+    name: Optional[str] = None
+    description: Optional[str] = None
+    vehicle_type: Optional[str] = None
+    status: Optional[str] = "active"
+    metadata: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
 
@@ -52,6 +57,9 @@ class VehicleListItem(BaseModel):
     """Vehicle item in list response."""
     vehicle_id: str
     latest_pose: Pose
+    name: Optional[str] = None
+    vehicle_type: Optional[str] = None
+    status: Optional[str] = "active"
     updated_at: datetime
 
 
@@ -67,6 +75,7 @@ class VehicleRegisterRequest(BaseModel):
     name: Optional[str] = Field(None, description="Vehicle name")
     description: Optional[str] = Field(None, description="Vehicle description")
     vehicle_type: Optional[str] = Field(None, description="Vehicle type (e.g., robot, drone, car)")
+    status: Optional[str] = Field("active", description="Vehicle status (e.g., active, inactive, maintenance)")
     metadata: Optional[dict] = Field(None, description="Additional metadata")
 
 
@@ -76,4 +85,9 @@ class VehicleRegisterResponse(BaseModel):
     vehicle_id: str
     message: str
     created: bool  # True if newly created, False if already exists
+
+
+class VehicleStatusUpdateRequest(BaseModel):
+    """Request model for updating vehicle status."""
+    status: str = Field(..., description="Vehicle status (e.g., active, inactive, maintenance)")
 

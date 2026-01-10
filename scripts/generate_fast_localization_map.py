@@ -30,43 +30,43 @@ try:
     import open3d as o3d
 except ImportError as e:
     raise SystemExit(
-        "Thiếu thư viện 'open3d'. Hãy cài trước khi chạy:\n"
+        "Missing library 'open3d'. Please install before running:\n"
         "    pip install open3d\n"
     ) from e
 
 
 def load_pcd(path: Path) -> o3d.geometry.PointCloud:
     if not path.exists():
-        raise FileNotFoundError(f"Không tìm thấy file PCD đầu vào: {path}")
-    print(f"[INFO] Đang đọc PCD: {path}")
+        raise FileNotFoundError(f"Input PCD file not found: {path}")
+    print(f"[INFO] Reading PCD: {path}")
     pcd = o3d.io.read_point_cloud(str(path))
     if pcd.is_empty():
-        raise RuntimeError(f"PCD rỗng: {path}")
-    print(f"[INFO]  - Số điểm: {np.asarray(pcd.points).shape[0]}")
+        raise RuntimeError(f"PCD is empty: {path}")
+    print(f"[INFO]  - Number of points: {np.asarray(pcd.points).shape[0]}")
     return pcd
 
 
 def voxel_downsample(pcd: o3d.geometry.PointCloud, voxel_size: float) -> o3d.geometry.PointCloud:
     if voxel_size <= 0:
-        print("[INFO] Bỏ qua downsample (voxel_size <= 0)")
+        print("[INFO] Skipping downsample (voxel_size <= 0)")
         return pcd
-    print(f"[INFO] Đang downsample với voxel_size = {voxel_size} m")
+    print(f"[INFO] Downsampling with voxel_size = {voxel_size} m")
     ds = pcd.voxel_down_sample(voxel_size=voxel_size)
-    print(f"[INFO]  - Sau downsample: {np.asarray(ds.points).shape[0]} điểm")
+    print(f"[INFO]  - After downsample: {np.asarray(ds.points).shape[0]} points")
     return ds
 
 
 def strip_colors(pcd: o3d.geometry.PointCloud) -> o3d.geometry.PointCloud:
     """
-    Loại bỏ màu trong dữ liệu sử dụng: chỉ giữ toạ độ XYZ.
-    Lưu ý: open3d vẫn có thể ghi PCD với field màu trống; FAST-LOCALIZATION
-    thường chỉ quan tâm XYZ/X, Y, Z (và có thể intensity).
+    Remove color data: keep only XYZ coordinates.
+    Note: open3d can still write PCD with empty color fields; FAST-LOCALIZATION
+    typically only cares about XYZ (and possibly intensity).
     """
     if not pcd.has_colors():
-        print("[INFO] PCD không có màu, bỏ qua bước strip_colors")
+        print("[INFO] PCD has no colors, skipping strip_colors step")
         return pcd
 
-    print("[INFO] Đang bỏ màu (RGB) khỏi point cloud, chỉ giữ XYZ")
+    print("[INFO] Removing color (RGB) from point cloud, keeping only XYZ")
     pts = np.asarray(pcd.points)
     out = o3d.geometry.PointCloud()
     out.points = o3d.utility.Vector3dVector(pts)
@@ -89,22 +89,22 @@ def generate_tiles(
     min_points_per_tile: int,
 ) -> Tuple[List[o3d.geometry.PointCloud], List[Dict]]:
     """
-    Cơ chế PHÂN CHIA LƯỚI (Grid Partitioning) - Khớp với @smile-lidar-recorder:
-    Chia bản đồ thành các tile vuông KHÔNG ĐÈ LÊN NHAU.
-    Mỗi tile sẽ được lưu ở hệ toạ độ Local (tâm tại 0,0,0).
-    Vị trí Global của tâm tile sẽ được lưu trong pose.json.
+    Grid Partitioning mechanism - Matches @smile-lidar-recorder:
+    Divide map into square tiles WITHOUT OVERLAPPING.
+    Each tile will be saved in Local coordinate system (center at 0,0,0).
+    Global position of tile center will be saved in pose.json.
     """
     if tile_size <= 0:
-        raise ValueError("tile_size phải > 0")
+        raise ValueError("tile_size must be > 0")
 
     pts = np.asarray(pcd.points)
     x_min, x_max, y_min, y_max = compute_xy_bounds(pcd)
     
-    # Grid steps - không dùng overlap để tránh đè map
+    # Grid steps - don't use overlap to avoid map overlap
     nx = int(math.ceil((x_max - x_min) / tile_size))
     ny = int(math.ceil((y_max - y_min) / tile_size))
 
-    print(f"[INFO] Chia lưới bản đồ: {nx}x{ny} ô, kích thước {tile_size:.2f}m")
+    print(f"[INFO] Dividing map grid: {nx}x{ny} cells, size {tile_size:.2f}m")
 
     tiles: List[o3d.geometry.PointCloud] = []
     metas: List[Dict] = []
@@ -136,8 +136,8 @@ def generate_tiles(
             cy = (y0 + y1) / 2.0
             cz = float(tile_pts[:, 2].mean())
 
-            # CHUYỂN VỀ TỌA ĐỘ LOCAL (Quan trọng!)
-            # Khi load, C++ node sẽ dùng pose.json để dịch ngược lại vị trí này.
+            # CONVERT TO LOCAL COORDINATES (Important!)
+            # When loading, C++ node will use pose.json to translate this position back.
             tile_pts_local = tile_pts - np.array([cx, cy, cz])
 
             tile_pcd = o3d.geometry.PointCloud()
@@ -157,7 +157,7 @@ def generate_tiles(
             metas.append(meta)
             tile_index += 1
 
-    print(f"[INFO] Đã chia thành {len(tiles)} tile không chồng lấn.")
+    print(f"[INFO] Divided into {len(tiles)} non-overlapping tiles.")
     return tiles, metas
 
 
@@ -179,14 +179,14 @@ def save_tiles(
 
     pose_data = []
 
-    print(f"[INFO] Lưu tile vào thư mục: {tiles_dir}")
+    print(f"[INFO] Saving tiles to directory: {tiles_dir}")
     for idx, (tile_pcd, meta) in enumerate(zip(tiles, metas)):
         # FAST_LIO_LOCALIZATION2 dùng số thứ tự làm tên file
         fname = f"{idx}.pcd"
         fpath = tiles_dir / fname
         ok = o3d.io.write_point_cloud(str(fpath), tile_pcd, write_ascii=False, compressed=False)
         if not ok:
-            raise RuntimeError(f"Lỗi khi ghi tile: {fpath}")
+            raise RuntimeError(f"Error writing tile: {fpath}")
 
         meta_with_file = dict(meta)
         meta_with_file["file"] = str(fpath.relative_to(output_dir))
@@ -207,65 +207,65 @@ def save_tiles(
     with pose_path.open("w", encoding="utf-8") as f:
         f.write("\n".join(pose_data) + "\n")
 
-    print(f"[INFO] Đã ghi index tile: {index_path}")
-    print(f"[INFO] Đã ghi pose.json (định dạng FAST_LIO_LOCALIZATION2): {pose_path}")
+    print(f"[INFO] Wrote tile index: {index_path}")
+    print(f"[INFO] Wrote pose.json (FAST_LIO_LOCALIZATION2 format): {pose_path}")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Sinh map tile PCD kiểu ScanContext cho FAST-LOCALIZATION từ 1 file PCD lớn (đã qua HBA)."
+        description="Generate ScanContext-style PCD map tiles for FAST-LOCALIZATION from a large PCD file (after HBA)."
     )
     parser.add_argument(
         "--input_pcd",
         type=str,
         required=True,
-        help="Đường dẫn tới file PCD đầu vào (ví dụ merge_all_hba.pcd).",
+        help="Path to input PCD file (e.g., merge_all_hba.pcd).",
     )
     parser.add_argument(
         "--output_dir",
         type=str,
         required=True,
-        help="Thư mục output chứa tiles + index.json (ví dụ livo2/maps/fast_localization_map).",
+        help="Output directory containing tiles + index.json (e.g., livo2/maps/fast_localization_map).",
     )
     parser.add_argument(
         "--base_name",
         type=str,
         default="fastloc_map",
-        help="Prefix tên file tile (mặc định: fastloc_map).",
+        help="Prefix for tile file names (default: fastloc_map).",
     )
     parser.add_argument(
         "--voxel_size",
         type=float,
         default=0.0,
-        help="Voxel size (m) để downsample trước khi chia tile. 0 = bỏ qua.",
+        help="Voxel size (m) for downsampling before tiling. 0 = skip.",
     )
     parser.add_argument(
         "--tile_size",
         type=float,
         default=80.0,
-        help="Kích thước tile theo XY (m), mặc định 80m.",
+        help="Tile size in XY (m), default 80m.",
     )
     parser.add_argument(
         "--overlap",
         type=float,
         default=5.0,
-        help="Overlap giữa các tile theo XY (m), mặc định 5m.",
+        help="Overlap between tiles in XY (m), default 5m.",
     )
     parser.add_argument(
         "--min_points_per_tile",
         type=int,
         default=2000,
-        help="Số điểm tối thiểu để chấp nhận 1 tile (mặc định 2000).",
+        help="Minimum number of points to accept a tile (default 2000).",
     )
     parser.add_argument(
         "--strip_color",
         action="store_true",
-        help="Nếu đặt cờ này, script sẽ bỏ màu RGB (chỉ giữ XYZ).",
+        help="If set, script will remove RGB color (keep only XYZ).",
     )
     parser.add_argument(
         "--input_pose",
         type=str,
-        help="Đường dẫn tới file scans_pos.json từ FAST-LIVO2 (nếu có) để trích xuất pose cho từng tile.",
+        help="Path to scans_pos.json file from FAST-LIVO2 (if available) to extract pose for each tile.",
     )
     return parser.parse_args()
 
@@ -305,13 +305,13 @@ def main() -> None:
     )
 
     if len(tiles) == 0:
-        print("[ERROR] Không tạo được tile nào, dừng.")
+        print("[ERROR] No tiles created, stopping.")
         return
 
     save_tiles(tiles, metas, output_dir, base_name=args.base_name)
 
-    print("[DONE] Đã sinh map tile cho FAST-LOCALIZATION.")
-    print("       Hãy trỏ cấu hình FAST-LOCALIZATION tới thư mục output_dir ở trên.")
+    print("[DONE] Map tiles generated for FAST-LOCALIZATION.")
+    print("       Please point FAST-LOCALIZATION config to the output_dir above.")
 
 
 if __name__ == "__main__":
