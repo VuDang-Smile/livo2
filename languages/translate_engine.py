@@ -33,4 +33,4 @@ class Translator:
             return default or path
 
 # Khởi tạo mặc định
-translator = Translator('en')
+translator = Translator('jp')

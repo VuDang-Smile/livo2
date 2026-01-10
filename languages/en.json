@@ -2,6 +2,31 @@
     "title": {
         "livox_panel": "Livox control panel"
     },
+    "message": {
+        "select_output_dir": "Please select an output directory for recordings.",
+        "recording_started": "Recording has started.",
+        "recording_stopped": "Recording has stopped.",
+        "cannot_launch_theta_driver": "Cannot launch theta_driver",
+        "cannot_launch_camera_info_publisher": "Cannot launch camera_info_publisher"
+    },
+    "button": {
+        "browse": "Browse",
+        "start": "Start",
+        "stop": "Stop",
+        "clear_log": "Clear Log",
+        "launch_rviz2": "Launch RViz2",
+        "cancel": "Cancel",
+        "regiter": "Register"
+    },
+    "status": {
+        "ready": "Ready",
+        "error": "Error",
+        "active": "Active",
+        "disconnected": "Disconnected",
+        "connected": "Connected",
+        "running": "Running",
+        "not_running": "not running"
+    },
     "label": {
         "livox_driver_2": "LIVOX DRIVER 2",
         "enable_converter": "Enable Converter",
@@ -16,29 +41,12 @@
         "livox_driver": "Livox Driver",
         "slam": "SLAM",
         "livox_360": "Livox 360",
-        "camera": "Camera"
-    },
-    "message": {
-        "select_output_dir": "Please select an output directory for recordings.",
-        "recording_started": "Recording has started.",
-        "recording_stopped": "Recording has stopped.",
-        "cannot_launch_theta_driver": "Cannot launch theta_driver",
-        "cannot_launch_camera_info_publisher": "Cannot launch camera_info_publisher"
-    },
-    "button": {
-        "browse": "Browse",
-        "start": "Start",
-        "stop": "Stop",
-        "clear_log": "Clear Log",
-        "launch_rviz2": "Launch RViz2"
-    },
-    "status": {
-        "ready": "Ready",
-        "error": "Error",
-        "active": "Active",
-        "disconnected": "Disconnected",
-        "connected": "Connected",
-        "running": "Running",
-        "not_running": "not running"
+        "camera": "Camera",
+        "registration_form": "REGISTRATION FORM",
+        "registration_system": "Registration System",
+        "display_name": "Display Name",
+        "vehicle_id_system_id": "Vehicle ID (System ID)",
+        "type_category": "Type Category",
+        "description_and_notes": "Description & Notes"
     }
 }

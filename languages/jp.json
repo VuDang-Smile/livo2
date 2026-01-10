@@ -2,6 +2,31 @@
     "title": {
         "livox_panel": "Livox コントロールパネル"
     },
+    "message": {
+        "select_output_dir": "録画の出力ディレクトリを選択してください。",
+        "recording_started": "録画を開始しました。",
+        "recording_stopped": "録画を停止しました。",
+        "cannot_launch_theta_driver": "theta_driver を起動できません",
+        "cannot_launch_camera_info_publisher": "camera_info_publisher を起動できません"
+    },
+    "button": {
+        "browse": "参照",
+        "start": "開始",
+        "stop": "停止",
+        "clear_log": "ログを消去",
+        "launch_rviz2": "RViz2 を起動",
+        "cancel": "キャンセル",
+        "regiter": "登録"
+    },
+    "status": {
+        "ready": "準備完了",
+        "error": "エラー",
+        "active": "アクティブ",
+        "disconnected": "未接続",
+        "connected": "接続済み",
+        "running": "実行中",
+        "not_running": "実行されていません"
+    },
     "label": {
         "livox_driver_2": "LIVOX DRIVER 2",
         "enable_converter": "コンバーターを有効にする",
@@ -16,30 +41,13 @@
         "livox_driver": "Livox ドライバー",
         "slam": "SLAM",
         "livox_360": "Livox 360",
-        "camera": "Camera"
+        "camera": "Camera",
+        "registration_form": "登録フォーム",
+        "registration_system": "登録システム",
+        "display_name": "表示名",
+        "vehicle_id_system_id": "車両ID（システムID）",
+        "type_category": "種別カテゴリ",
+        "description_and_notes": "説明・備考"
 
-    },
-    "message": {
-        "select_output_dir": "録画の出力ディレクトリを選択してください。",
-        "recording_started": "録画を開始しました。",
-        "recording_stopped": "録画を停止しました。",
-        "cannot_launch_theta_driver": "theta_driver を起動できません",
-        "cannot_launch_camera_info_publisher": "camera_info_publisher を起動できません"
-    },
-    "button": {
-        "browse": "参照",
-        "start": "開始",
-        "stop": "停止",
-        "clear_log": "ログを消去",
-        "launch_rviz2": "RViz2 を起動"
-    },
-    "status": {
-        "ready": "準備完了",
-        "error": "エラー",
-        "active": "アクティブ",
-        "disconnected": "未接続",
-        "connected": "接続済み",
-        "running": "実行中",
-        "not_running": "実行されていません"
     }
 }

@@ -153,6 +153,10 @@ async def get_vehicle(vehicle_id: str):
         
         return VehicleResponse(
             vehicle_id=vehicle["vehicle_id"],
+            name=vehicle.get("name", ""),
+            description=vehicle.get("description", ""),
+            vehicle_type=vehicle.get("vehicle_type", ""),
+            metadata=vehicle.get("metadata", {}),
             latest_pose=Pose(
                 position=Position(**latest_pose["position"]),
                 orientation=Orientation(**latest_pose["orientation"]),
