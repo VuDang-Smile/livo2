@@ -1,0 +1,192 @@
+import React, { useRef, useEffect, Suspense } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { OrbitControls } from '@react-three/drei';
+import { ArrowHelper } from 'three';
+import * as THREE from 'three';
+import { VehicleMarker3D } from '../../types/vehicle';
+import PCDMap, { PointCloudBounds } from '../PCDMap';
+import { DEFAULT_PCD_URL } from '../../constants/pcdConfig';
+
+interface MapView3DProps {
+  vehicleMarkers: VehicleMarker3D[];
+  pcdUrl?: string;
+  clipXMin?: number;
+  clipXMax?: number;
+  clipYMin?: number;
+  clipYMax?: number;
+  clipZMin?: number;
+  clipZMax?: number;
+  selectedVehicleId?: string | null;
+  onVehicleSelect?: (id: string) => void;
+  onBoundsCalculated?: (bounds: PointCloudBounds) => void;
+}
+
+// Component cho phương tiện 3D
+const VehicleMarker: React.FC<{ 
+  marker: VehicleMarker3D; 
+  isSelected?: boolean; 
+  onSelect?: () => void;
+}> = ({ marker, isSelected = false, onSelect }) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const [hovered, setHovered] = React.useState(false);
+  
+  // Animation cho phương tiện
+  useFrame((state) => {
+    if (meshRef.current) {
+      meshRef.current.position.y = marker.position[1] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
+    }
+  });
+
+  const color = marker.color || '#ef4444';
+  const size = isSelected ? 1.5 : hovered ? 1.2 : 1.0;
+
+  return (
+    <group
+      position={[marker.position[0], marker.position[1], marker.position[2]]}
+      onPointerOver={() => setHovered(true)}
+      onPointerOut={() => setHovered(false)}
+      onClick={onSelect}
+    >
+      <mesh ref={meshRef}>
+        <boxGeometry args={[size, size, size]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+      
+      {marker.showOrientation && marker.orientation && (
+        <primitive
+          object={new ArrowHelper(
+            new THREE.Vector3(0, 0, 1),
+            new THREE.Vector3(0, 0, 0),
+            2,
+            color,
+            0.5,
+            0.3
+          )}
+        />
+      )}
+      
+      {(isSelected || hovered) && (
+        <mesh>
+          <ringGeometry args={[1.5, 2, 32]} />
+          <meshBasicMaterial color={color} transparent opacity={0.3} />
+        </mesh>
+      )}
+    </group>
+  );
+};
+
+// Component chính cho 3D map
+const MapView3D: React.FC<MapView3DProps> = ({
+  vehicleMarkers,
+  pcdUrl = DEFAULT_PCD_URL,
+  clipXMin,
+  clipXMax,
+  clipYMin,
+  clipYMax,
+  clipZMin,
+  clipZMax,
+  selectedVehicleId,
+  onVehicleSelect,
+  onBoundsCalculated,
+}) => {
+  const controlsRef = useRef<any>(null);
+
+  // Focus camera vào phương tiện được chọn
+  useEffect(() => {
+    if (!selectedVehicleId || !controlsRef.current) return;
+
+    const controls = controlsRef.current;
+    const selectedMarker = vehicleMarkers.find(m => m.id === selectedVehicleId);
+    if (!selectedMarker) return;
+
+    const targetPosition = new THREE.Vector3(
+      selectedMarker.position[0],
+      selectedMarker.position[1],
+      selectedMarker.position[2]
+    );
+
+    const currentTarget = controls.target.clone();
+    const camera = controls.object;
+    const viewDir = camera.position.clone().sub(currentTarget);
+    const currentDistance = viewDir.length();
+    const normalizedDir = viewDir.normalize();
+
+    const minDistance = controls.minDistance ?? 0;
+    const safetyMargin = 1;
+    const desiredDistance = Math.max(minDistance + safetyMargin, currentDistance);
+    const newCameraPosition = targetPosition.clone().add(normalizedDir.multiplyScalar(desiredDistance));
+
+    const startPosition = camera.position.clone();
+    const startTarget = currentTarget.clone();
+    const duration = 1000;
+    const startTime = Date.now();
+
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const easeProgress = 1 - Math.pow(1 - progress, 3);
+
+      camera.position.lerpVectors(startPosition, newCameraPosition, easeProgress);
+      controls.target.lerpVectors(startTarget, targetPosition, easeProgress);
+      controls.update();
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+
+    animate();
+  }, [selectedVehicleId, vehicleMarkers]);
+
+  return (
+    <div className="w-full h-full relative">
+      <Canvas camera={{ position: [0, 50, 100], fov: 50 }}>
+        <OrbitControls 
+          ref={controlsRef}
+          enablePan={true}
+          enableZoom={true}
+          enableRotate={true}
+          maxPolarAngle={Math.PI / 2}
+          minDistance={10}
+          maxDistance={200}
+        />
+        
+        <ambientLight intensity={0.4} />
+        <directionalLight position={[10, 10, 5]} intensity={0.8} />
+        
+        <color attach="background" args={['#000000']} />
+        
+        {pcdUrl && (
+          <Suspense fallback={null}>
+            <PCDMap 
+              url={pcdUrl} 
+              scale={1}
+              rotation={[-Math.PI / 2, 0, 0]}
+              position={[0, 0, 0]}
+              clipXMin={clipXMin}
+              clipXMax={clipXMax}
+              clipYMin={clipYMin}
+              clipYMax={clipYMax}
+              clipZMin={clipZMin}
+              clipZMax={clipZMax}
+              onBoundsCalculated={onBoundsCalculated}
+            />
+          </Suspense>
+        )}
+        
+        {vehicleMarkers.map((marker) => (
+          <VehicleMarker 
+            key={marker.id} 
+            marker={marker} 
+            isSelected={marker.id === selectedVehicleId}
+            onSelect={() => onVehicleSelect?.(marker.id)}
+          />
+        ))}
+        
+        <gridHelper args={[200, 20, '#34495e', '#2c3e50']} />
+      </Canvas>
+    </div>
+  );
+};
+
+export default MapView3D;
