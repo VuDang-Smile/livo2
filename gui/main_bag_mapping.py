@@ -685,6 +685,27 @@ class BagMappingInterface:
             )
             return
         
+        # Pre-flight checks để ngăn chặn crash
+        self.add_log(self.translator.get('log.preflight_checks', '🔍 Running pre-flight checks to prevent crashes...'))
+        
+        # 1. Validate config file (kiểm tra YAML hợp lệ)
+        if not self._validate_config_file(config_path_obj):
+            return
+        
+        # 2. Validate config parameters (kiểm tra các tham số quan trọng)
+        if not self._validate_config_parameters(config_path_obj):
+            return
+        
+        # 3. Check system resources
+        if not self._check_system_resources():
+            return
+        
+        # 4. Validate bag file (kiểm tra topics trong bag)
+        if not self._validate_bag_file():
+            return
+        
+        self.add_log(self.translator.get('log.preflight_checks_passed', '✅ All pre-flight checks passed!'))
+        
         try:
             ros2_setup = "/opt/ros/jazzy/setup.bash"
             rviz_arg = "True" if self.use_rviz else "False"
@@ -746,17 +767,24 @@ class BagMappingInterface:
                 preexec_fn=os.setsid if hasattr(os, 'setsid') else None
             )
             
-            time.sleep(3)
-            
-            if self.mapping_process.poll() is not None:
-                error_output = self.mapping_process.stdout.read() if self.mapping_process.stdout else self.translator.get('log.no_output', 'No output')
-                self.add_log(f"❌ {self.translator.get('log.mapping_process_exited', 'Mapping process exited immediately with code')}: {self.mapping_process.returncode}")
-                self.add_log(f"{self.translator.get('log.output', 'Output')}: {error_output[:500]}")
-                messagebox.showerror(
-                    self.translator.get('dialog.error', 'Error'),
-                    self.translator.get('message.mapping_exited_immediately', 'Mapping process exited immediately. Check log for details.')
-                )
-                self.mapping_process = None
+            # Graceful startup với health check
+            if not self._wait_for_process_health(max_wait_time=10):
+                # Process đã crash hoặc không khởi động được
+                if self.mapping_process:
+                    if self.mapping_process.poll() is not None:
+                        error_output = ""
+                        try:
+                            error_output = self.mapping_process.stdout.read() if self.mapping_process.stdout else self.translator.get('log.no_output', 'No output')
+                        except:
+                            pass
+                        self.add_log(f"❌ {self.translator.get('log.mapping_process_exited', 'Mapping process exited immediately with code')}: {self.mapping_process.returncode}")
+                        if error_output:
+                            self.add_log(f"{self.translator.get('log.output', 'Output')}: {error_output[:500]}")
+                        messagebox.showerror(
+                            self.translator.get('dialog.error', 'Error'),
+                            self.translator.get('message.mapping_exited_immediately', 'Mapping process exited immediately. Check log for details.')
+                        )
+                    self.mapping_process = None
                 return
             
             self.is_mapping_running = True
@@ -1199,8 +1227,303 @@ class BagMappingInterface:
             self.add_log_success('message.default_config_selected', name=default_config.name)
         else:
             self.add_log_warning('message.default_config_not_found', name='mid360_equirectangular_stable.yaml')
+    
+    def _validate_config_file(self, config_path_obj):
+        """Validate YAML config file trước khi sử dụng"""
+        try:
+            import yaml
+        except ImportError:
+            # Nếu không có yaml, chỉ kiểm tra file tồn tại
+            self.add_log(self.translator.get('log.yaml_not_available', '⚠️ PyYAML not available, skipping config validation'))
+            return True
+        
+        try:
+            with open(config_path_obj, 'r', encoding='utf-8') as f:
+                config_data = yaml.safe_load(f)
+            
+            if config_data is None:
+                error_msg = self.translator.get('message.config_file_empty', 'Config file is empty or invalid YAML format')
+                self.add_log(f"❌ {error_msg}")
+                messagebox.showerror(
+                    self.translator.get('dialog.error', 'Error'),
+                    f"{error_msg}: {config_path_obj}"
+                )
+                return False
+            
+            # Kiểm tra các tham số quan trọng
+            required_keys = ['common', 'lidar', 'imu']
+            missing_keys = [key for key in required_keys if key not in config_data]
+            
+            if missing_keys:
+                error_msg = self.translator.get('message.config_missing_keys', 
+                    'Config file is missing required sections: {keys}').replace('{keys}', ', '.join(missing_keys))
+                self.add_log(f"⚠️ {error_msg}")
+                # Không block, chỉ cảnh báo
+                self.add_log(self.translator.get('log.config_validation_warning', 
+                    '⚠️ Config validation warning, but continuing...'))
+            
+            self.add_log(self.translator.get('log.config_validation_success', '✅ Config file validation passed'))
+            return True
+            
+        except yaml.YAMLError as e:
+            error_msg = self.translator.get('message.config_yaml_error', 
+                'Config file has invalid YAML syntax: {error}').replace('{error}', str(e))
+            self.add_log(f"❌ {error_msg}")
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                f"{error_msg}\n\nFile: {config_path_obj}"
+            )
+            return False
+        except Exception as e:
+            error_msg = self.translator.get('message.config_validation_error', 
+                'Error validating config file: {error}').replace('{error}', str(e))
+            self.add_log(f"⚠️ {error_msg}")
+            # Không block, chỉ cảnh báo
+            return True
+    
+    def _validate_config_parameters(self, config_path_obj):
+        """Validate các tham số quan trọng trong config để tránh crash"""
+        try:
+            import yaml
+        except ImportError:
+            return True
+        
+        try:
+            with open(config_path_obj, 'r', encoding='utf-8') as f:
+                config_data = yaml.safe_load(f)
+            
+            if not config_data:
+                return True
+            
+            errors = []
+            warnings = []
+            
+            # Kiểm tra common section
+            if 'common' in config_data:
+                common = config_data['common']
+                # Kiểm tra các tham số có thể gây crash nếu sai
+                if 'lidar_topic' in common:
+                    topic = common['lidar_topic']
+                    if not topic or not isinstance(topic, str):
+                        errors.append(self.translator.get('log.config_invalid_lidar_topic', 'Invalid lidar_topic in config'))
+                
+                if 'imu_topic' in common:
+                    topic = common['imu_topic']
+                    if not topic or not isinstance(topic, str):
+                        errors.append(self.translator.get('log.config_invalid_imu_topic', 'Invalid imu_topic in config'))
+            
+            # Kiểm tra lidar section
+            if 'lidar' in config_data:
+                lidar = config_data['lidar']
+                # Kiểm tra các tham số số học
+                numeric_params = ['scan_line', 'blind', 'fov_degree', 'min_ring', 'max_ring']
+                for param in numeric_params:
+                    if param in lidar:
+                        try:
+                            value = float(lidar[param])
+                            if value < 0 and param in ['scan_line', 'min_ring', 'max_ring']:
+                                warnings.append(self.translator.get('log.config_negative_value', 
+                                    f'Warning: {param} has negative value: {value}').replace('{param}', param).replace('{value}', str(value)))
+                        except (ValueError, TypeError):
+                            errors.append(self.translator.get('log.config_invalid_numeric', 
+                                f'Invalid numeric value for {param}').replace('{param}', param))
+            
+            # Kiểm tra imu section
+            if 'imu' in config_data:
+                imu = config_data['imu']
+                # Kiểm tra các tham số quan trọng
+                if 'acc_n' in imu:
+                    try:
+                        acc_n = float(imu['acc_n'])
+                        if acc_n <= 0:
+                            warnings.append(self.translator.get('log.config_invalid_acc_n', 
+                                'Warning: acc_n should be positive'))
+                    except (ValueError, TypeError):
+                        pass
+            
+            if errors:
+                error_msg = '\n'.join(errors)
+                self.add_log(f"❌ {self.translator.get('log.config_validation_errors', 'Config validation errors')}:")
+                for err in errors:
+                    self.add_log(f"   - {err}")
+                messagebox.showerror(
+                    self.translator.get('dialog.error', 'Error'),
+                    f"{self.translator.get('message.config_has_errors', 'Config file has errors that may cause crashes')}:\n\n{error_msg}"
+                )
+                return False
+            
+            if warnings:
+                self.add_log(f"⚠️ {self.translator.get('log.config_validation_warnings', 'Config validation warnings')}:")
+                for warn in warnings:
+                    self.add_log(f"   - {warn}")
+            
+            return True
+            
+        except Exception as e:
+            self.add_log(f"⚠️ {self.translator.get('log.config_parameter_validation_error', 'Error validating config parameters: {error}').replace('{error}', str(e))}")
+            # Không block, chỉ cảnh báo
+            return True
+    
+    def _check_system_resources(self):
+        """Kiểm tra system resources để tránh crash do thiếu tài nguyên"""
+        try:
+            import psutil
+        except ImportError:
+            # Nếu không có psutil, bỏ qua check
+            self.add_log(self.translator.get('log.psutil_not_available', '⚠️ psutil not available, skipping resource check'))
+            return True
+        
+        try:
+            # Kiểm tra memory
+            memory = psutil.virtual_memory()
+            memory_percent = memory.percent
+            available_gb = memory.available / (1024**3)
+            
+            if memory_percent > 90:
+                error_msg = self.translator.get('message.low_memory', 
+                    'System memory is very low ({percent}% used, {available:.1f}GB available). This may cause crashes.').replace('{percent}', str(memory_percent)).replace('{available:.1f}', f'{available_gb:.1f}')
+                self.add_log(f"⚠️ {error_msg}")
+                if not messagebox.askyesno(
+                    self.translator.get('dialog.warning', 'Warning'),
+                    f"{error_msg}\n\n{self.translator.get('message.continue_anyway', 'Continue anyway?')}"
+                ):
+                    return False
+            elif memory_percent > 75:
+                self.add_log(self.translator.get('log.memory_usage_high', 
+                    f'⚠️ Memory usage is high: {memory_percent:.1f}%').replace('{memory_percent:.1f}', f'{memory_percent:.1f}'))
+            
+            # Kiểm tra disk space
+            disk = psutil.disk_usage('/')
+            disk_percent = disk.percent
+            free_gb = disk.free / (1024**3)
+            
+            if disk_percent > 95:
+                error_msg = self.translator.get('message.low_disk_space', 
+                    'Disk space is very low ({percent}% used, {free:.1f}GB free). This may cause crashes.').replace('{percent}', str(disk_percent)).replace('{free:.1f}', f'{free_gb:.1f}')
+                self.add_log(f"❌ {error_msg}")
+                messagebox.showerror(
+                    self.translator.get('dialog.error', 'Error'),
+                    error_msg
+                )
+                return False
+            elif disk_percent > 85:
+                self.add_log(self.translator.get('log.disk_usage_high', 
+                    f'⚠️ Disk usage is high: {disk_percent:.1f}%').replace('{disk_percent:.1f}', f'{disk_percent:.1f}'))
+            
+            self.add_log(self.translator.get('log.resource_check_passed', 
+                f'✅ Resource check passed (Memory: {memory_percent:.1f}%, Disk: {disk_percent:.1f}%)').replace('{memory_percent:.1f}', f'{memory_percent:.1f}').replace('{disk_percent:.1f}', f'{disk_percent:.1f}'))
+            return True
+            
+        except Exception as e:
+            self.add_log(f"⚠️ {self.translator.get('log.resource_check_error', 'Error checking system resources: {error}').replace('{error}', str(e))}")
+            # Không block, chỉ cảnh báo
+            return True
+    
+    def _validate_bag_file(self):
+        """Kiểm tra bag file có chứa các topics cần thiết"""
+        if not self.bag_path:
+            return True
+        
+        try:
+            bag_path_obj = Path(self.bag_path)
+            if not bag_path_obj.exists():
+                return True
+            
+            self.add_log(self.translator.get('log.checking_bag_topics', '🔍 Checking bag file for required topics...'))
+            
+            # Kiểm tra bag info
+            ros2_setup = "/opt/ros/jazzy/setup.bash"
+            ws_setup = self.workspace_path / "install" / "setup.sh"
+            
+            if not ws_setup.exists():
+                # Không thể check, bỏ qua
+                return True
+            
+            cmd = f"source {ros2_setup} && source {ws_setup} && ros2 bag info {self.bag_path}"
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode != 0:
+                self.add_log(self.translator.get('log.cannot_check_bag', '⚠️ Cannot check bag info, continuing...'))
+                return True
+            
+            bag_output = result.stdout.lower()
+            
+            # Kiểm tra các topics cần thiết
+            required_topics = ['/livox/lidar', '/livox/imu', '/image_raw']
+            missing_topics = []
+            
+            for topic in required_topics:
+                # Kiểm tra cả với và không có leading slash
+                topic_variants = [topic, topic[1:], topic.replace('/', '_')]
+                if not any(variant in bag_output for variant in topic_variants):
+                    missing_topics.append(topic)
+            
+            if missing_topics:
+                error_msg = self.translator.get('message.bag_missing_topics', 
+                    'Bag file is missing required topics: {topics}\n\nThis may cause the mapping process to crash.').replace('{topics}', ', '.join(missing_topics))
+                self.add_log(f"❌ {error_msg}")
+                if not messagebox.askyesno(
+                    self.translator.get('dialog.warning', 'Warning'),
+                    f"{error_msg}\n\n{self.translator.get('message.continue_anyway', 'Continue anyway?')}"
+                ):
+                    return False
+            else:
+                self.add_log(self.translator.get('log.bag_topics_ok', '✅ All required topics found in bag file'))
+            
+            return True
+            
+        except subprocess.TimeoutExpired:
+            self.add_log(self.translator.get('log.bag_check_timeout', '⚠️ Bag check timeout, continuing...'))
+            return True
+        except Exception as e:
+            self.add_log(f"⚠️ {self.translator.get('log.bag_check_error', 'Error checking bag file: {error}').replace('{error}', str(e))}")
+            # Không block, chỉ cảnh báo
+            return True
+    
+    def _wait_for_process_health(self, max_wait_time=10):
+        """Đợi process khởi động và kiểm tra health"""
+        check_interval = 0.5
+        max_checks = int(max_wait_time / check_interval)
+        
+        for i in range(max_checks):
+            time.sleep(check_interval)
+            
+            if not self.mapping_process:
+                return False
+            
+            # Kiểm tra process có còn chạy không
+            if self.mapping_process.poll() is not None:
+                # Process đã dừng
+                return False
+            
+            # Kiểm tra output để tìm dấu hiệu khởi động thành công hoặc lỗi
+            try:
+                # Đọc một phần output nếu có
+                if hasattr(self.mapping_process, 'stdout') and self.mapping_process.stdout:
+                    # Không block, chỉ peek
+                    pass
+            except:
+                pass
+            
+            # Sau 3 giây đầu tiên, coi như process đã khởi động
+            if i >= 6:  # 3 seconds
+                return True
+        
+        # Kiểm tra lần cuối
+        if self.mapping_process and self.mapping_process.poll() is None:
+            return True
+        
+        return False
 
     def monitor_mapping_process(self):
+        """Theo dõi mapping process và phát hiện crash"""
         if not self.mapping_process:
             return
         
@@ -1210,13 +1533,107 @@ class BagMappingInterface:
                     break
                 if self.is_mapping_running:
                     line_lower = line.lower()
-                    if any(keyword in line_lower for keyword in ['error', 'warning', 'started', 'ready', 'failed']):
+                    # Log tất cả các dòng quan trọng
+                    if any(keyword in line_lower for keyword in ['error', 'warning', 'started', 'ready', 'failed', 'died', 'crash', 'segmentation', 'signal']):
                         self.add_log(f"[Mapping] {line.strip()}")
+                    
+                    # Phát hiện process crash
+                    if 'process has died' in line_lower or 'process died' in line_lower:
+                        self.add_log(f"❌ [Mapping] {line.strip()}")
+                        # Đợi một chút để process hoàn toàn dừng
+                        time.sleep(0.5)
+                        # Kiểm tra exit code
+                        if self.mapping_process.poll() is not None:
+                            exit_code = self.mapping_process.returncode
+                            self._handle_mapping_crash(exit_code, line)
+                            break
                 else:
                     break
+            
+            # Kiểm tra lại sau khi đọc hết output
+            if self.is_mapping_running and self.mapping_process:
+                if self.mapping_process.poll() is not None:
+                    exit_code = self.mapping_process.returncode
+                    if exit_code != 0:
+                        self._handle_mapping_crash(exit_code, "Process exited unexpectedly")
+                        
         except Exception as e:
             if self.is_mapping_running:
                 self.add_log(f"⚠️ {self.translator.get('log.error_reading_mapping_output', 'Error reading mapping output')}: {e}")
+                # Kiểm tra xem process có còn chạy không
+                if self.mapping_process and self.mapping_process.poll() is not None:
+                    self._handle_mapping_crash(self.mapping_process.returncode, str(e))
+    
+    def _handle_mapping_crash(self, exit_code, error_line):
+        """Xử lý khi mapping process bị crash"""
+        if not self.is_mapping_running:
+            return
+        
+        self.is_mapping_running = False
+        
+        # Xác định loại lỗi dựa trên exit code
+        error_type = "Unknown error"
+        error_description = ""
+        
+        if exit_code == -11:
+            error_type = "Segmentation Fault (SIGSEGV)"
+            error_description = self.translator.get('log.crash_segmentation_fault', 
+                'The mapping process crashed due to a segmentation fault. This usually indicates:\n'
+                '- Memory access violation\n'
+                '- Invalid pointer dereference\n'
+                '- Stack overflow\n'
+                '- Corrupted memory\n\n'
+                'Possible solutions:\n'
+                '- Check config file parameters\n'
+                '- Verify sensor data topics are available\n'
+                '- Check system resources (memory, CPU)\n'
+                '- Rebuild the workspace')
+        elif exit_code == -6:
+            error_type = "Abort (SIGABRT)"
+            error_description = self.translator.get('log.crash_abort',
+                'The mapping process was aborted. This usually indicates:\n'
+                '- Assertion failure\n'
+                '- Fatal error in the code\n'
+                '- Resource allocation failure\n\n'
+                'Check the log above for more details.')
+        elif exit_code < 0:
+            error_type = f"Signal {abs(exit_code)}"
+            signal_num = abs(exit_code)
+            error_description = self.translator.get('log.crash_signal',
+                'The mapping process was terminated by signal {signal}.\nThis usually indicates a crash or abnormal termination.').replace('{signal}', str(signal_num))
+        else:
+            error_type = f"Exit code {exit_code}"
+            error_description = self.translator.get('log.crash_exit_code',
+                'The mapping process exited with code {code}.\nCheck the log above for error details.').replace('{code}', str(exit_code))
+        
+        # Log chi tiết
+        self.add_log("=" * 60)
+        self.add_log(f"❌ {self.translator.get('log.mapping_process_crashed', 'MAPPING PROCESS CRASHED')}")
+        self.add_log(f"   {self.translator.get('log.error_type', 'Error Type')}: {error_type}")
+        self.add_log(f"   {self.translator.get('log.exit_code', 'Exit Code')}: {exit_code}")
+        self.add_log(f"   {self.translator.get('log.error_line', 'Error Line')}: {error_line[:200]}")
+        self.add_log("=" * 60)
+        
+        # Cập nhật UI
+        self.root.after(0, lambda: self.status_label.config(
+            text=self.translator.get('label.status_crashed', 'Status: ❌ Crashed'),
+            foreground="red"
+        ))
+        self.root.after(0, lambda: self.btn_start.config(state=tk.NORMAL))
+        
+        # Dừng bag playback nếu đang chạy
+        if self.is_bag_playing:
+            self.add_log(self.translator.get('log.stopping_bag_due_to_crash', '⚠️ Stopping bag playback due to mapping crash...'))
+            self.cleanup_processes()
+        
+        # Hiển thị thông báo lỗi
+        self.root.after(0, lambda: messagebox.showerror(
+            self.translator.get('dialog.mapping_crashed_title', 'Mapping Process Crashed'),
+            f"{self.translator.get('dialog.mapping_crashed_message', 'The mapping process has crashed!')}\n\n"
+            f"{self.translator.get('dialog.error_type', 'Error Type')}: {error_type}\n"
+            f"{self.translator.get('dialog.exit_code', 'Exit Code')}: {exit_code}\n\n"
+            f"{error_description}"
+        ))
     
     def monitor_bag_process(self):
         """Theo dõi output của ros2 bag play"""
@@ -1236,6 +1653,11 @@ class BagMappingInterface:
             if self.is_bag_playing:
                 self.add_log(self.translator.get('log.bag_playback_finished', '✅ Bag playback finished'))
                 self.is_bag_playing = False
+                # Hiển thị thông báo khi bag playback kết thúc
+                self.root.after(0, lambda: messagebox.showinfo(
+                    self.translator.get('dialog.bag_playback_finished_title', 'Bag Playback Finished'),
+                    self.translator.get('dialog.bag_playback_finished_message', 'Bag playback has completed successfully!')
+                ))
         except Exception as e:
             if self.is_bag_playing:
                 self.add_log(self.translator.get('log.error_reading_bag', '⚠️ Error reading bag output: {error}').replace('{error}', str(e)))
