@@ -477,6 +477,18 @@ class BagMappingInterface:
         self.translator = Translator('en')
         self.current_lang = 'en'
         
+        # Queue system cho smooth updates
+        self.log_queue = []
+        self.progress_queue = None  # (target_value, current_value)
+        self.log_update_lock = threading.Lock()
+        self.log_batch_size = 5  # Batch log updates để mượt hơn
+        self.progress_animation_speed = 2  # Tốc độ animation progress bar (giá trị mỗi frame)
+        
+        # Start log update thread
+        self.log_update_thread_running = True
+        threading.Thread(target=self._log_update_worker, daemon=True).start()
+        threading.Thread(target=self._progress_update_worker, daemon=True).start()
+        
         self.setup_language_button()
         self.update_ui_texts()
         
@@ -723,8 +735,13 @@ class BagMappingInterface:
         self.clear_log_btn.pack(side=tk.RIGHT)
 
         self.log_panel = tk.Text(log_container, height=8, bg="white", fg="black", 
-                                 font=("Consolas", 10), state=tk.DISABLED, bd=1, relief=tk.SUNKEN)
-        self.log_panel.pack(fill=tk.BOTH, expand=True)
+                                 font=("Consolas", 10), state=tk.DISABLED, bd=1, relief=tk.SUNKEN,
+                                 wrap=tk.WORD, padx=5, pady=5)
+        # Thêm scrollbar cho log
+        log_scrollbar = tk.Scrollbar(log_container, orient=tk.VERTICAL, command=self.log_panel.yview)
+        self.log_panel.config(yscrollcommand=log_scrollbar.set)
+        log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
 
 
@@ -1092,7 +1109,7 @@ class BagMappingInterface:
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                 return
             
-            self.root.after(0, lambda: self.progress.config(value=20))
+            self.root.after(0, lambda: self.set_progress(20))
             
             # 2. HBA Optimize
             self.add_log(self.translator.get('log.step_hba', 'Step 2/6: Running HBA Optimize...'))
@@ -1101,7 +1118,7 @@ class BagMappingInterface:
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                 return
             
-            self.root.after(0, lambda: self.progress.config(value=40))
+            self.root.after(0, lambda: self.set_progress(40))
             
             # 3. SC Tile
             self.add_log(self.translator.get('log.step_sc', 'Step 3/6: Running ScanContext Tiling...'))
@@ -1110,7 +1127,7 @@ class BagMappingInterface:
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                 return
             
-            self.root.after(0, lambda: self.progress.config(value=60))
+            self.root.after(0, lambda: self.set_progress(60))
             
             # 4. Generate Floorplan
             self.add_log(self.translator.get('log.step_floorplan', 'Step 4/6: Generating floorplan...'))
@@ -1119,7 +1136,7 @@ class BagMappingInterface:
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                 return
             
-            self.root.after(0, lambda: self.progress.config(value=80))
+            self.root.after(0, lambda: self.set_progress(80))
             
             # 5. Save QR codes to JSON
             self.add_log(self.translator.get('log.step_save_qr', 'Step 5/7: Saving QR codes...'))
@@ -1129,7 +1146,7 @@ class BagMappingInterface:
             else:
                 self.add_log(self.translator.get('log.no_qr_codes_to_save', '⚠️ No QR codes to save'))
             
-            self.root.after(0, lambda: self.progress.config(value=75))
+            self.root.after(0, lambda: self.set_progress(75))
             
             # 6. Zip files
             self.add_log(self.translator.get('log.step_zip', 'Step 6/7: Compressing files (Zip)...'))
@@ -1139,7 +1156,7 @@ class BagMappingInterface:
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                 return
             
-            self.root.after(0, lambda: self.progress.config(value=90))
+            self.root.after(0, lambda: self.set_progress(90))
             
             # 7. Upload to backend
             self.add_log(self.translator.get('log.step_upload', 'Step 7/7: Uploading to backend...'))
@@ -1154,7 +1171,7 @@ class BagMappingInterface:
                 fail_reason = upload_info or "Unknown error"
                 self.add_log(self.translator.get('log.upload_backend_failed', '⚠️ Backend upload failed: {reason}').replace('{reason}', str(fail_reason)))
             
-            self.root.after(0, lambda: self.progress.config(value=100))
+            self.root.after(0, lambda: self.set_progress(100))
             self.root.after(0, lambda: self.upload_stat.config(text="100% - Done"))
             
             duration = time.time() - start_time
@@ -1182,7 +1199,7 @@ class BagMappingInterface:
     
     def simulate_upload_progress(self, val):
         if val <= 100:
-            self.progress['value'] = val
+            self.set_progress(val)
             upload_text = self.translator.get('label.uploading', 'Uploading: {val}%').replace('{val}', str(val))
             self.upload_stat.config(text=upload_text)
             self.root.after(30, lambda: self.simulate_upload_progress(val + 2))
@@ -1346,11 +1363,125 @@ class BagMappingInterface:
         self.qr_listbox.see(tk.END)
 
     def add_log(self, message):
-        self.log_panel.config(state=tk.NORMAL)
+        """Thêm log message vào queue để update mượt hơn"""
         time_str = datetime.now().strftime("%H:%M:%S")
-        self.log_panel.insert(tk.END, f"[{time_str}] {message}\n")
-        self.log_panel.see(tk.END)
-        self.log_panel.config(state=tk.DISABLED)
+        log_entry = f"[{time_str}] {message}\n"
+        
+        with self.log_update_lock:
+            self.log_queue.append(log_entry)
+    
+    def _log_update_worker(self):
+        """Worker thread để batch update log panel mượt hơn"""
+        while self.log_update_thread_running:
+            try:
+                # Lấy batch log entries từ queue
+                batch = []
+                with self.log_update_lock:
+                    if self.log_queue:
+                        batch = self.log_queue[:self.log_batch_size]
+                        self.log_queue = self.log_queue[self.log_batch_size:]
+                
+                if batch:
+                    # Update UI trong main thread
+                    self.root.after(0, lambda: self._update_log_panel(batch))
+                
+                # Sleep ngắn để không chiếm CPU
+                time.sleep(0.05)  # 50ms = 20 updates/second
+            except Exception as e:
+                # Nếu có lỗi, log trực tiếp để không mất thông tin
+                try:
+                    self.root.after(0, lambda: self._update_log_panel_direct(f"Error in log worker: {e}\n"))
+                except:
+                    pass
+                time.sleep(0.1)
+    
+    def _update_log_panel(self, batch):
+        """Update log panel với batch entries"""
+        try:
+            self.log_panel.config(state=tk.NORMAL)
+            
+            # Insert tất cả entries trong batch
+            for entry in batch:
+                self.log_panel.insert(tk.END, entry)
+            
+            # Smooth scroll đến cuối
+            self.log_panel.see(tk.END)
+            
+            # Giới hạn số dòng để tránh memory leak (giữ tối đa 1000 dòng)
+            line_count = int(self.log_panel.index('end-1c').split('.')[0])
+            if line_count > 1000:
+                # Xóa 200 dòng đầu
+                self.log_panel.delete('1.0', '200.0')
+            
+            self.log_panel.config(state=tk.DISABLED)
+        except Exception as e:
+            # Fallback nếu có lỗi
+            print(f"Error updating log panel: {e}")
+    
+    def _update_log_panel_direct(self, message):
+        """Update log panel trực tiếp (fallback)"""
+        try:
+            self.log_panel.config(state=tk.NORMAL)
+            self.log_panel.insert(tk.END, message)
+            self.log_panel.see(tk.END)
+            self.log_panel.config(state=tk.DISABLED)
+        except:
+            pass
+    
+    def _progress_update_worker(self):
+        """Worker thread để animate progress bar mượt hơn"""
+        while self.log_update_thread_running:
+            try:
+                if self.progress_queue is not None:
+                    target_value, current_value = self.progress_queue
+                    
+                    # Tính toán giá trị mới với animation
+                    if abs(target_value - current_value) < self.progress_animation_speed:
+                        # Đã đạt target
+                        new_value = target_value
+                        self.progress_queue = None
+                    else:
+                        # Di chuyển về phía target
+                        if target_value > current_value:
+                            new_value = min(current_value + self.progress_animation_speed, target_value)
+                        else:
+                            new_value = max(current_value - self.progress_animation_speed, target_value)
+                        self.progress_queue = (target_value, new_value)
+                    
+                    # Update UI trong main thread
+                    self.root.after(0, lambda v=new_value: self._update_progress_bar(v))
+                
+                # Sleep ngắn để animation mượt
+                time.sleep(0.03)  # ~33 FPS cho animation
+            except Exception as e:
+                time.sleep(0.1)
+    
+    def _update_progress_bar(self, value):
+        """Update progress bar với giá trị mới"""
+        try:
+            self.progress['value'] = value
+            # Update status text
+            if value >= 100:
+                self.upload_stat.config(text=self.translator.get('label.upload_done', '100% - Done'))
+            elif value > 0:
+                self.upload_stat.config(text=self.translator.get('label.uploading', 'Uploading: {val}%').replace('{val}', str(int(value))))
+        except:
+            pass
+    
+    def set_progress(self, value):
+        """Set progress bar với smooth animation"""
+        try:
+            current_value = self.progress['value']
+            # Clamp value
+            value = max(0, min(100, value))
+            # Set vào queue để animate
+            self.progress_queue = (value, current_value)
+        except:
+            # Fallback: set trực tiếp
+            try:
+                self.progress['value'] = value
+            except:
+                pass
     
     def add_log_success(self, message_key, **kwargs):
         msg = self.translator.get(message_key, message_key)
@@ -2887,12 +3018,13 @@ class BagMappingInterface:
         self.is_stopping = True
         self.cleanup_processes()
         self.btn_start.config(state=tk.NORMAL)
-        self.progress['value'] = 0
+        self.set_progress(0)
         self.status_label.config(text=self.translator.get('label.status_stopped', 'Status: Stopped'))
         self.add_log(self.translator.get('log.process_terminated', 'PROCESS: Mapping and Upload terminated.'))
         # Flag sẽ được reset trong cleanup_processes()
 
 if __name__ == "__main__":
+    app = None
     try:
         # Khởi tạo root window trước
         root = tk.Tk()
@@ -2921,6 +3053,14 @@ if __name__ == "__main__":
             root.destroy()
             sys.exit(1)
         
+        # Cleanup function khi đóng window
+        def on_closing():
+            if app:
+                app.log_update_thread_running = False
+            root.destroy()
+        
+        root.protocol("WM_DELETE_WINDOW", on_closing)
+        
         # Chạy main loop với error handling
         try:
             root.mainloop()
@@ -2930,6 +3070,10 @@ if __name__ == "__main__":
             print(f"Error in main loop: {e}")
             import traceback
             traceback.print_exc()
+        finally:
+            # Cleanup threads
+            if app:
+                app.log_update_thread_running = False
     
     except Exception as e:
         print(f"Fatal error: {e}")
