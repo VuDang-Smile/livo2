@@ -178,7 +178,6 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
         const newVehicle = {
           id: lastPositionUpdate.vehicle_id,
           name: `Vehicle ${lastPositionUpdate.vehicle_id}`,
-          type: 'scanner' as const,
           status: 'active' as const,
           position: newPosition,
           timestamp: timestamp as string,
@@ -280,13 +279,11 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
   );
 
   /**
-   * Filter vehicles: only worker devices, excluding excluded vehicles
-   * Include all statuses (active, inactive, offline) to show all vehicles
+   * Filter vehicles: excluding excluded vehicles
+   * Include all types & statuses (active, inactive, offline) để hiển thị đầy đủ
    */
   const filteredVehicles = useMemo(() => {
-    return mapVehicles.filter(
-      vehicle => vehicle.type === 'worker' && !isExcludedVehicle(vehicle.id)
-    );
+    return mapVehicles.filter(vehicle => !isExcludedVehicle(vehicle.id));
   }, [mapVehicles, isExcludedVehicle]);
 
   return {

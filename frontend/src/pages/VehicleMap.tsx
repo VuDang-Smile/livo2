@@ -139,7 +139,6 @@ const VehicleMap: React.FC = () => {
       return markers3D.map(marker => ({
         id: marker.id,
         name: marker.id,
-        type: 'scanner' as const,
         status: marker.status || 'active' as const,
         position: { x: marker.position[0], y: marker.position[1], z: marker.position[2] },
         timestamp: new Date().toISOString(),
@@ -169,7 +168,7 @@ const VehicleMap: React.FC = () => {
     
     // Apply vehicle type filter
     if (filters.vehicleType !== 'all') {
-      result = result.filter(vehicle => vehicle.type === filters.vehicleType);
+      result = result.filter(vehicle => (vehicle.type || 'unknown') === filters.vehicleType);
     }
     
     return result;
@@ -203,7 +202,9 @@ const VehicleMap: React.FC = () => {
   };
 
   const getUniqueValues = (key: 'status' | 'vehicleType') => {
-    const values = displayVehicles.map(v => key === 'status' ? v.status : v.type);
+    const values = displayVehicles.map(v =>
+      key === 'status' ? v.status : (v.type || 'unknown')
+    );
     return ['all', ...Array.from(new Set(values))];
   };
 
@@ -537,7 +538,10 @@ const VehicleMap: React.FC = () => {
                         </div>
                         
                         <div className="text-sm text-gray-600 space-y-1">
-                          <p><span className="font-medium">{t('type_label')}</span> {vehicle.type}</p>
+                          <p>
+                            <span className="font-medium">{t('type_label')}</span>{' '}
+                            {vehicle.type || t('vehicle_type_unknown')}
+                          </p>
                           <p><span className="font-medium">{t('status_label_short')}</span> 
                             <span className={`ml-1 ${
                               vehicle.status === 'active' ? 'text-green-600' :
@@ -591,7 +595,10 @@ const VehicleMap: React.FC = () => {
               <h4 className="font-medium text-gray-700 text-sm uppercase tracking-wide">{t('vehicle_details')}</h4>
               <div className="space-y-1">
                 <p className="text-sm"><span className="font-medium">{t('id_label')}</span> {selectedVehicle.id}</p>
-                <p className="text-sm"><span className="font-medium">{t('vehicle_type_label')}</span> {selectedVehicle.type}</p>
+                <p className="text-sm">
+                  <span className="font-medium">{t('vehicle_type_label')}</span>{' '}
+                  {selectedVehicle.type || t('vehicle_type_unknown')}
+                </p>
                 <p className="text-sm"><span className="font-medium">{t('status_label')}</span> 
                   <span className={`ml-1 ${
                     selectedVehicle.status === 'active' ? 'text-green-600' :

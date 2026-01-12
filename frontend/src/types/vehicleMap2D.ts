@@ -8,7 +8,11 @@
 export interface Vehicle {
   id: string;
   name: string;
-  type: 'scanner' | 'worker';
+  /**
+   * Loại phương tiện, optional vì record từ MQTT có thể không set type.
+   * Backend có thể trả nhiều loại hơn 'scanner' | 'worker', nên dùng string rộng.
+   */
+  type?: string;
   status: 'active' | 'inactive' | 'offline' | 'maintenance';
   position: { x: number; y: number; z: number };
   timestamp: string;
