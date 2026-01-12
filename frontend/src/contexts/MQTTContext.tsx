@@ -318,7 +318,7 @@ export const MQTTProvider: React.FC<MQTTProviderProps> = ({
     return () => {
       disconnect();
     };
-  }, [connect, disconnect, brokerUrl]);
+  }, [connect, disconnect, brokerUrl, client]);
 
   const value: MQTTContextType = {
     client,

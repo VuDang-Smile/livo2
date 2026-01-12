@@ -10,7 +10,7 @@
  */
 
 import { MapMetadata } from '../../types/mapMetadata';
-import { getBackendUrl, getMapMetadataUrl, getCurrentMap } from '../../constants/mapConfig';
+import { getMapMetadataUrl, getCurrentMap } from '../../constants/mapConfig';
 
 export class MapMetadataService {
   private cache: Map<string, MapMetadata> = new Map();

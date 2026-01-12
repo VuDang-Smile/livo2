@@ -18,6 +18,9 @@ export interface Pose3D {
     z: number;
     w: number;
   };
+  // Optional metadata provided by some MQTT pose messages
+  frame_id?: string;
+  timestamp?: string | number;
 }
 
 /**

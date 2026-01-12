@@ -11,7 +11,7 @@ export interface VehicleMarker3D {
   orientation?: [number, number, number, number]; // Quaternion [w, x, y, z]
   color: string;
   showOrientation: boolean;
-  status?: 'active' | 'inactive' | 'offline';
+  status?: 'active' | 'inactive' | 'offline' | 'maintenance';
 }
 
 /**
@@ -35,7 +35,7 @@ export interface ApiVehicle {
   name?: string;
   type?: 'scanner' | 'worker';
   type_category?: 'scanner' | 'worker';
-  status?: 'active' | 'inactive' | 'offline';
+  status?: 'active' | 'inactive' | 'offline' | 'maintenance';
   current_pose?: {
     frame_id: string;
     position: { x: number; y: number; z: number };

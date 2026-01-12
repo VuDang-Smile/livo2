@@ -217,8 +217,8 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
             console.log('✅ Updated vehicle status:', vehicleId, vehicle.status, '->', newStatus);
           }
           // Cast status to valid Vehicle status type
-          const validStatus: "active" | "inactive" | "offline" = 
-            (newStatus === 'active' || newStatus === 'inactive' || newStatus === 'offline') 
+          const validStatus: "active" | "inactive" | "offline" | "maintenance" = 
+            (newStatus === 'active' || newStatus === 'inactive' || newStatus === 'offline' || newStatus === 'maintenance') 
               ? newStatus 
               : vehicle.status;
           return {

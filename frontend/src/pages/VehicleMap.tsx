@@ -39,9 +39,9 @@ const VehicleMap: React.FC = () => {
   const [showClipControls, setShowClipControls] = useState(false);
 
   // Hooks for data
-  const { vehicleMarkers: markers3D, loading: loading3D, fetchVehicles: fetchVehicles3D } = useVehicleMarkers3D();
-  const { vehicleMarkers: markers2D, mapMetadata: poseMetadata, isLoading: loadingPose, refreshMetadata } = useVehiclePose2D(selectedView);
-  const { mapData, mapVehicles, filteredVehicles, loading: loading2D, loadMapData } = useVehicleMap2D();
+  const { vehicleMarkers: markers3D } = useVehicleMarkers3D();
+  const { vehicleMarkers: markers2D, mapMetadata: poseMetadata } = useVehiclePose2D(selectedView);
+  const { filteredVehicles } = useVehicleMap2D();
 
   // Load map metadata when component mounts
   useEffect(() => {
@@ -131,7 +131,7 @@ const VehicleMap: React.FC = () => {
   }, []);
 
   // Get vehicles for display based on view mode
-  const displayVehicles = useMemo(() => {
+  const displayVehicles: Vehicle[] = useMemo(() => {
     if (viewMode === '2D') {
       return filteredVehicles;
     } else {
@@ -203,7 +203,7 @@ const VehicleMap: React.FC = () => {
   };
 
   const getUniqueValues = (key: 'status' | 'vehicleType') => {
-    const values = displayVehicles.map(v => v[key]);
+    const values = displayVehicles.map(v => key === 'status' ? v.status : v.type);
     return ['all', ...Array.from(new Set(values))];
   };
 

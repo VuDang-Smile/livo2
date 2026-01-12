@@ -1,4 +1,4 @@
-import { Pose3D, Pose2DPixel, MapMetadata, ViewMetadata, OrientationConfig } from '../types/mapMetadata';
+import { Pose3D, Pose2DPixel, MapMetadata, OrientationConfig } from '../types/mapMetadata';
 
 /**
  * Transform 3D pose (world coordinates) to 2D pixel coordinates on floorplan image

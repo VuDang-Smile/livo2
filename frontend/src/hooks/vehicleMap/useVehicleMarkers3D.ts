@@ -137,8 +137,8 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
             console.log('✅ Updated marker status:', vehicleId, marker.status || 'unknown', '->', newStatus);
           }
           // Cast status to valid VehicleMarker3D status type
-          const validStatus: "active" | "inactive" | "offline" | undefined = 
-            (newStatus === 'active' || newStatus === 'inactive' || newStatus === 'offline') 
+          const validStatus: "active" | "inactive" | "offline" | "maintenance" | undefined = 
+            (newStatus === 'active' || newStatus === 'inactive' || newStatus === 'offline' || newStatus === 'maintenance') 
               ? newStatus 
               : marker.status;
           return {

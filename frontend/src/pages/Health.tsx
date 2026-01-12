@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Activity, CheckCircle, XCircle, RefreshCw, Clock, Server, Globe } from 'lucide-react';
 
@@ -38,7 +38,7 @@ const Health: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Get backend URL - try to detect from current host or use default
-  const getBackendUrl = (): string => {
+  const getBackendUrl = useCallback((): string => {
     const hostname = window.location.hostname;
     // If running on frontend.lidar.tm or lidar.tm, use backend.lidar.tm
     if (hostname === 'frontend.lidar.tm' || hostname === 'lidar.tm' || hostname.includes('lidar.tm')) {
@@ -46,9 +46,9 @@ const Health: React.FC = () => {
     }
     // For localhost or IP addresses, use same hostname with port 8000
     return `http://${hostname}:8000`;
-  };
+  }, []);
 
-  const checkBackendHealth = async () => {
+  const checkBackendHealth = useCallback(async () => {
     setBackendHealth({ status: 'checking' });
     const backendUrl = getBackendUrl();
 
@@ -86,14 +86,14 @@ const Health: React.FC = () => {
         error: error.message || 'Failed to connect to backend',
       });
     }
-  };
+  }, [getBackendUrl]);
 
   useEffect(() => {
     checkBackendHealth();
     // Auto-refresh every 30 seconds
     const interval = setInterval(checkBackendHealth, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [checkBackendHealth]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);

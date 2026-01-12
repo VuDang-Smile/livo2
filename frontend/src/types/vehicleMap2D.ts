@@ -9,7 +9,7 @@ export interface Vehicle {
   id: string;
   name: string;
   type: 'scanner' | 'worker';
-  status: 'active' | 'inactive' | 'offline';
+  status: 'active' | 'inactive' | 'offline' | 'maintenance';
   position: { x: number; y: number; z: number };
   timestamp: string;
   source?: 'api' | 'mqtt';
