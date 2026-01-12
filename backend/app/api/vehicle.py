@@ -172,11 +172,7 @@ async def get_vehicle(vehicle_id: str):
                 orientation=Orientation(**latest_pose["orientation"]),
                 timestamp=latest_pose["timestamp"]
             ),
-            name=vehicle.get("name"),
-            description=vehicle.get("description"),
-            vehicle_type=vehicle.get("vehicle_type"),
             status=status,
-            metadata=vehicle.get("metadata"),
             created_at=vehicle.get("created_at", datetime.utcnow()),
             updated_at=vehicle.get("updated_at", datetime.utcnow())
         )

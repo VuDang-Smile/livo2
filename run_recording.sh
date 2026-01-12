@@ -52,12 +52,32 @@ echo "------------------------------------------------"
 echo "Đang khởi động giao diện tại: $GUI_DIR"
 cd "$GUI_DIR"
 
-# THÊM DÒNG NÀY: Khai báo thư mục cha để Python tìm thấy 'languages'
 export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
 
 # Kiểm tra file python có tồn tại không trước khi chạy
 if [ -f "main_recording.py" ]; then
-    python3 main_recording.py
+    # 1. Chạy script kiểm tra trạng thái ban đầu
+    python3 check_status_worker.py
+    STATUS=$?
+
+    if [ $STATUS -eq 0 ]; then
+        echo "Thiết bị đã đăng ký. Đang mở Main..."
+        python3 main_recording.py
+    else
+        echo "Thiết bị chưa đăng ký. Đang mở Register..."
+        # Chạy đăng ký
+        python3 main_registration.py
+        
+        # Sau khi main_registration.py đóng (do lệnh self.root.destroy())
+        # Chúng ta kiểm tra lại một lần nữa hoặc tin tưởng mở luôn Main:
+        echo "Đang kiểm tra lại sau đăng ký..."
+        python3 check_status_worker.py
+        if [ $? -eq 0 ]; then
+             python3 main_recording.py
+        else
+             echo "Đăng ký không thành công hoặc người dùng đã tắt form."
+        fi
+    fi
 else
-    echo "[X] Lỗi: Không tìm thấy file gui/main_recording.py"
+    echo "[X] Lỗi: Không tìm thấy file main_recording.py"
 fi
