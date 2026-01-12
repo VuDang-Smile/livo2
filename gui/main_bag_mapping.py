@@ -10,42 +10,98 @@ import threading
 import signal
 import zipfile
 import json
+# Import numpy trước (an toàn hơn)
 import numpy as np
-import cv2
+
+# Delay import cv2 để tránh segfault - import với error handling tốt hơn
+cv2 = None
+try:
+    # Thử import cv2 với error handling đầy đủ
+    import cv2
+    # Test import thành công bằng cách gọi một hàm đơn giản
+    _ = cv2.__version__
+except (ImportError, SystemError, OSError, AttributeError) as e:
+    print(f"Warning: cv2 not available: {e}. Some features will be disabled.")
+    cv2 = None
+except Exception as e:
+    # Catch tất cả các exception khác để tránh segfault
+    print(f"Warning: cv2 import failed with unexpected error: {e}. Some features will be disabled.")
+    cv2 = None
+
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import io
 import warnings
-sys.path.insert(0, str(Path(__file__).parent.parent / "languages"))
-from translate_engine import Translator
+import ctypes
+import sys
 
-# Try to import pyzbar for QR code scanning
+# Import Translator với error handling tốt hơn
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent / "languages"))
+    from translate_engine import Translator
+except (ImportError, SystemError, OSError) as e:
+    print(f"Error: Cannot import Translator: {e}")
+    # Fallback Translator class
+    class Translator:
+        def __init__(self, lang='en'):
+            self.lang = lang
+        def get(self, key, default=None):
+            return default or key
+        def switch_language(self, lang):
+            self.lang = lang
+    Translator = Translator
+
+# Try to import pyzbar for QR code scanning với error handling tốt hơn
+PYZBAR_AVAILABLE = False
+QRCODE_SYMBOLS = None
+pyzbar = None
 try:
     from pyzbar import pyzbar
+    from pyzbar.pyzbar import ZBarSymbol
     PYZBAR_AVAILABLE = True
-except ImportError:
+    # Chỉ decode QRCODE để tránh warnings từ DataBar decoder
+    QRCODE_SYMBOLS = [ZBarSymbol.QRCODE]
+except (ImportError, SystemError, OSError, AttributeError) as e:
     PYZBAR_AVAILABLE = False
-    print("Warning: pyzbar not available. QR code scanning will be disabled.")
+    QRCODE_SYMBOLS = None
+    pyzbar = None
+    print(f"Warning: pyzbar not available: {e}. QR code scanning will be disabled.")
 
-# Import geometry utils for equirectangular to perspective conversion
+# Import geometry utils với error handling tốt hơn
+GEOMETRY_UTILS_AVAILABLE = False
+get_camera_matrix = None
+get_extrinsic_matrix = None
+camera_to_world = None
+cartesian_to_spherical = None
+spherical2equirect = None
 try:
     from geometry_utils import (
         get_camera_matrix, get_extrinsic_matrix, 
         camera_to_world, cartesian_to_spherical, spherical2equirect
     )
     GEOMETRY_UTILS_AVAILABLE = True
-except ImportError:
+except (ImportError, SystemError, OSError, AttributeError) as e:
     GEOMETRY_UTILS_AVAILABLE = False
-    print("Warning: geometry_utils not available. QR code scanning will be disabled.")
+    print(f"Warning: geometry_utils not available: {e}. QR code scanning will be disabled.")
 
 # Try to import requests for backend upload
+REQUESTS_AVAILABLE = False
+requests = None
 try:
     import requests
     REQUESTS_AVAILABLE = True
-except ImportError:
+except (ImportError, SystemError, OSError):
     REQUESTS_AVAILABLE = False
+    requests = None
 
-# Try to import ROS2 for image subscription during bag playback
+# Try to import ROS2 với error handling tốt hơn
+ROS2_AVAILABLE = False
+rclpy = None
+Node = None
+SingleThreadedExecutor = None
+Image = None
+Odometry = None
+CvBridge = None
 try:
     import rclpy
     from rclpy.node import Node
@@ -54,9 +110,69 @@ try:
     from nav_msgs.msg import Odometry
     from cv_bridge import CvBridge
     ROS2_AVAILABLE = True
-except ImportError:
+except (ImportError, SystemError, OSError, AttributeError) as e:
     ROS2_AVAILABLE = False
-    print("Warning: ROS2 not available. QR code scanning from bag will be disabled.")
+    print(f"Warning: ROS2 not available: {e}. QR code scanning from bag will be disabled.")
+
+def _decode_qr_silently(gray_image):
+    """Wrapper function để decode QRCODE với suppress warnings hoàn toàn"""
+    if not PYZBAR_AVAILABLE or pyzbar is None:
+        return []
+    
+    decoded_objects = []
+    
+    # Suppress warnings ở nhiều mức
+    if sys.platform == 'linux':
+        # Linux: redirect stderr ở OS level
+        saved_stderr = None
+        devnull_fd = None
+        try:
+            devnull_fd = os.open(os.devnull, os.O_WRONLY)
+            stderr_fd = sys.stderr.fileno()
+            saved_stderr = os.dup(stderr_fd)
+            os.dup2(devnull_fd, stderr_fd)
+            os.close(devnull_fd)
+            devnull_fd = None
+            
+            # Decode chỉ QRCODE
+            try:
+                decoded_objects = pyzbar.decode(gray_image, symbols=QRCODE_SYMBOLS)
+            except (TypeError, AttributeError):
+                # Fallback: decode tất cả rồi filter
+                decoded_objects = pyzbar.decode(gray_image)
+                decoded_objects = [obj for obj in decoded_objects if obj.type == 'QRCODE']
+        except Exception:
+            pass
+        finally:
+            # Restore stderr
+            if saved_stderr is not None:
+                try:
+                    stderr_fd = sys.stderr.fileno()
+                    os.dup2(saved_stderr, stderr_fd)
+                    os.close(saved_stderr)
+                except:
+                    pass
+            if devnull_fd is not None:
+                try:
+                    os.close(devnull_fd)
+                except:
+                    pass
+    else:
+        # Windows/Mac: dùng redirect_stderr
+        stderr_buffer = io.StringIO()
+        with contextlib.redirect_stderr(stderr_buffer):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                try:
+                    decoded_objects = pyzbar.decode(gray_image, symbols=QRCODE_SYMBOLS)
+                except (TypeError, AttributeError):
+                    decoded_objects = pyzbar.decode(gray_image)
+                    decoded_objects = [obj for obj in decoded_objects if obj.type == 'QRCODE']
+                except Exception:
+                    decoded_objects = []
+    
+    return decoded_objects
+
 
 class QRScanner:
     """Class để quét QR code từ ảnh equirectangular"""
@@ -66,7 +182,8 @@ class QRScanner:
         self.max_workers = max_workers
         self._remap_cache = {}
         
-        if not PYZBAR_AVAILABLE or not GEOMETRY_UTILS_AVAILABLE:
+        # Kiểm tra tất cả dependencies trước khi enable
+        if not PYZBAR_AVAILABLE or not GEOMETRY_UTILS_AVAILABLE or cv2 is None:
             self.enabled = False
         else:
             self.enabled = True
@@ -80,6 +197,9 @@ class QRScanner:
         """
         Convert equirectangular image to perspective view with caching for speed.
         """
+        if cv2 is None or not GEOMETRY_UTILS_AVAILABLE:
+            raise RuntimeError("cv2 or geometry_utils not available")
+        
         key = (THETA, PHI, FOV, height, width)
         if key in self._remap_cache:
             XY = self._remap_cache[key]
@@ -148,49 +268,50 @@ class QRScanner:
 
                     def process_view(args):
                         theta, phi = args
-                        persp = self.Equirec2Perspec(frame, fov, theta, phi,
-                                                    self.perspec_size, self.perspec_size)
-                        gray = cv2.cvtColor(persp, cv2.COLOR_BGR2GRAY)
-                        # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-                        # gray = clahe.apply(gray)
-                        # gray = cv2.GaussianBlur(gray, (3,3), 0)
+                        if cv2 is None:
+                            return [], None
                         
-                        # Suppress zbar warnings và chỉ lấy QR code
-                        # Redirect stderr để suppress zbar warnings
-                        stderr_buffer = io.StringIO()
-                        with contextlib.redirect_stderr(stderr_buffer):
-                            try:
-                                decoded_objects = pyzbar.decode(gray)
-                            except Exception:
-                                decoded_objects = []
-                        
-                        # Chỉ lấy QR code, bỏ qua DataBar và các loại barcode khác
-                        qr_codes = [obj for obj in decoded_objects if obj.type == 'QRCODE']
-                        
-                        results = []
-                        debug_img = None
+                        try:
+                            persp = self.Equirec2Perspec(frame, fov, theta, phi,
+                                                        self.perspec_size, self.perspec_size)
+                            gray = cv2.cvtColor(persp, cv2.COLOR_BGR2GRAY)
+                            # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+                            # gray = clahe.apply(gray)
+                            # gray = cv2.GaussianBlur(gray, (3,3), 0)
+                            
+                            # Sử dụng wrapper function để suppress warnings hoàn toàn
+                            decoded_objects = _decode_qr_silently(gray)
+                            
+                            # Tất cả decoded_objects đã là QRCODE
+                            qr_codes = decoded_objects
+                            
+                            results = []
+                            debug_img = None
 
-                        for qr in qr_codes:
-                            results.append({
-                                "data": qr.data.decode('utf-8'),
-                                "rect": {
-                                    "left": qr.rect.left,
-                                    "top": qr.rect.top,
-                                    "width": qr.rect.width,
-                                    "height": qr.rect.height
-                                },
-                                "view": (theta, phi),
-                                "zoom": fov
-                            })
+                            for qr in qr_codes:
+                                results.append({
+                                    "data": qr.data.decode('utf-8'),
+                                    "rect": {
+                                        "left": qr.rect.left,
+                                        "top": qr.rect.top,
+                                        "width": qr.rect.width,
+                                        "height": qr.rect.height
+                                    },
+                                    "view": (theta, phi),
+                                    "zoom": fov
+                                })
 
-                            # Tạo debug image nếu cần (giống logic từ nhánh)
-                            x, y, w, h = qr.rect.left, qr.rect.top, qr.rect.width, qr.rect.height
-                            debug_img = persp.copy()
-                            cv2.rectangle(debug_img, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                            cv2.putText(debug_img, qr.data.decode('utf-8'), (x, y - 10),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                                # Tạo debug image nếu cần (giống logic từ nhánh)
+                                x, y, w, h = qr.rect.left, qr.rect.top, qr.rect.width, qr.rect.height
+                                debug_img = persp.copy()
+                                cv2.rectangle(debug_img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                                cv2.putText(debug_img, qr.data.decode('utf-8'), (x, y - 10),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-                        return results, debug_img  # trả về debug image
+                            return results, debug_img  # trả về debug image
+                        except Exception as e:
+                            # Tránh crash nếu có lỗi trong quá trình xử lý
+                            return [], None
 
                     with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                         futures = executor.map(process_view, views)
@@ -254,6 +375,9 @@ class QRImageSubscriberNode(Node):
     def image_callback(self, msg):
         """Callback when receiving image"""
         try:
+            if cv2 is None or CvBridge is None:
+                return
+            
             # Handle JPEG compressed images
             if msg.encoding.lower() in ['jpeg', 'jpg']:
                 # Decode JPEG data directly from compressed format
@@ -273,7 +397,8 @@ class QRImageSubscriberNode(Node):
             
         except Exception as e:
             error_msg = f'Error processing image from {self.image_topic_name}: {e}'
-            self.get_logger().error(error_msg)
+            if hasattr(self, 'get_logger'):
+                self.get_logger().error(error_msg)
             print(f'[QRImageSubscriberNode] ERROR: {error_msg}')
     
     def odom_callback(self, msg):
@@ -306,6 +431,8 @@ class BagMappingInterface:
         
         self.mapping_process = None
         self.is_mapping_running = False
+        # Flag để phân biệt crash thực sự và graceful shutdown từ STOP button
+        self.is_stopping = False
         # Thêm process cho ros2 bag play
         self.bag_process = None
         self.is_bag_playing = False
@@ -315,8 +442,21 @@ class BagMappingInterface:
         # Backend URL for map upload
         self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.tm")
         
-        # QR code scanning
-        self.qr_scanner = QRScanner() if (PYZBAR_AVAILABLE and GEOMETRY_UTILS_AVAILABLE) else None
+        # QR code scanning - chỉ khởi tạo nếu tất cả dependencies có sẵn
+        try:
+            if PYZBAR_AVAILABLE and GEOMETRY_UTILS_AVAILABLE and cv2 is not None:
+                self.qr_scanner = QRScanner()
+            else:
+                self.qr_scanner = None
+                if not PYZBAR_AVAILABLE:
+                    print("Warning: pyzbar not available. QR scanning disabled.")
+                if not GEOMETRY_UTILS_AVAILABLE:
+                    print("Warning: geometry_utils not available. QR scanning disabled.")
+                if cv2 is None:
+                    print("Warning: cv2 not available. QR scanning disabled.")
+        except Exception as e:
+            print(f"Warning: Failed to initialize QRScanner: {e}. QR scanning disabled.")
+            self.qr_scanner = None
         self.detected_qr_codes = []  # List of detected QR codes
         self.qr_codes_lock = threading.Lock()  # Lock for thread-safe access
         
@@ -1093,6 +1233,10 @@ class BagMappingInterface:
             self.add_log(self.translator.get('log.qr_scanner_not_available', '⚠️ QR scanner is not available. Please install pyzbar and geometry_utils.'))
             return []
         
+        if cv2 is None:
+            self.add_log('⚠️ cv2 not available. Cannot scan QR codes.')
+            return []
+        
         try:
             # Chuyển đổi BGR sang RGB nếu cần
             if len(cv_image.shape) == 3 and cv_image.shape[2] == 3:
@@ -1554,7 +1698,8 @@ class BagMappingInterface:
             if self.is_mapping_running and self.mapping_process:
                 if self.mapping_process.poll() is not None:
                     exit_code = self.mapping_process.returncode
-                    if exit_code != 0:
+                    # Chỉ xử lý như crash nếu không phải graceful shutdown
+                    if exit_code != 0 and not (self.is_stopping or exit_code == -15):
                         self._handle_mapping_crash(exit_code, "Process exited unexpectedly")
                         
         except Exception as e:
@@ -1567,6 +1712,14 @@ class BagMappingInterface:
     def _handle_mapping_crash(self, exit_code, error_line):
         """Xử lý khi mapping process bị crash"""
         if not self.is_mapping_running:
+            return
+        
+        # Kiểm tra nếu đang dừng từ STOP button (Signal 15 = SIGTERM)
+        # Signal 15 là graceful shutdown, không phải crash
+        if self.is_stopping or exit_code == -15:
+            # Đây là graceful shutdown từ STOP button, không phải crash
+            self.is_mapping_running = False
+            self.add_log(self.translator.get('log.mapping_stopped_by_user', '✅ Mapping process stopped by user'))
             return
         
         self.is_mapping_running = False
@@ -1761,6 +1914,9 @@ class BagMappingInterface:
         self.qr_frame_count = 0
     
     def cleanup_processes(self):
+        # Đánh dấu đang dừng để tránh hiển thị dialog crash
+        self.is_stopping = True
+        
         # Dừng QR scanning subscriber trước
         self.stop_qr_scanning_subscriber()
         # Dừng bag play trước
@@ -1831,6 +1987,9 @@ class BagMappingInterface:
             self.add_log(self.translator.get('log.pcd_detected', '✅ PCD files detected, ready to upload'))
         else:
             self.upload_stat.config(text="Waiting for PCD files...")
+        
+        # Reset flag sau khi cleanup xong
+        self.is_stopping = False
     
     # --- PCD Processing Functions ---
     def merge_pcd_files(self, silent=False):
@@ -2067,11 +2226,16 @@ class BagMappingInterface:
             return False
     
     def _run_sc_core(self):
-        """Core logic của ScanContext tiling (đồng bộ) - sử dụng input từ hba_map"""
+        """Core logic của ScanContext tiling (đồng bộ) - sử dụng input từ hba_map với error handling tốt hơn"""
         hba_map_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "hba_map"
         merged_map_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "merged_map"
         sc_script = Path(__file__).parent.parent / "scripts" / "generate_fast_localization_map.py"
         output_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "fastloc_map"
+
+        # Kiểm tra script tồn tại
+        if not sc_script.exists():
+            self.add_log(self.translator.get('log.sc_script_not_found', '❌ ScanContext script not found: {path}').replace('{path}', str(sc_script)))
+            return False
 
         # Ưu tiên input từ hba_map, fallback về merged_map
         input_pcd = hba_map_dir / "merge_all_hba.pcd"
@@ -2082,37 +2246,222 @@ class BagMappingInterface:
                 self.add_log(self.translator.get('log.no_merged_pcd_found', '❌ No merged PCD files found'))
                 return False
 
+        # Validate input file
+        try:
+            file_size = input_pcd.stat().st_size
+            file_size_mb = file_size / (1024 * 1024)
+            
+            if file_size == 0:
+                self.add_log(self.translator.get('log.sc_input_empty', '❌ Input PCD file is empty'))
+                return False
+            
+            self.add_log(self.translator.get('log.sc_input_size', '📦 Input file size: {size:.2f} MB').replace('{size:.2f}', f'{file_size_mb:.2f}'))
+            
+            # Cảnh báo nếu file quá lớn (>1GB)
+            if file_size > 1024 * 1024 * 1024:
+                self.add_log(self.translator.get('log.sc_file_very_large', 
+                    '⚠️ Warning: Input file is very large ({size:.1f}GB). Processing may take a long time and use significant memory.').replace('{size:.1f}', f'{file_size_mb/1024:.1f}'))
+        except OSError as e:
+            self.add_log(self.translator.get('log.sc_cannot_read_input', '❌ Cannot read input file: {error}').replace('{error}', str(e)))
+            return False
+
+        # Kiểm tra memory trước khi chạy
+        try:
+            import psutil
+            memory = psutil.virtual_memory()
+            available_gb = memory.available / (1024**3)
+            
+            # Ước tính memory cần thiết: khoảng 3-5x file size
+            estimated_memory_gb = (file_size_mb / 1024) * 4
+            
+            if available_gb < estimated_memory_gb:
+                self.add_log(self.translator.get('log.sc_low_memory', 
+                    '⚠️ Warning: Available memory ({available:.1f}GB) may be insufficient for processing ({estimated:.1f}GB estimated).').replace('{available:.1f}', f'{available_gb:.1f}').replace('{estimated:.1f}', f'{estimated_memory_gb:.1f}'))
+        except ImportError:
+            # psutil không có, bỏ qua check
+            pass
+        except Exception as e:
+            self.add_log(f"⚠️ Warning: Cannot check memory: {e}")
+
         self.add_log("=" * 60)
         self.add_log(self.translator.get('log.sc_start', '🗺️ Preparing ScanContext map from {filename}...').replace('{filename}', input_pcd.name))
         self.add_log(f"📁 Input: {input_pcd.parent}")
         self.add_log(f"📁 Output: {output_dir}")
 
+        # Tạo output directory trước
         try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            self.add_log(self.translator.get('log.sc_cannot_create_output', '❌ Cannot create output directory: {error}').replace('{error}', str(e)))
+            return False
+
+        process = None
+        try:
+            # Tính toán timeout động: ít nhất 300s (5 phút), thêm 60s cho mỗi 100MB
+            base_timeout = 300
+            timeout_per_100mb = 60
+            dynamic_timeout = base_timeout + int((file_size_mb / 100) * timeout_per_100mb)
+            # Giới hạn timeout tối đa 3600s (1 giờ)
+            process_timeout = min(dynamic_timeout, 3600)
+            
+            self.add_log(self.translator.get('log.sc_timeout', '⏱️ Process timeout: {timeout}s').replace('{timeout}', str(process_timeout)))
+            
             cmd = (
                 f"python3 {sc_script} "
                 f"--input_pcd {input_pcd} "
                 f"--output_dir {output_dir} "
                 f"--strip_color --voxel_size 0.2 --tile_size 50.0"
             )
+            
+            self.add_log(self.translator.get('log.sc_running', '▶️ Running ScanContext script...'))
+            
             process = subprocess.Popen(
-                cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                cmd, 
+                shell=True, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True,
+                bufsize=1,
+                universal_newlines=True
             )
             
-            for line in iter(process.stdout.readline, ''):
-                if line:
-                    self.add_log(f"[ScanContext] {line.strip()}")
+            # Đọc output với timeout
+            output_lines = []
+            start_time = time.time()
             
-            process.wait()
+            while True:
+                # Kiểm tra timeout
+                elapsed = time.time() - start_time
+                if elapsed > process_timeout:
+                    self.add_log(self.translator.get('log.sc_timeout_reached', '❌ Process timeout reached ({timeout}s). Terminating...').replace('{timeout}', str(process_timeout)))
+                    try:
+                        if hasattr(os, 'setsid'):
+                            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                        else:
+                            process.terminate()
+                    except:
+                        pass
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            if hasattr(os, 'setsid'):
+                                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                            else:
+                                process.kill()
+                        except:
+                            pass
+                    return False
+                
+                # Đọc line với timeout ngắn
+                try:
+                    line = process.stdout.readline()
+                    if not line:
+                        # Process đã kết thúc
+                        break
+                    if line.strip():
+                        output_lines.append(line.strip())
+                        self.add_log(f"[ScanContext] {line.strip()}")
+                except Exception as e:
+                    self.add_log(f"⚠️ Error reading output: {e}")
+                    break
             
-            if process.returncode == 0:
+            # Đợi process kết thúc
+            try:
+                return_code = process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.add_log(self.translator.get('log.sc_process_hanging', '⚠️ Process seems to be hanging, forcing termination...'))
+                try:
+                    if hasattr(os, 'setsid'):
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    else:
+                        process.kill()
+                except:
+                    pass
+                return False
+            
+            # Kiểm tra exit code
+            if return_code == 0:
+                # Validate output
+                index_file = output_dir / "index.json"
+                if not index_file.exists():
+                    self.add_log(self.translator.get('log.sc_no_index_file', '⚠️ Process completed but index.json not found'))
+                    return False
+                
+                # Đếm số tile files - tiles được lưu trong thư mục con "pcd"
+                tiles_dir = output_dir / "pcd"
+                if tiles_dir.exists():
+                    tile_files = list(tiles_dir.glob("*.pcd"))
+                else:
+                    # Fallback: tìm trong output_dir trực tiếp (cho tương thích ngược)
+                    tile_files = list(output_dir.glob("*.pcd"))
+                
+                if len(tile_files) == 0:
+                    self.add_log(self.translator.get('log.sc_no_tiles', '⚠️ Process completed but no tile files found'))
+                    # Log thêm thông tin để debug
+                    if tiles_dir.exists():
+                        self.add_log(f"   Checked directory: {tiles_dir}")
+                        all_files = list(tiles_dir.glob("*"))
+                        if all_files:
+                            self.add_log(f"   Found {len(all_files)} files in pcd directory (but no .pcd files)")
+                    return False
+                
+                self.add_log("=" * 60)
                 self.add_log(self.translator.get('log.sc_success', '✅ ScanContext Tiling successful!'))
                 self.add_log(f"📁 Output: {output_dir}")
+                self.add_log(self.translator.get('log.sc_tiles_created', '📊 Tiles created: {count}').replace('{count}', str(len(tile_files))))
+                self.add_log("=" * 60)
                 return True
             else:
-                self.add_log(self.translator.get('log.sc_failed', '❌ Tiling failed with code {code}').replace('{code}', str(process.returncode)))
+                # Process failed
+                error_msg = self.translator.get('log.sc_failed', '❌ Tiling failed with code {code}').replace('{code}', str(return_code))
+                self.add_log(error_msg)
+                
+                # Log last few lines of output để debug
+                if output_lines:
+                    self.add_log(self.translator.get('log.sc_last_output', 'Last output lines:'))
+                    for line in output_lines[-10:]:
+                        self.add_log(f"   {line}")
+                
                 return False
+                
+        except subprocess.TimeoutExpired:
+            self.add_log(self.translator.get('log.sc_timeout_error', '❌ Process timeout'))
+            if process:
+                try:
+                    if hasattr(os, 'setsid'):
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    else:
+                        process.kill()
+                except:
+                    pass
+            return False
+        except KeyboardInterrupt:
+            self.add_log(self.translator.get('log.sc_interrupted', '⚠️ Process interrupted by user'))
+            if process:
+                try:
+                    if hasattr(os, 'setsid'):
+                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                    else:
+                        process.terminate()
+                except:
+                    pass
+            return False
         except Exception as e:
-            self.add_log(self.translator.get('log.sc_error', '❌ ScanContext error: {error}').replace('{error}', str(e)))
+            error_msg = self.translator.get('log.sc_error', '❌ ScanContext error: {error}').replace('{error}', str(e))
+            self.add_log(error_msg)
+            import traceback
+            self.add_log(f"   Details: {traceback.format_exc()[:500]}")
+            
+            # Cleanup process nếu còn chạy
+            if process:
+                try:
+                    if hasattr(os, 'setsid'):
+                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                    else:
+                        process.terminate()
+                except:
+                    pass
             return False
     
     def _generate_floorplan(self):
@@ -2324,49 +2673,266 @@ class BagMappingInterface:
             return None
     
     def _upload_map_to_backend(self, zip_path: Path):
-        """Upload file zip map lên backend."""
+        """Upload file zip map lên backend với retry mechanism và error handling tốt hơn."""
         if not REQUESTS_AVAILABLE:
             msg = self.translator.get('log.upload_backend_requests_missing', 'Missing requests library. Install with: pip install requests')
             self.add_log(f"❌ {msg}")
             return False, msg
         
         zip_path = Path(zip_path)
+        
+        # Validate file tồn tại và có thể đọc được
         if not zip_path.exists():
             error_msg = self.translator.get('log.upload_backend_file_not_found', 'File not found: {path}').replace('{path}', str(zip_path))
+            self.add_log(f"❌ {error_msg}")
+            return False, error_msg
+        
+        # Kiểm tra file size để tránh upload file quá lớn hoặc rỗng
+        try:
+            file_size = zip_path.stat().st_size
+            file_size_mb = file_size / (1024 * 1024)
+            
+            if file_size == 0:
+                error_msg = self.translator.get('log.upload_file_empty', 'File is empty: {path}').replace('{path}', str(zip_path))
+                self.add_log(f"❌ {error_msg}")
+                return False, error_msg
+            
+            # Cảnh báo nếu file quá lớn (>500MB)
+            if file_size > 500 * 1024 * 1024:
+                self.add_log(self.translator.get('log.upload_file_large', 
+                    '⚠️ Warning: File is very large ({size:.1f}MB). Upload may take a long time.').replace('{size:.1f}', f'{file_size_mb:.1f}'))
+            
+            self.add_log(self.translator.get('log.upload_file_size', 
+                '📦 File size: {size:.2f} MB').replace('{size:.2f}', f'{file_size_mb:.2f}'))
+        except OSError as e:
+            error_msg = self.translator.get('log.upload_cannot_read_file', 
+                'Cannot read file: {error}').replace('{error}', str(e))
+            self.add_log(f"❌ {error_msg}")
             return False, error_msg
         
         upload_url = f"{self.backend_base_url.rstrip('/')}/api/v1/maps/upload"
         self.add_log(self.translator.get('log.upload_endpoint', '🌐 Endpoint: {url}').replace('{url}', upload_url))
         
-        try:
-            with open(zip_path, "rb") as f:
-                files = {"file": (zip_path.name, f, "application/zip")}
-                response = requests.post(upload_url, files=files, timeout=120)
-            
-            if response.status_code in (200, 201):
-                upload_id = None
-                try:
-                    data = response.json()
-                    upload_id = data.get("upload_id") or data.get("uploadId")
-                except Exception:
-                    upload_id = None
-                return True, upload_id
-            
-            # Non-200 response
-            error_text = response.text.strip()[:200] if response.text else f"status {response.status_code}"
-            return False, error_text
+        # Tính toán timeout động: ít nhất 60s, thêm 30s cho mỗi 10MB
+        base_timeout = 60
+        timeout_per_10mb = 30
+        dynamic_timeout = base_timeout + int((file_size_mb / 10) * timeout_per_10mb)
+        # Giới hạn timeout tối đa 600s (10 phút) để tránh chờ quá lâu
+        upload_timeout = min(dynamic_timeout, 600)
+        self.add_log(self.translator.get('log.upload_timeout', 
+            '⏱️ Upload timeout: {timeout}s').replace('{timeout}', str(upload_timeout)))
         
-        except requests.exceptions.RequestException as e:
-            return False, str(e)
+        # Retry configuration
+        max_retries = 3
+        retry_delays = [2, 5, 10]  # Exponential backoff: 2s, 5s, 10s
+        
+        # Tạo session để reuse connection và cải thiện performance
+        session = None
+        try:
+            session = requests.Session()
+            # Tăng connection pool size
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=1,
+                pool_maxsize=1,
+                max_retries=0  # Tự quản lý retry
+            )
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+            
+            # Retry loop
+            last_error = None
+            for attempt in range(max_retries):
+                if attempt > 0:
+                    delay = retry_delays[min(attempt - 1, len(retry_delays) - 1)]
+                    self.add_log(self.translator.get('log.upload_retry', 
+                        '🔄 Retrying upload (attempt {attempt}/{max}) after {delay}s...').replace('{attempt}', str(attempt + 1)).replace('{max}', str(max_retries)).replace('{delay}', str(delay)))
+                    time.sleep(delay)
+                
+                try:
+                    # Sử dụng streaming upload để tránh load toàn bộ file vào memory
+                    # Điều này giúp tránh crash với file lớn
+                    self.add_log(self.translator.get('log.upload_starting', 
+                        '📤 Starting upload (attempt {attempt}/{max})...').replace('{attempt}', str(attempt + 1)).replace('{max}', str(max_retries)))
+                    
+                    start_time = time.time()
+                    
+                    # Mở file với context manager để đảm bảo đóng đúng cách
+                    with open(zip_path, "rb") as f:
+                        files = {"file": (zip_path.name, f, "application/zip")}
+                        
+                        # Upload với timeout và streaming
+                        response = session.post(
+                            upload_url,
+                            files=files,
+                            timeout=(10, upload_timeout),  # (connect timeout, read timeout)
+                            stream=False  # False để đảm bảo upload hoàn tất
+                        )
+                    
+                    upload_duration = time.time() - start_time
+                    upload_speed_mbps = (file_size_mb / upload_duration) if upload_duration > 0 else 0
+                    
+                    self.add_log(self.translator.get('log.upload_completed', 
+                        '✅ Upload completed in {duration:.1f}s ({speed:.2f} MB/s)').replace('{duration:.1f}', f'{upload_duration:.1f}').replace('{speed:.2f}', f'{upload_speed_mbps:.2f}'))
+                    
+                    # Validate response
+                    if response.status_code in (200, 201):
+                        upload_id = None
+                        try:
+                            data = response.json()
+                            upload_id = data.get("upload_id") or data.get("uploadId") or data.get("id")
+                            
+                            if upload_id:
+                                self.add_log(self.translator.get('log.upload_success_with_id', 
+                                    '✅ Upload successful! Upload ID: {id}').replace('{id}', str(upload_id)))
+                            else:
+                                self.add_log(self.translator.get('log.upload_success_no_id', 
+                                    '✅ Upload successful! (No upload ID in response)'))
+                        except (ValueError, KeyError) as e:
+                            # Response không phải JSON hoặc không có upload_id
+                            self.add_log(self.translator.get('log.upload_success_invalid_response', 
+                                '⚠️ Upload successful but response format unexpected: {error}').replace('{error}', str(e)))
+                            upload_id = None
+                        
+                        return True, upload_id
+                    
+                    # Non-200 response - không retry cho client errors (4xx)
+                    if 400 <= response.status_code < 500:
+                        error_text = response.text.strip()[:500] if response.text else f"HTTP {response.status_code}"
+                        error_msg = self.translator.get('log.upload_client_error', 
+                            '❌ Client error (HTTP {code}): {error}').replace('{code}', str(response.status_code)).replace('{error}', error_text)
+                        self.add_log(error_msg)
+                        return False, error_text
+                    
+                    # Server errors (5xx) - có thể retry
+                    if 500 <= response.status_code < 600:
+                        error_text = response.text.strip()[:500] if response.text else f"HTTP {response.status_code}"
+                        last_error = f"Server error (HTTP {response.status_code}): {error_text}"
+                        self.add_log(f"⚠️ {last_error}")
+                        # Tiếp tục retry loop
+                        continue
+                    
+                    # Unknown status code
+                    error_text = response.text.strip()[:500] if response.text else f"HTTP {response.status_code}"
+                    last_error = f"Unexpected status code {response.status_code}: {error_text}"
+                    self.add_log(f"⚠️ {last_error}")
+                    # Tiếp tục retry loop
+                    continue
+                
+                except requests.exceptions.Timeout as e:
+                    last_error = self.translator.get('log.upload_timeout_error', 
+                        'Upload timeout after {timeout}s').replace('{timeout}', str(upload_timeout))
+                    self.add_log(f"⚠️ {last_error}")
+                    # Retry nếu chưa hết số lần thử
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return False, last_error
+                
+                except requests.exceptions.ConnectionError as e:
+                    last_error = self.translator.get('log.upload_connection_error', 
+                        'Connection error: {error}').replace('{error}', str(e))
+                    self.add_log(f"⚠️ {last_error}")
+                    # Retry nếu chưa hết số lần thử
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return False, last_error
+                
+                except requests.exceptions.RequestException as e:
+                    last_error = self.translator.get('log.upload_request_error', 
+                        'Request error: {error}').replace('{error}', str(e))
+                    self.add_log(f"⚠️ {last_error}")
+                    # Retry nếu chưa hết số lần thử
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return False, last_error
+                
+                except IOError as e:
+                    # File I/O error - không retry
+                    error_msg = self.translator.get('log.upload_io_error', 
+                        'File I/O error: {error}').replace('{error}', str(e))
+                    self.add_log(f"❌ {error_msg}")
+                    return False, error_msg
+                
+                except Exception as e:
+                    # Unexpected error
+                    error_msg = self.translator.get('log.upload_unexpected_error', 
+                        'Unexpected error: {error}').replace('{error}', str(e))
+                    self.add_log(f"❌ {error_msg}")
+                    import traceback
+                    self.add_log(f"   Details: {traceback.format_exc()[:500]}")
+                    # Retry nếu chưa hết số lần thử
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return False, error_msg
+            
+            # Tất cả retry đã thất bại
+            final_error = self.translator.get('log.upload_all_retries_failed', 
+                'All retry attempts failed. Last error: {error}').replace('{error}', str(last_error))
+            self.add_log(f"❌ {final_error}")
+            return False, last_error or "Unknown error"
+        
+        finally:
+            # Đảm bảo đóng session
+            if session:
+                try:
+                    session.close()
+                except:
+                    pass
     
     def stop_process(self):
+        # Đánh dấu đang dừng từ STOP button
+        self.is_stopping = True
         self.cleanup_processes()
         self.btn_start.config(state=tk.NORMAL)
         self.progress['value'] = 0
         self.status_label.config(text=self.translator.get('label.status_stopped', 'Status: Stopped'))
         self.add_log(self.translator.get('log.process_terminated', 'PROCESS: Mapping and Upload terminated.'))
+        # Flag sẽ được reset trong cleanup_processes()
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = BagMappingInterface(root)
-    root.mainloop()
+    try:
+        # Khởi tạo root window trước
+        root = tk.Tk()
+        
+        # Thử khởi tạo ứng dụng với error handling tốt hơn
+        try:
+            app = BagMappingInterface(root)
+        except Exception as e:
+            print(f"Error initializing BagMappingInterface: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Hiển thị error dialog nếu có thể
+            try:
+                import tkinter.messagebox as mb
+                mb.showerror(
+                    "Initialization Error",
+                    f"Failed to initialize application:\n\n{str(e)}\n\n"
+                    "Some features may be disabled. Check console for details."
+                )
+            except:
+                pass
+            
+            # Vẫn chạy mainloop để không crash hoàn toàn
+            # Nhưng ứng dụng có thể không hoạt động đầy đủ
+            root.destroy()
+            sys.exit(1)
+        
+        # Chạy main loop với error handling
+        try:
+            root.mainloop()
+        except KeyboardInterrupt:
+            print("\nApplication interrupted by user")
+        except Exception as e:
+            print(f"Error in main loop: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
