@@ -533,27 +533,46 @@ class LivoxApp:
     #         self.stop_recording()
 
     def toggle_recording(self):
-        if not self.recorder.is_recording:
-            # Gọi logic start từ file riêng
-            success = self.recorder.start(
-                output_dir_str=self.output_dir_var.get(),
-                topic_vars=self.topic_vars,
-                workspace_path=self.workspace_path,
-                drive_ws_path=self.drive_ws_path,
-                max_bag_size_str=self.max_bag_size_var.get()
-            )
-            
-            if success:
+        # Disable button để tránh double-click và race condition
+        self.btn_record.config(state=tk.DISABLED)
+        
+        try:
+            if not self.recorder.is_recording:
+                # Gọi logic start từ file riêng
+                success = self.recorder.start(
+                    output_dir_str=self.output_dir_var.get(),
+                    topic_vars=self.topic_vars,
+                    workspace_path=self.workspace_path,
+                    drive_ws_path=self.drive_ws_path,
+                    max_bag_size_str=self.max_bag_size_var.get()
+                )
+                
+                if success:
+                    self.btn_record.config(text="■ STOP RECORDING", state=tk.NORMAL)
+                    self.lbl_status.config(text="Status: Recording...", fg="red")
+                    # self.btn_upload.pack_forget()
+                else:
+                    # Nếu start thất bại, enable lại button
+                    self.btn_record.config(state=tk.NORMAL)
+            else:
+                # Gọi logic stop từ file riêng
+                saved_path = self.recorder.stop()
+                self.btn_record.config(text="● START RECORDING", state=tk.NORMAL)
+                self.lbl_status.config(text=f"Status: Saved", fg="green")
+                # self.btn_upload.pack(side="left", padx=10)
+                if saved_path:
+                    self.log(f"✅ Đã lưu tại: {saved_path}")
+        except Exception as e:
+            # Xử lý exception và đảm bảo button được enable lại
+            self.log(f"❌ Lỗi trong toggle_recording: {e}")
+            self.btn_record.config(state=tk.NORMAL)
+            # Sync lại UI state
+            if self.recorder.is_recording:
                 self.btn_record.config(text="■ STOP RECORDING")
                 self.lbl_status.config(text="Status: Recording...", fg="red")
-                # self.btn_upload.pack_forget()
-        else:
-            # Gọi logic stop từ file riêng
-            saved_path = self.recorder.stop()
-            self.btn_record.config(text="● START RECORDING")
-            self.lbl_status.config(text=f"Status: Saved", fg="green")
-            # self.btn_upload.pack(side="left", padx=10)
-            self.log(f"✅ Đã lưu tại: {saved_path}")
+            else:
+                self.btn_record.config(text="● START RECORDING")
+                self.lbl_status.config(text="Status: Ready", fg="black")
 
     def check_mid360_connection(self):
         """Kiểm tra kết nối và lưu vào biến self.is_mid360_connected"""
@@ -605,59 +624,102 @@ class LivoxApp:
     
     def update_ui_theta_connected(self, is_active_theta):
         """Hàm này chuyên trách việc đổi màu/text trên giao diện"""
-        # Xác định màu sắc dựa trên biến success
+        # Kiểm tra xem các widget đã được khởi tạo chưa
+        if not hasattr(self, 'label_theta') or not hasattr(self, 'btn_start_livox'):
+            # Nếu widget chưa được khởi tạo, schedule lại sau
+            self.root.after(100, lambda: self.update_ui_theta_connected(is_active_theta))
+            return
         
-        color = "green" if is_active_theta else "red"
-        
-        # Xác định nội dung text dựa trên biến success
-        status_text = translator.get("status.running") if is_active_theta else translator.get("status.not_running")
+        try:
+            # Xác định màu sắc dựa trên biến success
+            color = "green" if is_active_theta else "red"
+            
+            # Xác định nội dung text dựa trên biến success
+            status_text = translator.get("status.running") if is_active_theta else translator.get("status.not_running")
 
-        print(f"UI cập nhật: is_active_theta={is_active_theta}")
-        
-        # Cập nhật UI Theta
-        full_text_theta = f"● {translator.get('label.theta_driver')}: {status_text}"
+            print(f"UI cập nhật: is_active_theta={is_active_theta}")
+            
+            # Cập nhật UI Theta
+            full_text_theta = f"● {translator.get('label.theta_driver')}: {status_text}"
 
-        self.label_theta.config(text=full_text_theta, fg=color)
-        if is_active_theta:
-            self.btn_start_livox.config(state=tk.DISABLED)
-            self.btn_stop_livox.config(state=tk.NORMAL)
-        else:
-            self.btn_start_livox.config(state=tk.NORMAL)
-            self.btn_stop_livox.config(state=tk.DISABLED)
+            self.label_theta.config(text=full_text_theta, fg=color)
+            if is_active_theta:
+                self.btn_start_livox.config(state=tk.DISABLED)
+                self.btn_stop_livox.config(state=tk.NORMAL)
+            else:
+                self.btn_start_livox.config(state=tk.NORMAL)
+                self.btn_stop_livox.config(state=tk.DISABLED)
+        except Exception as e:
+            # Log lỗi nhưng không crash
+            print(f"⚠️  Lỗi khi cập nhật UI theta: {e}")
+            import traceback
+            traceback.print_exc()
 
         # self.label_livox.config(text=full_text_livox, fg=color)
     
     def stop_livox_driver(self):
-        self.theta_driver.stop_all()
-        self.livox_tab.stop_livox_driver()
-        self.livox_tab.stop_converter()
-        self.livox_tab.stop_ros_subscriber()
+        """Stop tất cả drivers và đảm bảo cleanup hoàn toàn"""
+        try:
+            # Stop theo thứ tự để tránh dependency issues
+            if hasattr(self, 'livox_tab') and self.livox_tab:
+                self.livox_tab.stop_ros_subscriber()
+                self.livox_tab.stop_converter()
+                self.livox_tab.stop_livox_driver()
+            
+            if hasattr(self, 'theta_driver') and self.theta_driver:
+                self.theta_driver.stop_all()
+            
+            # Chờ một chút để đảm bảo processes đã dừng
+            time.sleep(0.5)
+            
+            # Cập nhật UI để enable lại nút start và disable nút stop
+            self.update_ui_theta_connected(False)
+        except Exception as e:
+            self.log(f"⚠️  Lỗi khi stop drivers: {e}")
+            # Đảm bảo UI được cập nhật ngay cả khi có lỗi
+            self.update_ui_theta_connected(False)
     
     def start_livox_driver(self):
+        """Start livox driver với proper sequencing và cleanup"""
         # Disable nút bấm để tránh người dùng click loạn xạ gây crash
         self.btn_start_livox.config(state=tk.DISABLED)
         
-        # def run_start():
-        try:
-            self.stop_livox_driver()
-            time.sleep(1.0) # Chờ 1 giây để các process cũ giải phóng port
-            
-            self.log(translator.get("log.starting_livox_theta_drivers"))
-            self.check_mid360_connection()
-            
-            # Khởi chạy các driver
-            self.theta_driver.check_theta_usb_connection(self.check_theta_usb_callback)
-            self.theta_driver.launch_theta_driver()
-            self.livox_tab.start_livox_driver()
-            
-            self.log("✅ Hệ thống đã khởi động lại")
-        except Exception as e:
-            self.log(f"❌ Lỗi: {e}")
-        # finally:
-            # Cho phép bấm nút lại sau khi xử lý xong
-            # self.root.after(0, lambda: self.btn_start_livox.config(state=tk.NORMAL))
-
-        # threading.Thread(target=run_start, daemon=True).start()
+        def run_start():
+            success = False
+            try:
+                # Đảm bảo stop tất cả processes cũ trước
+                self.log("Đang dừng các processes cũ...")
+                self.stop_livox_driver()
+                
+                # Chờ đủ lâu để các process cũ giải phóng port và resources
+                time.sleep(1.5)
+                
+                self.log(translator.get("log.starting_livox_theta_drivers"))
+                self.check_mid360_connection()
+                
+                # Khởi chạy các driver theo thứ tự
+                self.theta_driver.check_theta_usb_connection(self.check_theta_usb_callback)
+                self.theta_driver.launch_theta_driver()
+                
+                # Chờ một chút để theta driver khởi động
+                time.sleep(0.5)
+                
+                self.livox_tab.start_livox_driver()
+                
+                self.log("✅ Hệ thống đã khởi động lại")
+                success = True
+            except Exception as e:
+                self.log(f"❌ Lỗi khi start drivers: {e}")
+                import traceback
+                self.log(f"Chi tiết: {traceback.format_exc()}")
+            finally:
+                # Chỉ enable lại nút start nếu có lỗi
+                # Nếu start thành công, nút start sẽ được disable bởi update_ui_theta_connected()
+                if not success:
+                    self.root.after(0, lambda: self.btn_start_livox.config(state=tk.NORMAL))
+        
+        # Chạy trong thread riêng để không block UI
+        threading.Thread(target=run_start, daemon=True).start()
             
     def monitor_record_process(self):
         """Monitor record process output"""

@@ -119,6 +119,7 @@ class ThetaDriver(ttk.Frame):
         self.theta_driver_process = None
         self.ros_executor = None
         self.ros_node = None
+        self._stopping = False  # Flag để tránh double cleanup
         self.create_control_panel()
     
     def create_control_panel(self):
@@ -128,6 +129,8 @@ class ThetaDriver(ttk.Frame):
 
     def launch_theta_driver(self):
         """Launch theta_driver node với parameters"""
+        # Reset stopping flag khi start lại
+        self._stopping = False
         try:
             workspace_path = Path(__file__).parent.parent / "ws"
             setup_script = workspace_path / "install" / "setup.sh"
@@ -213,6 +216,9 @@ class ThetaDriver(ttk.Frame):
                 return
             
             # self.log(f"✓ theta_driver process started (PID: {self.theta_driver_process.pid})")
+            # Đợi một chút trước khi start subscriber để đảm bảo process đã ổn định
+            import time
+            time.sleep(0.3)
             self.start_subscriber()
             
             # Update status based on running processes
@@ -269,6 +275,10 @@ class ThetaDriver(ttk.Frame):
     
     def launch_camera_info_publisher(self):
         """Launch camera_info_publisher node cho calibration"""
+        # Đảm bảo không launch khi đang stopping
+        if self._stopping:
+            return
+        
         try:
             workspace_path = Path(__file__).parent.parent / "ws"
             setup_script = workspace_path / "install" / "setup.sh"
@@ -420,37 +430,64 @@ class ThetaDriver(ttk.Frame):
                 if self.update_ui_theta_connected:
                     self.update_ui_theta_connected(self.is_active_theta)
                 # self.launch_theta_btn.config(state=tk.NORMAL)
-                self.stop_all()
+                # Chỉ gọi stop_all nếu chưa đang stopping để tránh double cleanup
+                if not self._stopping:
+                    self.stop_all()
 
     def ros_spin(self):
         """Spin ROS node trong thread riêng"""
         try:
             print("ROS spin thread đã bắt đầu cho Equirectangular")
             while rclpy.ok() and self.is_running:
-                if self.ros_executor is not None:
-                    self.ros_executor.spin_once(timeout_sec=0.1)
+                # Kiểm tra executor và node trước khi sử dụng
+                if self.ros_executor is not None and self.ros_node is not None:
+                    try:
+                        self.ros_executor.spin_once(timeout_sec=0.1)
+                    except Exception:
+                        # Executor có thể đã bị shutdown, thoát khỏi vòng lặp
+                        break
+                elif self.ros_node is not None:
+                    try:
+                        rclpy.spin_once(self.ros_node, timeout_sec=0.1)
+                    except Exception:
+                        # Node có thể đã bị destroy, thoát khỏi vòng lặp
+                        break
                 else:
-                    rclpy.spin_once(self.ros_node, timeout_sec=0.1)
+                    # Không có executor hoặc node, thoát
+                    break
         except Exception as e:
             error_msg = f"Lỗi trong ROS spin: {e}"
             print(f"✗ {error_msg}")
             import traceback
             traceback.print_exc()
-            # if self.is_running:
-            #     self.after(0, lambda: self.status_label.config(
-            #         text=f"Lỗi: {str(e)[:50]}",
-            #         foreground="red"
-            #     ))
+        finally:
+            # Đảm bảo flag được reset khi thread kết thúc
+            self.is_running = False
     
     def start_subscriber(self):
         """Start ROS subscriber"""
+        # Reset stopping flag khi start lại
+        self._stopping = False
         if self.is_running:
             return
+        
+        # Đảm bảo canvas đã được khởi tạo
+        if not self.canvas:
+            self.log("⚠️  Canvas chưa được khởi tạo, không thể start subscriber")
+            return
+        
         self.log("Bắt đầu ROS2 subscriber cho /image_raw...")
         try:
-            if not rclpy.ok():
-                self.log("Khởi tạo ROS2...")
-                rclpy.init()
+            # Khởi tạo ROS2 một cách an toàn
+            try:
+                if not rclpy.ok():
+                    self.log("Khởi tạo ROS2...")
+                    rclpy.init()
+            except RuntimeError as e:
+                # ROS2 có thể đã được khởi tạo từ nơi khác
+                if "already initialized" not in str(e).lower():
+                    raise
+                self.log("ROS2 đã được khởi tạo từ trước")
             
             self.log("Tạo ROS2 node subscriber cho /image_raw...")
             self.ros_node = SingleImageSubscriber(
@@ -502,6 +539,10 @@ class ThetaDriver(ttk.Frame):
             
     def on_image_received(self, cv_image):
         """Callback khi nhận được ảnh"""
+        # Kiểm tra xem subscriber còn đang chạy không
+        if not self.is_running:
+            return
+        
         try:
             self.current_image = cv_image
             self.frame_count += 1
@@ -510,8 +551,14 @@ class ThetaDriver(ttk.Frame):
             # if self.frame_count % 30 == 0:
             #     self.log(f"✓ Equirectangular: Đã nhận {self.frame_count} frames")
             
-            # Cập nhật UI trong main thread
-            self.after(0, self.update_image_display, cv_image)
+            # Kiểm tra canvas và widget trước khi cập nhật UI
+            if self.canvas and hasattr(self, 'canvas'):
+                # Cập nhật UI trong main thread
+                try:
+                    self.after(0, self.update_image_display, cv_image)
+                except Exception as e:
+                    # Nếu không thể schedule update, bỏ qua
+                    pass
             
             # Cập nhật status mỗi 30 frame
             # if self.frame_count % 30 == 0:
@@ -520,18 +567,29 @@ class ThetaDriver(ttk.Frame):
             #         foreground="green"
             #     ))
         except Exception as e:
-            self.log(f"✗ Lỗi trong on_image_received: {e}")
-            import traceback
-            traceback.print_exc()
+            # Log lỗi nhưng không crash
+            if self.is_running:
+                self.log(f"✗ Lỗi trong on_image_received: {e}")
     
     def update_image_display(self, cv_image):
         """Cập nhật hiển thị ảnh"""
+        # Kiểm tra xem subscriber còn đang chạy và canvas còn tồn tại không
+        if not self.is_running or not self.canvas:
+            return
+        
         try:
-            canvas_width = self.canvas.winfo_width()
-            canvas_height = self.canvas.winfo_height()
+            # Kiểm tra canvas có còn tồn tại và valid không
+            try:
+                canvas_width = self.canvas.winfo_width()
+                canvas_height = self.canvas.winfo_height()
+            except (tk.TclError, AttributeError):
+                # Canvas đã bị destroy, không cập nhật nữa
+                return
             
             if canvas_width <= 1 or canvas_height <= 1:
-                self.after(100, lambda: self.update_image_display(cv_image))
+                # Canvas chưa sẵn sàng, schedule lại
+                if self.is_running:
+                    self.after(100, lambda: self.update_image_display(cv_image) if self.is_running and self.canvas else None)
                 return
             
             img_height, img_width = cv_image.shape[:2]
@@ -545,15 +603,23 @@ class ThetaDriver(ttk.Frame):
             pil_image = PILImage.fromarray(resized)
             photo = ImageTk.PhotoImage(image=pil_image)
             
-            self.canvas.delete("all")
-            self.canvas.create_image(
-                canvas_width // 2,
-                canvas_height // 2,
-                image=photo,
-                anchor=tk.CENTER
-            )
+            # Kiểm tra lại canvas trước khi update
+            if not self.is_running or not self.canvas:
+                return
             
-            self.canvas.image = photo
+            try:
+                self.canvas.delete("all")
+                self.canvas.create_image(
+                    canvas_width // 2,
+                    canvas_height // 2,
+                    image=photo,
+                    anchor=tk.CENTER
+                )
+                
+                self.canvas.image = photo
+            except (tk.TclError, AttributeError):
+                # Canvas đã bị destroy trong khi đang update
+                return
             
             # self.status_label.config(
             #     text=f"Equirectangular: {img_width}x{img_height} | "
@@ -563,60 +629,89 @@ class ThetaDriver(ttk.Frame):
             # )
             
         except Exception as e:
-            self.log(f"Lỗi cập nhật hiển thị equirectangular: {e}")
+            # Log lỗi nhưng không crash
+            if self.is_running:
+                self.log(f"Lỗi cập nhật hiển thị equirectangular: {e}")
     
     def stop_all(self):
         """Stop tất cả"""
-        # Stop equirectangular tab
-        # if self.tab_equirect.is_running:
-        #     self.tab_equirect.stop_all()
+        # Tránh double cleanup
+        if self._stopping:
+            return
+        self._stopping = True
         
-        # Stop camera_info_publisher
-        if self.camera_info_publisher_process:
-            try:
-                self.camera_info_publisher_process.terminate()
-                self.camera_info_publisher_process.wait(timeout=5)
-            except:
+        try:
+            # Stop equirectangular tab
+            # if self.tab_equirect.is_running:
+            #     self.tab_equirect.stop_all()
+            
+            # Stop camera_info_publisher
+            if self.camera_info_publisher_process:
                 try:
-                    self.camera_info_publisher_process.kill()
+                    self.camera_info_publisher_process.terminate()
+                    self.camera_info_publisher_process.wait(timeout=5)
                 except:
-                    pass
-            self.camera_info_publisher_process = None
-            # self.is_active_theta = False
-        
-        # Stop theta driver
-        if self.theta_driver_process:
-            try:
-                self.theta_driver_process.terminate()
-                self.theta_driver_process.wait(timeout=5)
-            except:
+                    try:
+                        self.camera_info_publisher_process.kill()
+                    except:
+                        pass
+                finally:
+                    self.camera_info_publisher_process = None
+            
+            # Stop theta driver
+            if self.theta_driver_process:
                 try:
-                    self.theta_driver_process.kill()
+                    self.theta_driver_process.terminate()
+                    self.theta_driver_process.wait(timeout=5)
                 except:
-                    pass
-            self.theta_driver_process = None
+                    try:
+                        self.theta_driver_process.kill()
+                    except:
+                        pass
+                finally:
+                    self.theta_driver_process = None
+            
             self.is_active_theta = False
             if self.update_ui_theta_connected:
                 self.update_ui_theta_connected(self.is_active_theta)
-        
-
-        self.is_running = False
-        if self.ros_executor:
-            try:
-                self.ros_executor.shutdown()
-            except:
-                pass
-            self.ros_executor = None
-        
-        if self.ros_node:
-            try:
-                self.ros_node.destroy_node()
-            except:
-                pass
-            self.ros_node = None
-        
-        self.canvas.delete("all")
-        self.frame_count = 0
+            
+            # Set flag để spin thread biết dừng
+            self.is_running = False
+            
+            # Đợi một chút để spin thread thoát khỏi vòng lặp
+            import time
+            time.sleep(0.2)
+            
+            # Đợi thread kết thúc nếu có
+            if hasattr(self, 'ros_thread') and self.ros_thread and self.ros_thread.is_alive():
+                # Đợi tối đa 1 giây để thread kết thúc
+                self.ros_thread.join(timeout=1.0)
+            
+            # Sau đó mới shutdown executor và destroy node
+            if self.ros_executor:
+                try:
+                    self.ros_executor.shutdown()
+                except Exception as e:
+                    self.log(f"⚠️  Lỗi khi shutdown executor: {e}")
+                finally:
+                    self.ros_executor = None
+            
+            if self.ros_node:
+                try:
+                    self.ros_node.destroy_node()
+                except Exception as e:
+                    self.log(f"⚠️  Lỗi khi destroy node: {e}")
+                finally:
+                    self.ros_node = None
+            
+            self.ros_thread = None
+            self.canvas.delete("all")
+            self.frame_count = 0
+        except Exception as e:
+            self.log(f"⚠️  Lỗi trong stop_all: {e}")
+        finally:
+            # Reset flag để có thể stop lại sau này
+            self._stopping = False
 
 
         # self.status_label.config(

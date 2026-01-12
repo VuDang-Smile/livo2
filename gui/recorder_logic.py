@@ -85,13 +85,46 @@ class Recorder:
 
     def stop(self):
         if self.record_process:
-            self.record_process.terminate()
-            self.record_process = None
+            try:
+                # Terminate process
+                self.record_process.terminate()
+                # Wait với timeout 5 giây
+                try:
+                    self.record_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Nếu timeout, kill process
+                    try:
+                        self.record_process.kill()
+                        self.record_process.wait()
+                    except Exception as e:
+                        self.log(f"⚠️  Lỗi khi kill process: {e}")
+            except Exception as e:
+                self.log(f"⚠️  Lỗi khi dừng process: {e}")
+            finally:
+                self.record_process = None
         self.is_recording = False
         return self.output_path
 
     def _monitor_process(self):
-        for line in iter(self.record_process.stdout.readline, ''):
-            line = line.strip()
-            if any(k in line.lower() for k in ['error', 'warn', 'recording', 'bag']):
-                self.log(f"[ROS2] {line}")
+        """Monitor process output trong thread riêng - tránh crash khi process bị None"""
+        # Lưu reference của process trước khi đọc để tránh race condition
+        process = self.record_process
+        if not process:
+            return
+        
+        try:
+            for line in iter(process.stdout.readline, ''):
+                # Kiểm tra process còn tồn tại và đang recording
+                if not self.is_recording or process.poll() is not None:
+                    break
+                
+                line = line.strip()
+                if line and any(k in line.lower() for k in ['error', 'warn', 'recording', 'bag']):
+                    self.log(f"[ROS2] {line}")
+        except (ValueError, AttributeError):
+            # Process đã bị terminate hoặc stdout đã đóng - đây là bình thường
+            pass
+        except Exception as e:
+            # Log các exception khác nhưng không crash
+            if self.is_recording:
+                self.log(f"⚠️  Lỗi trong monitor thread: {e}")

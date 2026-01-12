@@ -508,14 +508,13 @@ class LivoxTab(ttk.Frame):
                 self.log("⚠️  Không thể kiểm tra topic type, dùng CustomMsg mặc định")
                 self.log("   (Topic có thể chưa tồn tại, sẽ thử subscribe với CustomMsg)")
             
-            # Tạo node subscriber (có thể subscribe /livox/points2 nếu converter đang chạy)
+            # Tạo node subscriber
+            # Luôn subscribe /livox/points2 nếu converter có publish, không cần restart subscriber
             self.log("Tạo ROS2 node cho Livox...")
-            # Kiểm tra xem converter có đang chạy không
-            subscribe_points2 = self.converter_process is not None and self.converter_process.poll() is None
             self.ros_node = LivoxSubscriber(
                 self.on_lidar_received,
                 self.on_imu_received,
-                callback_points2=self.on_points2_received if subscribe_points2 else None,
+                callback_points2=self.on_points2_received,
                 use_pointcloud2=use_pointcloud2
             )
             
@@ -582,11 +581,22 @@ class LivoxTab(ttk.Frame):
         try:
             self.log("ROS spin thread đã bắt đầu")
             while rclpy.ok() and self.is_ros_running:
-                # Dùng executor để spin
-                if self.ros_executor is not None:
-                    self.ros_executor.spin_once(timeout_sec=0.1)
+                # Kiểm tra executor và node trước khi sử dụng
+                if self.ros_executor is not None and self.ros_node is not None:
+                    try:
+                        self.ros_executor.spin_once(timeout_sec=0.1)
+                    except Exception:
+                        # Executor có thể đã bị shutdown, thoát khỏi vòng lặp
+                        break
+                elif self.ros_node is not None:
+                    try:
+                        rclpy.spin_once(self.ros_node, timeout_sec=0.1)
+                    except Exception:
+                        # Node có thể đã bị destroy, thoát khỏi vòng lặp
+                        break
                 else:
-                    rclpy.spin_once(self.ros_node, timeout_sec=0.1)
+                    # Không có executor hoặc node, thoát
+                    break
         except Exception as e:
             error_msg = f"Lỗi trong ROS spin: {e}"
             self.log(f"✗ {error_msg}")
@@ -598,6 +608,9 @@ class LivoxTab(ttk.Frame):
                     text=f"Lỗi: {str(e)[:50]}",
                     foreground="red"
                 ))
+        finally:
+            # Đảm bảo flag được reset khi thread kết thúc
+            self.is_ros_running = False
     
     def on_lidar_received(self, msg):
         """Callback khi nhận được lidar data"""
@@ -653,22 +666,37 @@ class LivoxTab(ttk.Frame):
             ))
     
     def stop_ros_subscriber(self):
-        """Dừng ROS subscriber"""
+        """Dừng ROS subscriber với proper cleanup để tránh segmentation fault"""
+        # Set flag để spin thread biết dừng
         self.is_ros_running = False
         
+        # Đợi một chút để spin thread thoát khỏi vòng lặp
+        import time
+        time.sleep(0.2)
+        
+        # Đợi thread kết thúc nếu có
+        if self.ros_thread and self.ros_thread.is_alive():
+            # Đợi tối đa 1 giây để thread kết thúc
+            self.ros_thread.join(timeout=1.0)
+        
+        # Sau đó mới shutdown executor và destroy node
         if self.ros_executor:
             try:
                 self.ros_executor.shutdown()
-            except:
-                pass
-            self.ros_executor = None
+            except Exception as e:
+                self.log(f"⚠️  Lỗi khi shutdown executor: {e}")
+            finally:
+                self.ros_executor = None
         
         if self.ros_node:
             try:
                 self.ros_node.destroy_node()
-            except:
-                pass
-            self.ros_node = None
+            except Exception as e:
+                self.log(f"⚠️  Lỗi khi destroy node: {e}")
+            finally:
+                self.ros_node = None
+        
+        self.ros_thread = None
         
         # Cập nhật UI
         self.status_label.config(
@@ -717,14 +745,7 @@ class LivoxTab(ttk.Frame):
             ):
                 self.start_converter_btn.config(state=tk.DISABLED)
                 self.stop_converter_btn.config(state=tk.NORMAL)
-                print("Đang restart subscriber để subscribe /livox/points2...")
-                
-                # Nếu subscriber đang chạy, cần restart để subscribe /livox/points2
-                if self.is_ros_running:
-                    self.log("Đang restart subscriber để subscribe /livox/points2...")
-                    print("Đang restart subscriber để subscribe /livox/points2...")
-                    self.stop_ros_subscriber()
-                    self.after(1000, self.start_ros_subscriber)
+                # Không cần restart subscriber nữa vì luôn subscribe /livox/points2
         except Exception as e:
             self.log(f"[Error]: start_converter: {e}")
         self.log("Ket thuc Livox Message Converter...")
