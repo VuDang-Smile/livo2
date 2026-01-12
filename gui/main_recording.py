@@ -606,6 +606,7 @@ class LivoxApp:
     def update_ui_theta_connected(self, is_active_theta):
         """Hàm này chuyên trách việc đổi màu/text trên giao diện"""
         # Xác định màu sắc dựa trên biến success
+        
         color = "green" if is_active_theta else "red"
         
         # Xác định nội dung text dựa trên biến success
@@ -633,22 +634,30 @@ class LivoxApp:
         self.livox_tab.stop_ros_subscriber()
     
     def start_livox_driver(self):
+        # Disable nút bấm để tránh người dùng click loạn xạ gây crash
+        self.btn_start_livox.config(state=tk.DISABLED)
+        
+        # def run_start():
         try:
+            self.stop_livox_driver()
+            time.sleep(1.0) # Chờ 1 giây để các process cũ giải phóng port
+            
             self.log(translator.get("log.starting_livox_theta_drivers"))
-            # Kiểm tra kết nối USB của Theta trước
             self.check_mid360_connection()
+            
+            # Khởi chạy các driver
             self.theta_driver.check_theta_usb_connection(self.check_theta_usb_callback)
             self.theta_driver.launch_theta_driver()
-            self.theta_driver.launch_camera_info_publisher()
             self.livox_tab.start_livox_driver()
             
-            # self.after(2000,  self.livox_tab.start_converter())
-            # self.livox_tab.start_converter()
-            # self.after(4000,  self.livox_tab.start_ros_subscriber())
-
-            # self.livox_tab.start_ros_subscriber()
+            self.log("✅ Hệ thống đã khởi động lại")
         except Exception as e:
-            self.log(f"{translator.get('log.error_starting_livox_theta_drivers')} {e}")
+            self.log(f"❌ Lỗi: {e}")
+        # finally:
+            # Cho phép bấm nút lại sau khi xử lý xong
+            # self.root.after(0, lambda: self.btn_start_livox.config(state=tk.NORMAL))
+
+        # threading.Thread(target=run_start, daemon=True).start()
             
     def monitor_record_process(self):
         """Monitor record process output"""

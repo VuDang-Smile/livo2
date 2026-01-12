@@ -73,9 +73,9 @@ class SingleImageSubscriber(Node):
             if not hasattr(self, '_callback_count'):
                 self._callback_count = 0
             self._callback_count += 1
-            if self._callback_count % 30 == 0:
-                self.get_logger().info(f'Received {self._callback_count} frames from {self.topic_name}')
-                print(f'[SingleImageSubscriber] Received {self._callback_count} frames from {self.topic_name}')
+            # if self._callback_count % 30 == 0:
+                # self.get_logger().info(f'Received {self._callback_count} frames from {self.topic_name}')
+                # print(f'[SingleImageSubscriber] Received {self._callback_count} frames from {self.topic_name}')
             
             # Debug: log encoding
             if self._callback_count == 1:

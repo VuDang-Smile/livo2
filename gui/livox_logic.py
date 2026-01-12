@@ -367,8 +367,8 @@ class LivoxTab(ttk.Frame):
                 self.start_driver_btn.config(state=tk.DISABLED)
                 self.stop_driver_btn.config(state=tk.NORMAL)
                 self.start_subscriber_btn.config(state=tk.NORMAL)
-                self.update_label_livo_connected(True)
                 self.start_converter()
+                self.update_label_livo_connected(True)
             # Converter button đã enable từ đầu, không cần enable lại
         except Exception as e:
             self.update_label_livo_connected(False)
@@ -468,6 +468,7 @@ class LivoxTab(ttk.Frame):
         #     self.stop_converter()
         if self.is_ros_running:
             self.stop_ros_subscriber()
+        self.update_label_livo_connected(False)
     
     def start_ros_subscriber(self):
         """Bắt đầu ROS subscriber cho livox topics"""
@@ -684,45 +685,48 @@ class LivoxTab(ttk.Frame):
     
     def start_converter(self):
         """Start Livox Message Converter node (độc lập, không phụ thuộc vào driver)"""
-        self.log("Bắt đầu Livox Message Converter...")
-        workspace_path = Path(__file__).parent.parent / "ws"
-        launch_file = Path("src/livox_msg_converter/launch/livox_msg_converter.launch.py")
-        
-        # Kiểm tra xem topic /livox/lidar có tồn tại không (có thể từ driver khác hoặc nguồn khác)
-        self.log("Kiểm tra topic /livox/lidar...")
-        result = subprocess.run(
-            ['ros2', 'topic', 'list'],
-            capture_output=True,
-            text=True,
-            timeout=2
-        )
-        
-        topic_exists = '/livox/lidar' in result.stdout or 'livox/lidar' in result.stdout
-        if not topic_exists:
-            self.log("⚠️  Cảnh báo: Topic /livox/lidar chưa tồn tại")
-            self.log("   Converter sẽ chờ topic này xuất hiện...")
-            self.log("   (Có thể start Livox Driver hoặc có nguồn khác publish /livox/lidar)")
-        else:
-            self.log("✓ Topic /livox/lidar đã tồn tại, converter sẽ subscribe ngay")
-        
-        if self._start_ros2_process(
-            workspace_path,
-            launch_file,
-            "Livox Message Converter",
-            "converter_process",
-            self.monitor_converter_output,
-            "Converter đang chạy (độc lập)"
-        ):
-            self.start_converter_btn.config(state=tk.DISABLED)
-            self.stop_converter_btn.config(state=tk.NORMAL)
-            print("Đang restart subscriber để subscribe /livox/points2...")
+        try:
+            self.log("Bắt đầu Livox Message Converter...")
+            workspace_path = Path(__file__).parent.parent / "ws"
+            launch_file = Path("src/livox_msg_converter/launch/livox_msg_converter.launch.py")
             
-            # Nếu subscriber đang chạy, cần restart để subscribe /livox/points2
-            if self.is_ros_running:
-                self.log("Đang restart subscriber để subscribe /livox/points2...")
+            # Kiểm tra xem topic /livox/lidar có tồn tại không (có thể từ driver khác hoặc nguồn khác)
+            self.log("Kiểm tra topic /livox/lidar...")
+            result = subprocess.run(
+                ['ros2', 'topic', 'list'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            
+            topic_exists = '/livox/lidar' in result.stdout or 'livox/lidar' in result.stdout
+            if not topic_exists:
+                self.log("⚠️  Cảnh báo: Topic /livox/lidar chưa tồn tại")
+                self.log("   Converter sẽ chờ topic này xuất hiện...")
+                self.log("   (Có thể start Livox Driver hoặc có nguồn khác publish /livox/lidar)")
+            else:
+                self.log("✓ Topic /livox/lidar đã tồn tại, converter sẽ subscribe ngay")
+            
+            if self._start_ros2_process(
+                workspace_path,
+                launch_file,
+                "Livox Message Converter",
+                "converter_process",
+                self.monitor_converter_output,
+                "Converter đang chạy (độc lập)"
+            ):
+                self.start_converter_btn.config(state=tk.DISABLED)
+                self.stop_converter_btn.config(state=tk.NORMAL)
                 print("Đang restart subscriber để subscribe /livox/points2...")
-                self.stop_ros_subscriber()
-                self.after(1000, self.start_ros_subscriber)
+                
+                # Nếu subscriber đang chạy, cần restart để subscribe /livox/points2
+                if self.is_ros_running:
+                    self.log("Đang restart subscriber để subscribe /livox/points2...")
+                    print("Đang restart subscriber để subscribe /livox/points2...")
+                    self.stop_ros_subscriber()
+                    self.after(1000, self.start_ros_subscriber)
+        except Exception as e:
+            self.log(f"[Error]: start_converter: {e}")
         self.log("Ket thuc Livox Message Converter...")
     
     def monitor_converter_output(self):

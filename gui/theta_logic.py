@@ -70,13 +70,13 @@ class SingleImageSubscriber(Node):
             if not hasattr(self, '_callback_count'):
                 self._callback_count = 0
             self._callback_count += 1
-            if self._callback_count % 30 == 0:
-                self.get_logger().info(f'Received {self._callback_count} frames from {self.topic_name}')
-                print(f'[SingleImageSubscriber] Received {self._callback_count} frames from {self.topic_name}')
+            # if self._callback_count % 30 == 0:
+                # self.get_logger().info(f'Received {self._callback_count} frames from {self.topic_name}')
+                # print(f'[SingleImageSubscriber] Received {self._callback_count} frames from {self.topic_name}')
             
             # Debug: log encoding
-            if self._callback_count == 1:
-                print(f'[SingleImageSubscriber] Encoding: {msg.encoding}, Size: {msg.width}x{msg.height}')
+            # if self._callback_count == 1:
+            #     print(f'[SingleImageSubscriber] Encoding: {msg.encoding}, Size: {msg.width}x{msg.height}')
             
             # Handle JPEG compressed images
             if msg.encoding.lower() in ['jpeg', 'jpg']:
@@ -116,6 +116,9 @@ class ThetaDriver(ttk.Frame):
         self.is_camera_connected = False
         self.is_active_theta = False
         self.is_running = False
+        self.theta_driver_process = None
+        self.ros_executor = None
+        self.ros_node = None
         self.create_control_panel()
     
     def create_control_panel(self):
@@ -210,6 +213,7 @@ class ThetaDriver(ttk.Frame):
                 return
             
             # self.log(f"✓ theta_driver process started (PID: {self.theta_driver_process.pid})")
+            self.start_subscriber()
             
             # Update status based on running processes
             if self.camera_info_publisher_process and self.camera_info_publisher_process.poll() is None:
@@ -217,10 +221,11 @@ class ThetaDriver(ttk.Frame):
                 self.is_active_theta = True
             else:
                 self.is_active_theta = False
+                self.launch_camera_info_publisher()
+
 
             
             self.log("✓ theta_driver process start_subscriber")
-            self.start_subscriber()
             
             if self.update_ui_theta_connected:
                 self.update_ui_theta_connected(self.is_active_theta)
@@ -300,6 +305,8 @@ class ThetaDriver(ttk.Frame):
             if 'ROS_DOMAIN_ID' not in env:
                 env['ROS_DOMAIN_ID'] = '0'
             
+            print("============start launch_camera_info_publisher==================")
+            
             self.camera_info_publisher_process = subprocess.Popen(
                 cmd,
                 shell=True,
@@ -343,6 +350,8 @@ class ThetaDriver(ttk.Frame):
                 # )
             else:
                 self.is_active_theta = False
+
+            print("launch_camera_info_publisher=============", self.is_active_theta)
             if self.update_ui_theta_connected:
                 self.update_ui_theta_connected(self.is_active_theta)
                 # self.status_label.config(
@@ -360,6 +369,7 @@ class ThetaDriver(ttk.Frame):
     
     def check_camera_info_publisher_process(self):
         """Kiểm tra xem camera_info_publisher process còn chạy không"""
+        print("========start check_camera_info_publisher_process========")
         if self.camera_info_publisher_process:
             if self.camera_info_publisher_process.poll() is not None:
                 # Update status based on other running processes
@@ -375,6 +385,7 @@ class ThetaDriver(ttk.Frame):
                     
                     self.log("Camera Info Publisher is not running")
 
+                print(f"check_camera_info_publisher_process=============", self.is_active_theta)
                 if self.update_ui_theta_connected:
                     self.update_ui_theta_connected(self.is_active_theta)
 
@@ -385,6 +396,9 @@ class ThetaDriver(ttk.Frame):
 
     def check_theta_driver_process(self):
         """Kiểm tra xem theta_driver process còn chạy không"""
+
+        print("========start check_theta_driver_process========")
+
         if self.theta_driver_process:
             if self.theta_driver_process.poll() is not None:
                 # Update status based on other running processes
@@ -401,6 +415,8 @@ class ThetaDriver(ttk.Frame):
                     #     text="Trạng thái: Theta Driver đã dừng",
                     #     foreground="red"
                     # )
+                
+                print(f"check_theta_driver_process=============", self.is_active_theta)
                 if self.update_ui_theta_connected:
                     self.update_ui_theta_connected(self.is_active_theta)
                 # self.launch_theta_btn.config(state=tk.NORMAL)
