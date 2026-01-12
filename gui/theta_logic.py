@@ -137,9 +137,8 @@ class ThetaDriver(ttk.Frame):
             
             if not setup_script.exists():
                 messagebox.showerror(
-                    "Lỗi",
-                    f"Không tìm thấy setup.sh tại: {setup_script}\n"
-                    "Vui lòng build workspace trước."
+                    translator.get("dialog.error"),
+                    translator.get("message.workspace_setup_not_found").replace("{path}", str(setup_script))
                 )
                 return
             
@@ -152,10 +151,10 @@ class ThetaDriver(ttk.Frame):
             try:
                 jpeg_quality = int(jpeg_quality_str) if jpeg_quality_str else 0
                 if jpeg_quality < 0 or jpeg_quality > 100:
-                    messagebox.showerror("Lỗi", "JPEG Quality phải trong khoảng 0-100")
+                    messagebox.showerror(translator.get("dialog.error"), translator.get("message.jpeg_quality_range"))
                     return
             except ValueError:
-                messagebox.showerror("Lỗi", "JPEG Quality phải là số nguyên")
+                messagebox.showerror(translator.get("dialog.error"), translator.get("message.jpeg_quality_integer"))
                 return
             
             # Build command with parameters
@@ -174,7 +173,7 @@ class ThetaDriver(ttk.Frame):
             cmd_parts.append(ros_cmd)
             cmd = " && ".join(cmd_parts)
             
-            self.log(f"Launching theta_driver with command: {cmd}")
+            self.log(translator.get("log.theta_driver_launching").replace("{cmd}", cmd))
             
             # Use subprocess with proper environment
             env = os.environ.copy()
@@ -231,7 +230,7 @@ class ThetaDriver(ttk.Frame):
 
 
             
-            self.log("✓ theta_driver process start_subscriber")
+            self.log(translator.get("log.theta_driver_started"))
             
             if self.update_ui_theta_connected:
                 self.update_ui_theta_connected(self.is_active_theta)
@@ -244,7 +243,7 @@ class ThetaDriver(ttk.Frame):
             
         except Exception as e:
             print(f"✗ theta_driver failed to start: {e}")
-            messagebox.showerror("Lỗi", translator.get("message.cannot_launch_theta_driver"))
+            messagebox.showerror(translator.get("dialog.error"), translator.get("message.cannot_launch_theta_driver"))
     
     def check_theta_usb_connection(self, check_theta_usb_callback=None):
         """Check if Theta X camera is connected via USB"""
@@ -256,17 +255,17 @@ class ThetaDriver(ttk.Frame):
                 
                 if result.returncode == 0 and 'theta' in result.stdout.lower():
                     self.is_camera_connected = True
-                    self.log("✅ Theta X Connected")
-                    self.log("Theta X camera detected via USB")
+                    self.log(translator.get("log.theta_x_connected"))
+                    self.log(translator.get("log.theta_x_detected"))
                 else:
                     self.is_camera_connected = False
-                    self.log("❌ Theta X Not Found")
-                    self.log("Theta X camera not detected")
+                    self.log(translator.get("log.theta_x_not_found"))
+                    self.log(translator.get("log.theta_x_not_detected"))
                     
             except Exception as e:
                 self.is_camera_connected = False
-                self.log("❌ Error Checking")
-                self.log(f"Error checking Theta USB connection: {str(e)}")
+                self.log(translator.get("log.error_checking_theta"))
+                self.log(translator.get("log.error_checking_theta_usb").replace("{error}", str(e)))
 
             if check_theta_usb_callback:
                 check_theta_usb_callback(self.is_camera_connected)
@@ -285,9 +284,8 @@ class ThetaDriver(ttk.Frame):
             
             if not setup_script.exists():
                 messagebox.showerror(
-                    "Lỗi",
-                    f"Không tìm thấy setup.sh tại: {setup_script}\n"
-                    "Vui lòng build workspace trước."
+                    translator.get("dialog.error"),
+                    translator.get("message.workspace_setup_not_found").replace("{path}", str(setup_script))
                 )
                 return
             
@@ -308,7 +306,7 @@ class ThetaDriver(ttk.Frame):
             cmd_parts.append(ros_cmd)
             cmd = " && ".join(cmd_parts)
             
-            self.log(f"Launching camera_info_publisher with command: {cmd}")
+            self.log(translator.get("log.camera_info_publisher_launching").replace("{cmd}", cmd))
             
             # Use subprocess with proper environment
             env = os.environ.copy()
@@ -349,7 +347,7 @@ class ThetaDriver(ttk.Frame):
                 # self.launch_camera_info_btn.config(state=tk.NORMAL)
                 return
             
-            self.log(f"✓ camera_info_publisher process started (PID: {self.camera_info_publisher_process.pid})")
+            self.log(translator.get("log.camera_info_publisher_started").replace("{pid}", str(self.camera_info_publisher_process.pid)))
             
             # Update status based on running processes
             if self.theta_driver_process and self.theta_driver_process.poll() is None:
@@ -375,7 +373,7 @@ class ThetaDriver(ttk.Frame):
             
         except Exception as e:
             self.log(f"✗ camera_info_publisher failed to start: {e}")
-            messagebox.showerror("Lỗi", translator.get("message.cannot_launch_camera_info_publisher"))
+            messagebox.showerror(translator.get("dialog.error"), translator.get("message.cannot_launch_camera_info_publisher"))
     
     def check_camera_info_publisher_process(self):
         """Kiểm tra xem camera_info_publisher process còn chạy không"""
@@ -476,7 +474,7 @@ class ThetaDriver(ttk.Frame):
             self.log("⚠️  Canvas chưa được khởi tạo, không thể start subscriber")
             return
         
-        self.log("Bắt đầu ROS2 subscriber cho /image_raw...")
+        self.log(translator.get("log.starting_subscriber"))
         try:
             # Khởi tạo ROS2 một cách an toàn
             try:
@@ -509,13 +507,13 @@ class ThetaDriver(ttk.Frame):
                 timeout=2
             )
             if '/image_raw' in result.stdout:
-                self.log("✓ Topic /image_raw đã tồn tại")
+                self.log(translator.get("log.topic_exists"))
             else:
-                self.log("⚠️  Cảnh báo: Topic /image_raw chưa tồn tại")
-                self.log("Các topics có sẵn:")
+                self.log(translator.get("log.warning_topic_not_exists"))
+                self.log(translator.get("log.topics_available"))
                 self.log(result.stdout)
             
-            self.log("Khởi động ROS thread...")
+            self.log(translator.get("log.starting_ros_thread"))
             self.ros_thread = threading.Thread(target=self.ros_spin, daemon=True)
             self.ros_thread.start()
             
@@ -528,14 +526,14 @@ class ThetaDriver(ttk.Frame):
             # self.start_btn.config(state=tk.DISABLED)
             # self.stop_btn.config(state=tk.NORMAL)
             
-            self.log("✓ ROS subscriber đã khởi động")
+            self.log(translator.get("log.subscriber_started"))
             
         except Exception as e:
             error_msg = f"Không thể start subscriber: {e}"
             self.log(f"✗ Lỗi: {error_msg}")
             import traceback
             traceback.print_exc()
-            messagebox.showerror("Lỗi", error_msg)
+            messagebox.showerror(translator.get("dialog.error"), error_msg)
             
     def on_image_received(self, cv_image):
         """Callback khi nhận được ảnh"""
@@ -569,7 +567,7 @@ class ThetaDriver(ttk.Frame):
         except Exception as e:
             # Log lỗi nhưng không crash
             if self.is_running:
-                self.log(f"✗ Lỗi trong on_image_received: {e}")
+                self.log(translator.get("log.error_start_subscriber").replace("{error}", str(e)))
     
     def update_image_display(self, cv_image):
         """Cập nhật hiển thị ảnh"""
@@ -631,7 +629,7 @@ class ThetaDriver(ttk.Frame):
         except Exception as e:
             # Log lỗi nhưng không crash
             if self.is_running:
-                self.log(f"Lỗi cập nhật hiển thị equirectangular: {e}")
+                self.log(translator.get("log.error_ui_update_theta").replace("{error}", str(e)))
     
     def stop_all(self):
         """Stop tất cả"""

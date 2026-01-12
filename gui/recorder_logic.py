@@ -42,7 +42,8 @@ class Recorder:
         # Xử lý Topics
         selected_topics = [topic for topic, var in topic_vars.items() if var.get()]
         if not selected_topics:
-            messagebox.showerror("Lỗi", "Vui lòng chọn ít nhất một topic")
+            from languages.translate_engine import translator
+            messagebox.showerror(translator.get("dialog.error"), translator.get("message.select_at_least_one_topic"))
             return False
 
         # Xử lý Bag Size

@@ -95,18 +95,76 @@ class LivoxApp:
         # Cập nhật lại tiêu đề cửa sổ
         self.root.title(translator.get("title.livox_panel"))
         
-        # Làm mới toàn bộ UI
-        self.refresh_ui()
+        # Cập nhật UI texts
+        self.update_ui_texts()
 
-    def refresh_ui(self):
-        # Xóa các thành phần hiện tại để render lại với ngôn ngữ mới
-        for widget in self.root.winfo_children():
-            widget.destroy()
-            
-        # Khởi tạo lại dictionary lưu biến
-        self.topic_vars = {}
-        # Gọi lại hàm dựng giao diện
-        self._setup_layout()
+    def update_ui_texts(self):
+        """Cập nhật lại các text trên UI khi đổi ngôn ngữ"""
+        # Cập nhật tiêu đề cửa sổ
+        self.root.title(translator.get("title.livox_panel"))
+        
+        # Cập nhật nút chuyển đổi ngôn ngữ
+        current_lang_text = "日本語" if translator.lang_code == "en" else "English"
+        if hasattr(self, 'btn_switch_lang'):
+            self.btn_switch_lang.config(text="🌐 " + current_lang_text)
+        
+        # Cập nhật sidebar
+        if hasattr(self, 'sidebar'):
+            self.sidebar.config(text=translator.get("label.livox_driver_2"))
+        
+        # Cập nhật các nút
+        if hasattr(self, 'btn_start_livox'):
+            self.btn_start_livox.config(text=translator.get("button.start"))
+        if hasattr(self, 'btn_stop_livox'):
+            self.btn_stop_livox.config(text=translator.get("button.stop"))
+        
+        # Cập nhật các label
+        if hasattr(self, 'label_theta_usb'):
+            if hasattr(self, 'is_camera_connected') and self.is_camera_connected:
+                self.label_theta_usb.config(text="● " + translator.get("label.camera") + ": " + translator.get("status.connected"))
+            else:
+                self.label_theta_usb.config(text="● " + translator.get("label.camera") + ": " + translator.get("status.disconnected"))
+        
+        if hasattr(self, 'label_slam_usb'):
+            if hasattr(self, 'is_mid360_connected') and self.is_mid360_connected:
+                self.label_slam_usb.config(text="● " + translator.get("label.livox_360") + ": " + translator.get("status.connected"))
+            else:
+                self.label_slam_usb.config(text="● " + translator.get("label.livox_360") + ": " + translator.get("status.disconnected"))
+        
+        if hasattr(self, 'label_theta'):
+            if hasattr(self, 'is_active_theta') and self.is_active_theta:
+                self.label_theta.config(text="● " + translator.get("label.theta_driver") + ": " + translator.get("status.running"))
+            else:
+                self.label_theta.config(text="● " + translator.get("label.theta_driver") + ": " + translator.get("status.not_running"))
+        
+        if hasattr(self, 'label_livox'):
+            if hasattr(self, 'livox_tab') and hasattr(self.livox_tab, 'is_running') and self.livox_tab.is_running:
+                self.label_livox.config(text="● " + translator.get("label.livox_driver") + ": " + translator.get("status.running"))
+            else:
+                self.label_livox.config(text="● " + translator.get("label.livox_driver") + ": " + translator.get("status.not_running"))
+        
+        # Cập nhật recording configuration
+        if hasattr(self, 'conf_frame'):
+            self.conf_frame.config(text=translator.get("label.recording_configuration"))
+        
+        # Cập nhật các nút và label khác
+        if hasattr(self, 'btn_record'):
+            if hasattr(self, 'recorder') and self.recorder.is_recording:
+                self.btn_record.config(text="■ " + translator.get("button.stop_recording"))
+            else:
+                self.btn_record.config(text="● " + translator.get("button.start_recording"))
+        
+        if hasattr(self, 'lbl_status'):
+            if hasattr(self, 'recorder') and self.recorder.is_recording:
+                self.lbl_status.config(text=translator.get("label.status_recording"))
+            else:
+                self.lbl_status.config(text=translator.get("label.status") + ": " + translator.get("status.ready"))
+        
+        if hasattr(self, 'btn_rviz'):
+            self.btn_rviz.config(text="📊 " + translator.get("button.launch_rviz2"))
+        
+        if hasattr(self, 'btn_clear_log'):
+            self.btn_clear_log.config(text=translator.get("button.clear_log"))
 
     def _setup_layout(self):
 
@@ -258,11 +316,11 @@ class LivoxApp:
     def open_rviz(self):
         """Mở RViz2 trực tiếp bằng subprocess"""
         rviz_config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.rviz")
-        self.log(f"🚀 Đang khởi động RViz2... {rviz_config_file}")
+        self.log(translator.get("log.launching_rviz2"))
         
         # Kiểm tra xem file có tồn tại không để tránh lỗi im lặng
         if not os.path.exists(rviz_config_file):
-            self.log(f"⚠️ Cảnh báo: Không tìm thấy file cấu hình tại {rviz_config_file}. Sẽ mở RViz mặc định.")
+            self.log(translator.get("log.warning_config_not_found").replace("{path}", rviz_config_file))
             cmd = ['rviz2']
         else:
             cmd = ['rviz2', '-d', rviz_config_file]
@@ -273,10 +331,10 @@ class LivoxApp:
                 stdout=subprocess.DEVNULL, # Ẩn log của RViz để đỡ rối terminal
                 stderr=subprocess.STDOUT
             )
-            self.log("✅ RViz2 đã được mở thành công.")
+            self.log(translator.get("log.rviz2_opened"))
             
         except Exception as e:
-            self.log(f"❌ Lỗi khi thực thi lệnh rviz2: {e}")
+            self.log(translator.get("log.error_rviz2").replace("{error}", str(e)))
 
     def _verify_source(self, setup_script, name):
         """Verify rằng setup script có thể source được"""
@@ -300,7 +358,7 @@ class LivoxApp:
     def start_recording(self):
         """Bắt đầu record rosbag"""
         if self.is_recording:
-            messagebox.showwarning("Cảnh báo", "Đang record, vui lòng dừng trước")
+            messagebox.showwarning(translator.get("dialog.warning"), translator.get("message.recording_in_progress"))
             return
         
         # Kiểm tra thư mục output
@@ -308,9 +366,9 @@ class LivoxApp:
         if not output_dir.exists():
             try:
                 output_dir.mkdir(parents=True, exist_ok=True)
-                self.log(f"Đã tạo thư mục: {output_dir}")
+                self.log(translator.get("log.created_directory").replace("{path}", str(output_dir)))
             except Exception as e:
-                messagebox.showerror("Lỗi", f"Không thể tạo thư mục: {e}")
+                messagebox.showerror(translator.get("dialog.error"), translator.get("message.cannot_create_directory").replace("{error}", str(e)))
                 return
         
         # Kiểm tra và source drive_ws setup.sh để có CustomMsg
@@ -318,21 +376,19 @@ class LivoxApp:
         use_drive_ws = False
         
         if drive_ws_setup.exists():
-            self.log("📦 Đang kiểm tra drive_ws/install/setup.sh...")
+            self.log(translator.get("log.checking_drive_ws"))
             if self._verify_source(drive_ws_setup, "drive_ws"):
-                self.log("✅ drive_ws/install/setup.sh đã sẵn sàng")
+                self.log(translator.get("log.drive_ws_ready"))
                 use_drive_ws = True
             else:
-                self.log("⚠️  Không thể verify drive_ws setup, nhưng vẫn sẽ thử source")
+                self.log(translator.get("log.cannot_verify_drive_ws"))
                 use_drive_ws = True
         else:
-            self.log("⚠️  Cảnh báo: Không tìm thấy drive_ws/install/setup.sh")
-            self.log("⚠️  Topic /livox/lidar (CustomMsg) có thể không record được")
+            self.log(translator.get("log.warning_drive_ws_not_found"))
+            self.log(translator.get("log.custommsg_may_not_recordable_log"))
             response = messagebox.askyesno(
-                "Cảnh báo",
-                "Không tìm thấy drive_ws/install/setup.sh.\n"
-                "Topic /livox/lidar (CustomMsg) có thể không record được.\n\n"
-                "Bạn có muốn tiếp tục không?"
+                translator.get("dialog.warning"),
+                translator.get("message.drive_ws_not_found")
             )
             if not response:
                 return
@@ -341,17 +397,16 @@ class LivoxApp:
         ws_setup = self.workspace_path / "install" / "setup.sh"
         if not ws_setup.exists():
             messagebox.showerror(
-                "Lỗi",
-                f"Không tìm thấy ws/install/setup.sh tại: {ws_setup}\n"
-                "Vui lòng build workspace trước."
+                translator.get("dialog.error"),
+                translator.get("message.ws_setup_not_found").replace("{path}", str(ws_setup))
             )
             return
         
-        self.log("📦 Đang kiểm tra ws/install/setup.sh...")
+        self.log(translator.get("log.checking_ws_setup"))
         if self._verify_source(ws_setup, "ws"):
-            self.log("✅ ws/install/setup.sh đã sẵn sàng")
+            self.log(translator.get("log.ws_setup_ready"))
         else:
-            self.log("⚠️  Không thể verify ws setup, nhưng vẫn sẽ thử source")
+            self.log(translator.get("log.cannot_verify_ws_setup"))
         
         # Lấy kích thước tối đa bag file
         try:
@@ -374,7 +429,7 @@ class LivoxApp:
         selected_topics = [topic for topic, var in self.topic_vars.items() if var.get()]
         
         if not selected_topics:
-            messagebox.showerror("Lỗi", "Vui lòng chọn ít nhất một topic để record")
+            messagebox.showerror(translator.get("dialog.error"), translator.get("message.select_at_least_one_topic"))
             return
         
         # Tạo tên bag file với timestamp
@@ -386,7 +441,7 @@ class LivoxApp:
         # Cần source drive_ws trước để có CustomMsg, sau đó source ws
         topics_str = " ".join(selected_topics)
         
-        self.log(f"📡 Topics được chọn: {len(selected_topics)}/{len(self.topic_vars)}")
+        self.log(translator.get("log.topics_selected").replace("{count}", str(len(selected_topics))).replace("{total}", str(len(self.topic_vars))))
         for topic in selected_topics:
             self.log(f"   ✓ {topic}")
         
@@ -404,15 +459,15 @@ class LivoxApp:
             min_size_bytes = 86016
             if max_bag_size_bytes < min_size_bytes:
                 max_bag_size_bytes = min_size_bytes
-                self.log(f"⚠️  Điều chỉnh kích thước tối thiểu: {min_size_bytes:,} bytes")
+                self.log(translator.get("log.adjusting_min_size").replace("{bytes:,}", f"{min_size_bytes:,}"))
             bag_record_cmd += f" --max-bag-size {max_bag_size_bytes}"
-            self.log(f"📦 Kích thước tối đa mỗi bag file: {max_bag_size}GB ({max_bag_size_bytes:,} bytes)")
-            self.log("📦 Bag files sẽ tự động chia nhỏ khi đạt giới hạn")
+            self.log(translator.get("log.max_bag_size").replace("{size}", str(max_bag_size)).replace("{bytes:,}", f"{max_bag_size_bytes:,}"))
+            self.log(translator.get("log.bag_files_will_split"))
         else:
-            self.log("📦 Không giới hạn kích thước bag file (sẽ tạo một file duy nhất)")
+            self.log(translator.get("log.no_bag_size_limit"))
         
         # Source theo thứ tự: ROS2 base -> drive_ws -> ws
-        self.log("🔧 Đang chuẩn bị source environment...")
+        self.log(translator.get("log.preparing_source"))
         if use_drive_ws:
             cmd = (
                 f"source {ros2_setup} && "
@@ -420,20 +475,20 @@ class LivoxApp:
                 f"source {ws_setup} && "
                 f"{bag_record_cmd}"
             )
-            self.log("✅ Sẽ source: ROS2 base -> drive_ws -> ws")
-            self.log("✅ CustomMsg support đã được kích hoạt")
+            self.log(translator.get("log.will_source_with_drive_ws"))
+            self.log(translator.get("log.custommsg_enabled"))
         else:
             cmd = (
                 f"source {ros2_setup} && "
                 f"source {ws_setup} && "
                 f"{bag_record_cmd}"
             )
-            self.log("⚠️  Sẽ source: ROS2 base -> ws (không có drive_ws)")
-            self.log("⚠️  CustomMsg có thể không hoạt động")
+            self.log(translator.get("log.will_source_without_drive_ws"))
+            self.log(translator.get("log.custommsg_may_not_work"))
         
-        self.log(f"📝 Bắt đầu record bag: {bag_name}")
-        self.log(f"📁 Output: {bag_path}")
-        self.log(f"📡 Topics: {topics_str}")
+        self.log(translator.get("log.starting_record_bag").replace("{name}", bag_name))
+        self.log(translator.get("log.output_path").replace("{path}", str(bag_path)))
+        self.log(translator.get("log.topics_list").replace("{topics}", topics_str))
         
         try:
             # Sử dụng env để đảm bảo clean environment
@@ -458,12 +513,12 @@ class LivoxApp:
             # Start thread để đọc output
             threading.Thread(target=self.monitor_record_process, daemon=True).start()
             
-            self.log("✅ Recording đã được khởi động")
+            self.log(translator.get("log.recording_started"))
             
         except Exception as e:
             error_msg = f"Không thể bắt đầu record: {e}"
             self.log(f"❌ Lỗi: {error_msg}")
-            messagebox.showerror("Lỗi", error_msg)
+            messagebox.showerror(translator.get("dialog.error"), error_msg)
             self.is_recording = False
     
     def stop_recording(self):
@@ -473,7 +528,7 @@ class LivoxApp:
         
         if self.record_process:
             try:
-                self.log("Đang dừng recording...")
+                self.log(translator.get("log.stopping_recording"))
                 self.record_process.terminate()
                 try:
                     self.record_process.wait(timeout=5)
@@ -488,20 +543,20 @@ class LivoxApp:
         self.is_recording = False
         
         if self.output_dir:
-            self.log(f"✅ Recording đã dừng. Bag file: {self.output_dir}")
+            self.log(translator.get("log.recording_stopped_with_path").replace("{path}", str(self.output_dir)))
         else:
-            self.log("✅ Recording đã dừng")
+            self.log(translator.get("log.recording_stopped_no_path"))
 
 
     def browse_output_directory(self):
         """Browse cho output directory"""
         directory = filedialog.askdirectory(
-            title="Chọn thư mục để lưu recording",
+            title=translator.get("message.select_directory_to_save"),
             initialdir=self.output_dir_var.get()
         )
         if directory:
             self.output_dir_var.set(directory)
-            self.log(f"Đã chọn thư mục: {directory}")
+            self.log(translator.get("log.directory_selected").replace("{path}", directory))
 
     def log(self, message):
         """Thêm message vào log"""
@@ -516,7 +571,7 @@ class LivoxApp:
         self.log_text.config(state="normal")
         self.log_text.delete('1.0', tk.END)
         self.log_text.config(state="disabled")
-        self.log("Log cleared.")
+        self.log(translator.get("log.log_cleared"))
 
     # def toggle_recording(self):
     #     if not self.is_recording:
@@ -548,8 +603,8 @@ class LivoxApp:
                 )
                 
                 if success:
-                    self.btn_record.config(text="■ STOP RECORDING", state=tk.NORMAL)
-                    self.lbl_status.config(text="Status: Recording...", fg="red")
+                    self.btn_record.config(text="■ " + translator.get("button.stop_recording"), state=tk.NORMAL)
+                    self.lbl_status.config(text=translator.get("label.status_recording"), fg="red")
                     # self.btn_upload.pack_forget()
                 else:
                     # Nếu start thất bại, enable lại button
@@ -557,8 +612,8 @@ class LivoxApp:
             else:
                 # Gọi logic stop từ file riêng
                 saved_path = self.recorder.stop()
-                self.btn_record.config(text="● START RECORDING", state=tk.NORMAL)
-                self.lbl_status.config(text=f"Status: Saved", fg="green")
+                self.btn_record.config(text="● " + translator.get("button.start_recording"), state=tk.NORMAL)
+                self.lbl_status.config(text=translator.get("label.status_saved"), fg="green")
                 # self.btn_upload.pack(side="left", padx=10)
                 if saved_path:
                     self.log(f"✅ Đã lưu tại: {saved_path}")
@@ -568,11 +623,11 @@ class LivoxApp:
             self.btn_record.config(state=tk.NORMAL)
             # Sync lại UI state
             if self.recorder.is_recording:
-                self.btn_record.config(text="■ STOP RECORDING")
-                self.lbl_status.config(text="Status: Recording...", fg="red")
+                self.btn_record.config(text="■ " + translator.get("button.stop_recording"))
+                self.lbl_status.config(text=translator.get("label.status_recording"), fg="red")
             else:
-                self.btn_record.config(text="● START RECORDING")
-                self.lbl_status.config(text="Status: Ready", fg="black")
+                self.btn_record.config(text="● " + translator.get("button.start_recording"))
+                self.lbl_status.config(text=translator.get("label.status") + ": " + translator.get("status.ready"), fg="black")
 
     def check_mid360_connection(self):
         """Kiểm tra kết nối và lưu vào biến self.is_mid360_connected"""
@@ -581,7 +636,7 @@ class LivoxApp:
         self.is_mid360_connected = False 
         
         if not ip:
-            self.log("❌ No IP")
+            self.log(translator.get("log.no_ip"))
             return
 
         def check():
@@ -598,7 +653,7 @@ class LivoxApp:
                         text="● " + translator.get("label.livox_360") + ": " + translator.get("status.connected"),
                         fg="green"
                     )
-                    self.log("✅ Livox mid360 Connected")
+                    self.log(translator.get("log.livox_mid360_connected"))
 
                 else:
                     self.is_mid360_connected = False
@@ -606,10 +661,10 @@ class LivoxApp:
                         text="● " + translator.get("label.livox_360") + ": " + translator.get("status.disconnected"),
                         fg="red"
                     )
-                    self.log("❌ Livox mid360 Disconnected")
+                    self.log(translator.get("log.livox_mid360_disconnected"))
             except Exception:
                 self.is_mid360_connected = False
-                self.log("⚠️ Livox mid360 Error")
+                self.log(translator.get("log.livox_mid360_error"))
 
 
         # Chạy ngầm để không treo giao diện (GUI)
@@ -675,7 +730,7 @@ class LivoxApp:
             # Cập nhật UI để enable lại nút start và disable nút stop
             self.update_ui_theta_connected(False)
         except Exception as e:
-            self.log(f"⚠️  Lỗi khi stop drivers: {e}")
+            self.log(translator.get("log.error_stop_drivers").replace("{error}", str(e)))
             # Đảm bảo UI được cập nhật ngay cả khi có lỗi
             self.update_ui_theta_connected(False)
     
@@ -688,7 +743,7 @@ class LivoxApp:
             success = False
             try:
                 # Đảm bảo stop tất cả processes cũ trước
-                self.log("Đang dừng các processes cũ...")
+                self.log(translator.get("log.stopping_recording"))
                 self.stop_livox_driver()
                 
                 # Chờ đủ lâu để các process cũ giải phóng port và resources
@@ -706,12 +761,12 @@ class LivoxApp:
                 
                 self.livox_tab.start_livox_driver()
                 
-                self.log("✅ Hệ thống đã khởi động lại")
+                self.log(translator.get("log.system_restarted"))
                 success = True
             except Exception as e:
-                self.log(f"❌ Lỗi khi start drivers: {e}")
+                self.log(translator.get("log.error_start_drivers").replace("{error}", str(e)))
                 import traceback
-                self.log(f"Chi tiết: {traceback.format_exc()}")
+                self.log(translator.get("log.details").replace("{details}", traceback.format_exc()))
             finally:
                 # Chỉ enable lại nút start nếu có lỗi
                 # Nếu start thành công, nút start sẽ được disable bởi update_ui_theta_connected()
@@ -742,7 +797,7 @@ class LivoxApp:
                         if any(keyword in line.lower() for keyword in ['recording', 'bag', 'topic', 'message']):
                             self.log(line)
         except Exception as e:
-            self.log(f"{translator.get("log.error_reading_output")} {e}")
+            self.log(f"{translator.get('log.error_reading_output')} {e}")
         
         # Kiểm tra exit code
         # if self.record_process.poll() is not None:
