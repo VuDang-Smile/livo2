@@ -25,6 +25,8 @@ except ImportError as e:
     import sys
     sys.exit(1)
 
+from languages.translate_engine import translator
+
 
 class LivoxSubscriber(Node):
     """ROS2 Node để subscribe topics /livox/lidar, livox/imu và /livox/points2"""
@@ -36,13 +38,12 @@ class LivoxSubscriber(Node):
         # /livox/lidar luôn là CustomMsg format
         if CustomMsg is None:
             self.get_logger().warn(
-                "Không thể import CustomMsg, fallback về PointCloud2. "
-                "Vui lòng source drive_ws/install/setup.sh trước khi chạy GUI."
+                translator.get("log.cannot_import_custommsg")
             )
             lidar_msg_type = PointCloud2
         else:
             lidar_msg_type = CustomMsg
-            self.get_logger().info('Sử dụng CustomMsg format cho /livox/lidar')
+            self.get_logger().info(translator.get("log.using_custommsg_format"))
         
         # Subscribe topic lidar với đúng message type
         # Topic name: /livox/lidar (đã được remap từ livox/points trong launch file)
@@ -69,7 +70,7 @@ class LivoxSubscriber(Node):
                 self.points2_callback,
                 10
             )
-            self.get_logger().info('Đã subscribe topic /livox/points2')
+            self.get_logger().info(translator.get("log.subscribed_points2"))
         else:
             self.subscription_points2 = None
         
@@ -89,7 +90,7 @@ class LivoxSubscriber(Node):
             
             self.callback_lidar(msg)
         except Exception as e:
-            self.get_logger().error(f'Lỗi xử lý lidar data: {e}')
+            self.get_logger().error(translator.get("log.error_processing_lidar").replace("{error}", str(e)))
             import traceback
             self.get_logger().error(traceback.format_exc())
     
@@ -103,7 +104,7 @@ class LivoxSubscriber(Node):
             
             self.callback_imu(msg)
         except Exception as e:
-            self.get_logger().error(f'Lỗi xử lý IMU data: {e}')
+            self.get_logger().error(translator.get("log.error_processing_imu").replace("{error}", str(e)))
             import traceback
             self.get_logger().error(traceback.format_exc())
     
@@ -118,7 +119,7 @@ class LivoxSubscriber(Node):
             if self.callback_points2:
                 self.callback_points2(msg)
         except Exception as e:
-            self.get_logger().error(f'Lỗi xử lý points2 data: {e}')
+            self.get_logger().error(translator.get("log.error_processing_points2").replace("{error}", str(e)))
             import traceback
             self.get_logger().error(traceback.format_exc())
 
@@ -155,7 +156,7 @@ class LivoxTab(ttk.Frame):
         # Nút Start Livox Driver
         self.start_driver_btn = ttk.Button(
             control_frame,
-            text="Start Livox MID 360",
+            text=translator.get("button.start_livox_mid360"),
             command=self.start_livox_driver
         )
         self.start_driver_btn.pack(side=tk.LEFT, padx=5)
@@ -163,7 +164,7 @@ class LivoxTab(ttk.Frame):
         # Nút Stop Livox Driver
         self.stop_driver_btn = ttk.Button(
             control_frame,
-            text="Stop Livox Driver",
+            text=translator.get("button.stop_livox_driver"),
             command=self.stop_livox_driver,
             state=tk.DISABLED
         )
@@ -172,7 +173,7 @@ class LivoxTab(ttk.Frame):
         # Nút Start ROS Subscriber
         self.start_subscriber_btn = ttk.Button(
             control_frame,
-            text="Start Subscriber",
+            text=translator.get("button.start_subscriber"),
             command=self.start_ros_subscriber,
             state=tk.DISABLED
         )
@@ -181,7 +182,7 @@ class LivoxTab(ttk.Frame):
         # Nút Stop Subscriber
         self.stop_subscriber_btn = ttk.Button(
             control_frame,
-            text="Stop Subscriber",
+            text=translator.get("button.stop_subscriber"),
             command=self.stop_ros_subscriber,
             state=tk.DISABLED
         )
@@ -190,7 +191,7 @@ class LivoxTab(ttk.Frame):
         # Nút Start Converter (độc lập, không phụ thuộc vào driver)
         self.start_converter_btn = ttk.Button(
             control_frame,
-            text="Start Converter",
+            text=translator.get("button.start_converter"),
             command=self.start_converter,
             state=tk.NORMAL  # Enable ngay từ đầu
         )
@@ -199,7 +200,7 @@ class LivoxTab(ttk.Frame):
         # Nút Stop Converter
         self.stop_converter_btn = ttk.Button(
             control_frame,
-            text="Stop Converter",
+            text=translator.get("button.stop_converter"),
             command=self.stop_converter,
             state=tk.DISABLED
         )
@@ -208,50 +209,50 @@ class LivoxTab(ttk.Frame):
         # Label trạng thái
         self.status_label = ttk.Label(
             control_frame,
-            text="Trạng thái: Chưa kết nối",
+            text=translator.get("label.status_not_connected"),
             foreground="red"
         )
         self.status_label.pack(side=tk.LEFT, padx=20)
         
         # Frame thông tin topics
-        info_frame = ttk.LabelFrame(self, text="Thông tin Topics", padding="10")
+        info_frame = ttk.LabelFrame(self, text=translator.get("label.topic_information"), padding="10")
         info_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Frame cho Lidar info
-        lidar_frame = ttk.LabelFrame(info_frame, text="Lidar Topic: /livox/lidar", padding="5")
+        lidar_frame = ttk.LabelFrame(info_frame, text=translator.get("label.lidar_topic_full"), padding="5")
         lidar_frame.pack(fill=tk.X, padx=5, pady=5)
         
         self.lidar_info_label = ttk.Label(
             lidar_frame,
-            text="Chưa nhận dữ liệu",
+            text=translator.get("label.no_data_received"),
             font=("Arial", 10)
         )
         self.lidar_info_label.pack(anchor=tk.W, padx=5)
         
         # Frame cho IMU info
-        imu_frame = ttk.LabelFrame(info_frame, text="IMU Topic: livox/imu", padding="5")
+        imu_frame = ttk.LabelFrame(info_frame, text=translator.get("label.imu_topic_full"), padding="5")
         imu_frame.pack(fill=tk.X, padx=5, pady=5)
         
         self.imu_info_label = ttk.Label(
             imu_frame,
-            text="Chưa nhận dữ liệu",
+            text=translator.get("label.no_data_received"),
             font=("Arial", 10)
         )
         self.imu_info_label.pack(anchor=tk.W, padx=5)
         
         # Frame cho Points2 info (từ converter)
-        points2_frame = ttk.LabelFrame(info_frame, text="PointCloud2 Topic: /livox/points2", padding="5")
+        points2_frame = ttk.LabelFrame(info_frame, text=translator.get("label.points2_topic"), padding="5")
         points2_frame.pack(fill=tk.X, padx=5, pady=5)
         
         self.points2_info_label = ttk.Label(
             points2_frame,
-            text="Chưa nhận dữ liệu",
+            text=translator.get("label.no_data_received"),
             font=("Arial", 10)
         )
         self.points2_info_label.pack(anchor=tk.W, padx=5)
         
         # Text area để hiển thị log
-        log_frame = ttk.LabelFrame(self, text="Log", padding="5")
+        log_frame = ttk.LabelFrame(self, text=translator.get("label.log_label"), padding="5")
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         self.log_text = scrolledtext.ScrolledText(
@@ -274,9 +275,8 @@ class LivoxTab(ttk.Frame):
         ros2_setup = "/opt/ros/jazzy/setup.bash"
         if not Path(ros2_setup).exists():
             messagebox.showerror(
-                "Lỗi",
-                f"Không tìm thấy ROS2 setup tại: {ros2_setup}\n"
-                "Vui lòng cài đặt ROS2 Jazzy."
+                translator.get("dialog.error"),
+                translator.get("message.ros2_setup_not_found").replace("{path}", ros2_setup)
             )
             return None
         return ros2_setup
@@ -287,17 +287,16 @@ class LivoxTab(ttk.Frame):
             setup_script = workspace_path / "install" / "setup.sh"
             if not setup_script.exists():
                 messagebox.showerror(
-                    "Lỗi",
-                    f"Không tìm thấy setup.sh tại: {setup_script}\n"
-                    "Vui lòng build workspace trước."
+                    translator.get("dialog.error"),
+                    translator.get("message.workspace_setup_not_found").replace("{path}", str(setup_script))
                 )
                 return False
             
             launch_path = workspace_path / launch_file
             if not launch_path.exists():
                 messagebox.showerror(
-                    "Lỗi",
-                    f"Không tìm thấy launch file tại: {launch_path}"
+                    translator.get("dialog.error"),
+                    translator.get("message.launch_file_not_found").replace("{path}", str(launch_path))
                 )
                 return False
             
@@ -318,8 +317,8 @@ class LivoxTab(ttk.Frame):
             launch_filename = launch_path.name
             cmd = f"source {ros2_setup} && source {setup_script} && ros2 launch {package_name} {launch_filename}"
             
-            self.log(f"Đang khởi động {process_name}...")
-            self.log(f"Command: {cmd}")
+            self.log(translator.get("log.starting_process").replace("{process_name}", process_name))
+            self.log(translator.get("log.command").replace("{cmd}", cmd))
             
             process = subprocess.Popen(
                 cmd,
@@ -334,20 +333,20 @@ class LivoxTab(ttk.Frame):
             setattr(self, process_attr, process)
             threading.Thread(target=monitor_func, daemon=True).start()
             
-            self.status_label.config(text=f"Trạng thái: {status_text}", foreground="orange")
+            self.status_label.config(text=translator.get("label.status") + ": " + status_text, foreground="orange")
             return True
             
         except Exception as e:
 
-            error_msg = f"Không thể start {process_name}: {e}"
+            error_msg = translator.get("log.error_start_process").replace("{process_name}", process_name).replace("{error}", str(e))
             print(error_msg)
             self.log(f"Lỗi: {error_msg}")
-            messagebox.showerror("Lỗi", error_msg)
+            messagebox.showerror(translator.get("dialog.error"), error_msg)
             return False
     
     def start_livox_driver(self):
         """Start Livox MID 360 driver"""
-        self.log("Bắt đầu Livox MID 360 driver...")
+        self.log(translator.get("log.starting_livox_driver"))
         print("Bắt đầu Livox MID 360 driver...")
         try:
             workspace_path = Path(__file__).parent.parent / "dependencies" / "drive_ws"
@@ -397,16 +396,16 @@ class LivoxTab(ttk.Frame):
                     else:
                         self.log(f"{process_name}: {line}")
         except Exception as e:
-            print(f"Lỗi khi đọc output từ {process_name}: {e}")
-            self.log(f"Lỗi khi đọc output từ {process_name}: {e}")
+            print(translator.get("log.error_reading_output_from").replace("{process_name}", process_name).replace("{error}", str(e)))
+            self.log(translator.get("log.error_reading_output_from").replace("{process_name}", process_name).replace("{error}", str(e)))
         
         # Kiểm tra exit code
         if process.poll() is not None:
             exit_code = process.poll()
             if exit_code != 0:
-                self.log(f"✗ {process_name} đã dừng với exit code: {exit_code}")
+                self.log(translator.get("log.process_stopped_exit_code").replace("{process_name}", process_name).replace("{exit_code}", str(exit_code)))
             else:
-                self.log(f"✓ {process_name} đã dừng bình thường")
+                self.log(translator.get("log.process_stopped_normal").replace("{process_name}", process_name))
             self.after(0, stopped_handler)
     
     def monitor_livox_driver_output(self):
@@ -420,7 +419,7 @@ class LivoxTab(ttk.Frame):
     def _handle_driver_stopped(self):
         """Xử lý khi driver dừng"""
         self.status_label.config(
-            text="Trạng thái: Livox Driver đã dừng",
+            text=translator.get("label.status_driver_stopped"),
             foreground="red"
         )
         self.start_driver_btn.config(state=tk.NORMAL)
@@ -439,7 +438,7 @@ class LivoxTab(ttk.Frame):
             return
         
         try:
-            self.log(f"Đang dừng {process_name}...")
+            self.log(translator.get("log.stopping_process").replace("{process_name}", process_name))
             process.terminate()
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -448,7 +447,7 @@ class LivoxTab(ttk.Frame):
             except:
                 pass
         except Exception as e:
-            self.log(f"Lỗi khi dừng {process_name}: {e}")
+            self.log(translator.get("log.error_stopping_process").replace("{process_name}", process_name).replace("{error}", str(e)))
     
     def stop_livox_driver(self):
         """Stop Livox driver"""
@@ -456,7 +455,7 @@ class LivoxTab(ttk.Frame):
         self.livox_driver_process = None
         
         self.status_label.config(
-            text="Trạng thái: Livox Driver đã dừng",
+            text=translator.get("label.status_driver_stopped"),
             foreground="red"
         )
         self.start_driver_btn.config(state=tk.NORMAL)
@@ -473,18 +472,18 @@ class LivoxTab(ttk.Frame):
     def start_ros_subscriber(self):
         """Bắt đầu ROS subscriber cho livox topics"""
         print("Bắt đầu ROS subscriber cho Livox...")
-        self.log("Bắt đầu ROS subscriber cho Livox...")
+        self.log(translator.get("log.starting_ros_subscriber"))
         if self.is_ros_running:
             return
         
         try:
             # Khởi tạo ROS2 nếu chưa có
             if not rclpy.ok():
-                self.log("Khởi tạo ROS2...")
+                self.log(translator.get("log.initializing_ros2"))
                 rclpy.init()
             
             # Kiểm tra topic type trước khi subscribe
-            self.log("Kiểm tra topic type...")
+            self.log(translator.get("log.checking_topic_type"))
             topic_type_result = subprocess.run(
                 ['ros2', 'topic', 'type', '/livox/lidar'],
                 capture_output=True,
@@ -495,37 +494,36 @@ class LivoxTab(ttk.Frame):
             use_pointcloud2 = False  # Mặc định dùng CustomMsg vì /livox/lidar là CustomMsg
             if topic_type_result.returncode == 0:
                 topic_type = topic_type_result.stdout.strip()
-                self.log(f"Topic /livox/lidar có type: {topic_type}")
+                self.log(translator.get("log.topic_type").replace("{type}", topic_type))
                 if 'CustomMsg' in topic_type:
                     use_pointcloud2 = False
-                    self.log("Phát hiện CustomMsg format, sẽ subscribe với CustomMsg")
+                    self.log(translator.get("log.detected_custommsg"))
                 elif 'PointCloud2' in topic_type or 'sensor_msgs' in topic_type:
                     use_pointcloud2 = True
-                    self.log("⚠️  Phát hiện PointCloud2 format (không mong đợi), sẽ dùng PointCloud2")
+                    self.log(translator.get("log.detected_pointcloud2"))
                 else:
-                    self.log(f"⚠️  Topic type không xác định: {topic_type}, dùng CustomMsg mặc định")
+                    self.log(translator.get("log.unknown_topic_type").replace("{type}", topic_type))
             else:
-                self.log("⚠️  Không thể kiểm tra topic type, dùng CustomMsg mặc định")
-                self.log("   (Topic có thể chưa tồn tại, sẽ thử subscribe với CustomMsg)")
+                self.log(translator.get("log.cannot_check_topic_type"))
+                self.log(translator.get("log.topic_may_not_exist"))
             
-            # Tạo node subscriber (có thể subscribe /livox/points2 nếu converter đang chạy)
-            self.log("Tạo ROS2 node cho Livox...")
-            # Kiểm tra xem converter có đang chạy không
-            subscribe_points2 = self.converter_process is not None and self.converter_process.poll() is None
+            # Tạo node subscriber
+            # Luôn subscribe /livox/points2 nếu converter có publish, không cần restart subscriber
+            self.log(translator.get("log.creating_ros2_node"))
             self.ros_node = LivoxSubscriber(
                 self.on_lidar_received,
                 self.on_imu_received,
-                callback_points2=self.on_points2_received if subscribe_points2 else None,
+                callback_points2=self.on_points2_received,
                 use_pointcloud2=use_pointcloud2
             )
             
             # Tạo executor và add node
-            self.log("Tạo executor...")
+            self.log(translator.get("log.creating_executor"))
             self.ros_executor = SingleThreadedExecutor()
             self.ros_executor.add_node(self.ros_node)
             
             # Kiểm tra topics có tồn tại không
-            self.log("Kiểm tra topics...")
+            self.log(translator.get("log.checking_topics"))
             result = subprocess.run(
                 ['ros2', 'topic', 'list'],
                 capture_output=True,
@@ -537,22 +535,22 @@ class LivoxTab(ttk.Frame):
             # Kiểm tra cả /livox/lidar và livox/lidar (ROS2 có thể normalize)
             if '/livox/lidar' in result.stdout or 'livox/lidar' in result.stdout:
                 topics_found.append('/livox/lidar')
-                self.log("✓ Topic /livox/lidar đã tồn tại")
+                self.log(translator.get("log.topic_livox_lidar_exists"))
             else:
-                self.log("⚠️  Cảnh báo: Topic /livox/lidar chưa tồn tại")
+                self.log(translator.get("log.warning_topic_livox_lidar_not_exists"))
             
             # Kiểm tra cả livox/imu và /livox/imu (ROS2 có thể normalize)
             if 'livox/imu' in result.stdout or '/livox/imu' in result.stdout:
                 topics_found.append('livox/imu')
-                self.log("✓ Topic livox/imu đã tồn tại")
+                self.log(translator.get("log.topic_livox_imu_exists"))
             else:
-                self.log("⚠️  Cảnh báo: Topic livox/imu chưa tồn tại")
+                self.log(translator.get("log.warning_topic_livox_imu_not_exists"))
             
             if not topics_found:
-                self.log("⚠️  Không tìm thấy topics. Đảm bảo Livox Driver đang chạy.")
+                self.log(translator.get("log.no_topics_found"))
             
             # Chạy ROS trong thread riêng
-            self.log("Khởi động ROS thread...")
+            self.log(translator.get("log.starting_ros_thread"))
             self.ros_thread = threading.Thread(target=self.ros_spin, daemon=True)
             self.ros_thread.start()
             
@@ -560,35 +558,46 @@ class LivoxTab(ttk.Frame):
             self.lidar_count = 0
             self.imu_count = 0
             self.status_label.config(
-                text="Trạng thái: Đang subscribe /livox/lidar và livox/imu...",
+                text=translator.get("log.status_subscribing"),
                 foreground="green"
             )
             self.start_subscriber_btn.config(state=tk.DISABLED)
             self.stop_subscriber_btn.config(state=tk.NORMAL)
             
-            self.log("✓ ROS subscriber đã khởi động")
+            self.log(translator.get("log.ros_subscriber_started"))
             
         except Exception as e:
-            error_msg = f"Không thể start subscriber: {e}"
+            error_msg = translator.get("log.error_start_subscriber").replace("{error}", str(e))
             print(error_msg)
             self.log(f"✗ Lỗi: {error_msg}")
             import traceback
             traceback.print_exc()
-            messagebox.showerror("Lỗi", error_msg)
-        self.log("Kết thúc ROS subscriber cho Livox...")
+            messagebox.showerror(translator.get("dialog.error"), error_msg)
+        self.log(translator.get("log.ending_ros_subscriber"))
     
     def ros_spin(self):
         """Spin ROS node trong thread riêng"""
         try:
-            self.log("ROS spin thread đã bắt đầu")
+            self.log(translator.get("log.ros_spin_thread_started"))
             while rclpy.ok() and self.is_ros_running:
-                # Dùng executor để spin
-                if self.ros_executor is not None:
-                    self.ros_executor.spin_once(timeout_sec=0.1)
+                # Kiểm tra executor và node trước khi sử dụng
+                if self.ros_executor is not None and self.ros_node is not None:
+                    try:
+                        self.ros_executor.spin_once(timeout_sec=0.1)
+                    except Exception:
+                        # Executor có thể đã bị shutdown, thoát khỏi vòng lặp
+                        break
+                elif self.ros_node is not None:
+                    try:
+                        rclpy.spin_once(self.ros_node, timeout_sec=0.1)
+                    except Exception:
+                        # Node có thể đã bị destroy, thoát khỏi vòng lặp
+                        break
                 else:
-                    rclpy.spin_once(self.ros_node, timeout_sec=0.1)
+                    # Không có executor hoặc node, thoát
+                    break
         except Exception as e:
-            error_msg = f"Lỗi trong ROS spin: {e}"
+            error_msg = translator.get("log.error_ros_spin").replace("{error}", str(e))
             self.log(f"✗ {error_msg}")
             import traceback
             traceback.print_exc()
@@ -598,6 +607,9 @@ class LivoxTab(ttk.Frame):
                     text=f"Lỗi: {str(e)[:50]}",
                     foreground="red"
                 ))
+        finally:
+            # Đảm bảo flag được reset khi thread kết thúc
+            self.is_ros_running = False
     
     def on_lidar_received(self, msg):
         """Callback khi nhận được lidar data"""
@@ -607,18 +619,18 @@ class LivoxTab(ttk.Frame):
         if CustomMsg and isinstance(msg, CustomMsg):
             # CustomMsg format
             info_text = (
-                f"Đã nhận {self.lidar_count} point clouds | "
-                f"Point num: {msg.point_num} | "
-                f"Type: CustomMsg | "
-                f"Lidar ID: {msg.lidar_id}"
+                translator.get("log.received_lidar_pointclouds").replace("{count}", str(self.lidar_count)) + " | " +
+                translator.get("log.point_num").replace("{num}", str(msg.point_num)) + " | " +
+                "Type: CustomMsg | " +
+                translator.get("log.lidar_id").replace("{id}", str(msg.lidar_id))
             )
         else:
             # PointCloud2 format
             info_text = (
-                f"Đã nhận {self.lidar_count} point clouds | "
-                f"Width: {msg.width} | Height: {msg.height} | "
-                f"Point step: {msg.point_step} bytes | "
-                f"Type: PointCloud2"
+                translator.get("log.received_lidar_pointclouds").replace("{count}", str(self.lidar_count)) + " | " +
+                f"Width: {msg.width} | Height: {msg.height} | " +
+                translator.get("log.point_step_bytes").replace("{step}", str(msg.point_step)) + " | " +
+                "Type: PointCloud2"
             )
         
         # Cập nhật UI trong main thread
@@ -627,7 +639,7 @@ class LivoxTab(ttk.Frame):
         # Cập nhật status mỗi 30 message
         if self.lidar_count % 30 == 0:
             self.after(0, lambda: self.status_label.config(
-                text=f"Trạng thái: Đã nhận {self.lidar_count} lidar, {self.imu_count} IMU messages",
+                text=translator.get("log.status_received_messages").replace("{lidar}", str(self.lidar_count)).replace("{imu}", str(self.imu_count)),
                 foreground="green"
             ))
     
@@ -639,59 +651,76 @@ class LivoxTab(ttk.Frame):
         angular_vel = msg.angular_velocity
         linear_accel = msg.linear_acceleration
         
+        angular_text = translator.get("log.angular").replace("{x:.3f}", f"{angular_vel.x:.3f}").replace("{y:.3f}", f"{angular_vel.y:.3f}").replace("{z:.3f}", f"{angular_vel.z:.3f}")
+        linear_text = translator.get("log.linear").replace("{x:.3f}", f"{linear_accel.x:.3f}").replace("{y:.3f}", f"{linear_accel.y:.3f}").replace("{z:.3f}", f"{linear_accel.z:.3f}")
         self.after(0, lambda: self.imu_info_label.config(
-            text=f"Đã nhận {self.imu_count} IMU messages | "
-                 f"Angular: [{angular_vel.x:.3f}, {angular_vel.y:.3f}, {angular_vel.z:.3f}] | "
-                 f"Linear: [{linear_accel.x:.3f}, {linear_accel.y:.3f}, {linear_accel.z:.3f}]"
+            text=translator.get("log.received_imu_messages").replace("{count}", str(self.imu_count)) + " | " +
+                 angular_text + " | " +
+                 linear_text
         ))
         
         # Cập nhật status mỗi 30 message
         if self.imu_count % 30 == 0:
             self.after(0, lambda: self.status_label.config(
-                text=f"Trạng thái: Đã nhận {self.lidar_count} lidar, {self.imu_count} IMU messages",
+                text=translator.get("log.status_received_messages").replace("{lidar}", str(self.lidar_count)).replace("{imu}", str(self.imu_count)),
                 foreground="green"
             ))
     
     def stop_ros_subscriber(self):
-        """Dừng ROS subscriber"""
+        """Dừng ROS subscriber với proper cleanup để tránh segmentation fault"""
+        # Set flag để spin thread biết dừng
         self.is_ros_running = False
         
+        # Đợi một chút để spin thread thoát khỏi vòng lặp
+        import time
+        time.sleep(0.2)
+        
+        # Đợi thread kết thúc nếu có
+        if self.ros_thread and self.ros_thread.is_alive():
+            # Đợi tối đa 1 giây để thread kết thúc
+            self.ros_thread.join(timeout=1.0)
+        
+        # Sau đó mới shutdown executor và destroy node
         if self.ros_executor:
             try:
                 self.ros_executor.shutdown()
-            except:
-                pass
-            self.ros_executor = None
+            except Exception as e:
+                self.log(translator.get("log.error_shutdown_executor").replace("{error}", str(e)))
+            finally:
+                self.ros_executor = None
         
         if self.ros_node:
             try:
                 self.ros_node.destroy_node()
-            except:
-                pass
-            self.ros_node = None
+            except Exception as e:
+                self.log(translator.get("log.error_destroy_node").replace("{error}", str(e)))
+            finally:
+                self.ros_node = None
+        
+        self.ros_thread = None
         
         # Cập nhật UI
         self.status_label.config(
-            text="Trạng thái: Subscriber đã dừng",
+            text=translator.get("log.status_subscriber_stopped"),
             foreground="red"
         )
         self.start_subscriber_btn.config(state=tk.NORMAL)
         self.stop_subscriber_btn.config(state=tk.DISABLED)
         
-        self.lidar_info_label.config(text="Chưa nhận dữ liệu")
-        self.imu_info_label.config(text="Chưa nhận dữ liệu")
-        self.points2_info_label.config(text="Chưa nhận dữ liệu")
-        self.log("ROS subscriber đã dừng")
+        self.lidar_info_label.config(text=translator.get("label.no_data_received"))
+        self.imu_info_label.config(text=translator.get("label.no_data_received"))
+        self.points2_info_label.config(text=translator.get("label.no_data_received"))
+        self.log(translator.get("log.ros_subscriber_stopped"))
     
     def start_converter(self):
         """Start Livox Message Converter node (độc lập, không phụ thuộc vào driver)"""
         try:
-            self.log("Bắt đầu Livox Message Converter...")
+            self.log(translator.get("log.starting_converter"))
             workspace_path = Path(__file__).parent.parent / "ws"
             launch_file = Path("src/livox_msg_converter/launch/livox_msg_converter.launch.py")
             
             # Kiểm tra xem topic /livox/lidar có tồn tại không (có thể từ driver khác hoặc nguồn khác)
-            self.log("Kiểm tra topic /livox/lidar...")
+            self.log(translator.get("log.checking_topic_livox_lidar"))
             result = subprocess.run(
                 ['ros2', 'topic', 'list'],
                 capture_output=True,
@@ -701,11 +730,11 @@ class LivoxTab(ttk.Frame):
             
             topic_exists = '/livox/lidar' in result.stdout or 'livox/lidar' in result.stdout
             if not topic_exists:
-                self.log("⚠️  Cảnh báo: Topic /livox/lidar chưa tồn tại")
-                self.log("   Converter sẽ chờ topic này xuất hiện...")
-                self.log("   (Có thể start Livox Driver hoặc có nguồn khác publish /livox/lidar)")
+                self.log(translator.get("log.warning_topic_not_exists_converter"))
+                self.log(translator.get("log.converter_will_wait"))
+                self.log(translator.get("log.converter_may_start_driver"))
             else:
-                self.log("✓ Topic /livox/lidar đã tồn tại, converter sẽ subscribe ngay")
+                self.log(translator.get("log.topic_exists_converter"))
             
             if self._start_ros2_process(
                 workspace_path,
@@ -717,17 +746,10 @@ class LivoxTab(ttk.Frame):
             ):
                 self.start_converter_btn.config(state=tk.DISABLED)
                 self.stop_converter_btn.config(state=tk.NORMAL)
-                print("Đang restart subscriber để subscribe /livox/points2...")
-                
-                # Nếu subscriber đang chạy, cần restart để subscribe /livox/points2
-                if self.is_ros_running:
-                    self.log("Đang restart subscriber để subscribe /livox/points2...")
-                    print("Đang restart subscriber để subscribe /livox/points2...")
-                    self.stop_ros_subscriber()
-                    self.after(1000, self.start_ros_subscriber)
+                # Không cần restart subscriber nữa vì luôn subscribe /livox/points2
         except Exception as e:
             self.log(f"[Error]: start_converter: {e}")
-        self.log("Ket thuc Livox Message Converter...")
+        self.log(translator.get("log.ending_converter"))
     
     def monitor_converter_output(self):
         """Monitor output từ converter process"""
@@ -742,17 +764,17 @@ class LivoxTab(ttk.Frame):
         # Cập nhật status dựa trên các process khác đang chạy
         if self.livox_driver_process and self.livox_driver_process.poll() is None:
             self.status_label.config(
-                text="Trạng thái: Livox Driver đang chạy (Converter đã dừng)",
+                text=translator.get("log.status_driver_running_converter_stopped"),
                 foreground="orange"
             )
         else:
             self.status_label.config(
-                text="Trạng thái: Converter đã dừng",
+                text=translator.get("log.status_converter_stopped"),
                 foreground="red"
             )
         self.start_converter_btn.config(state=tk.NORMAL)
         self.stop_converter_btn.config(state=tk.DISABLED)
-        self.points2_info_label.config(text="Chưa nhận dữ liệu")
+        self.points2_info_label.config(text=translator.get("label.no_data_received"))
         self.points2_count = 0
     
     
@@ -764,17 +786,17 @@ class LivoxTab(ttk.Frame):
         # Cập nhật status dựa trên các process khác đang chạy
         if self.livox_driver_process and self.livox_driver_process.poll() is None:
             self.status_label.config(
-                text="Trạng thái: Livox Driver đang chạy (Converter đã dừng)",
+                text=translator.get("log.status_driver_running_converter_stopped"),
                 foreground="orange"
             )
         else:
             self.status_label.config(
-                text="Trạng thái: Converter đã dừng",
+                text=translator.get("log.status_converter_stopped"),
                 foreground="red"
             )
         self.start_converter_btn.config(state=tk.NORMAL)
         self.stop_converter_btn.config(state=tk.DISABLED)
-        self.points2_info_label.config(text="Chưa nhận dữ liệu")
+        self.points2_info_label.config(text=translator.get("label.no_data_received"))
         self.points2_count = 0
     
     def on_points2_received(self, msg):
@@ -783,10 +805,10 @@ class LivoxTab(ttk.Frame):
         
         # Cập nhật UI trong main thread
         info_text = (
-            f"Đã nhận {self.points2_count} point clouds | "
-            f"Width: {msg.width} | Height: {msg.height} | "
-            f"Point step: {msg.point_step} bytes | "
-            f"Type: PointCloud2 (từ converter)"
+            translator.get("log.received_points2_pointclouds").replace("{count}", str(self.points2_count)) + " | " +
+            f"Width: {msg.width} | Height: {msg.height} | " +
+            translator.get("log.point_step_bytes").replace("{step}", str(msg.point_step)) + " | " +
+            translator.get("log.type_pointcloud2_from_converter")
         )
         
         self.after(0, lambda: self.points2_info_label.config(text=info_text))
@@ -794,7 +816,7 @@ class LivoxTab(ttk.Frame):
         # Cập nhật status mỗi 30 message
         if self.points2_count % 30 == 0:
             self.after(0, lambda: self.status_label.config(
-                text=f"Trạng thái: Đã nhận {self.lidar_count} lidar, {self.imu_count} IMU, {self.points2_count} points2 messages",
+                text=translator.get("log.status_received_all_messages").replace("{lidar}", str(self.lidar_count)).replace("{imu}", str(self.imu_count)).replace("{points2}", str(self.points2_count)),
                 foreground="green"
             ))
 
