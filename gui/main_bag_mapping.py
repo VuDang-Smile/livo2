@@ -2305,26 +2305,8 @@ class BagMappingInterface:
                 pose_file_copied = True
                 self.add_log(self.translator.get('log.copied_scans_pos', '📋 Copied scans_pos.json to {path}').replace('{path}', str(input_dir)))
             
-            # Đọc số poses để quyết định tham số HBA
-            try:
-                import json
-                with open(pose_file, 'r') as f:
-                    pose_data = json.load(f) if pose_file.suffix == '.json' else None
-                    if pose_data:
-                        num_poses = len(pose_data) if isinstance(pose_data, list) else len(pose_data.get('poses', []))
-                    else:
-                        # Fallback: đếm dòng trong file
-                        with open(pose_file, 'r') as f2:
-                            num_poses = sum(1 for line in f2 if line.strip())
-            except:
-                num_poses = 0
-            
-            # Chạy HBA với adaptive parameters để tối ưu hóa tốt hơn
-            # Sử dụng adaptive layers và threads, thêm downsampling nhẹ để giảm noise
-            cmd = f"python3 {hba_script} --input_dir {input_dir} --adaptive_layers --voxel_size 0.05"
-            if num_poses > 0:
-                self.add_log(self.translator.get('log.hba_poses_count', '📊 Number of poses: {count}').replace('{count}', str(num_poses)))
-            self.add_log(self.translator.get('log.hba_using_adaptive', '⚙️ Using adaptive HBA parameters for better optimization'))
+            # Chạy HBA với input_dir (script sẽ tạo file merge_all_hba.pcd trong input_dir)
+            cmd = f"python3 {hba_script} --input_dir {input_dir}"
             process = subprocess.Popen(
                 cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
             )
@@ -2455,60 +2437,12 @@ class BagMappingInterface:
             
             self.add_log(self.translator.get('log.sc_timeout', '⏱️ Process timeout: {timeout}s').replace('{timeout}', str(process_timeout)))
             
-            # Tính toán tile_size adaptive dựa trên kích thước map để có nhiều tiles hơn
-            # Đọc PCD để tính toán bounds
-            try:
-                import open3d as o3d
-                temp_pcd = o3d.io.read_point_cloud(str(input_pcd))
-                if not temp_pcd.is_empty():
-                    points = np.asarray(temp_pcd.points)
-                    x_range = float(points[:, 0].max() - points[:, 0].min())
-                    y_range = float(points[:, 1].max() - points[:, 1].min())
-                    map_size = max(x_range, y_range)
-                    
-                    # Adaptive tile_size: mục tiêu có ít nhất 10-15 tiles mỗi chiều
-                    # Nếu map nhỏ (<50m): tile_size = 10m
-                    # Nếu map trung bình (50-200m): tile_size = 15-20m  
-                    # Nếu map lớn (>200m): tile_size = 25m
-                    if map_size < 50:
-                        adaptive_tile_size = 10.0
-                    elif map_size < 200:
-                        adaptive_tile_size = 15.0 + (map_size - 50) * 0.033  # Linear từ 15 đến 20
-                        adaptive_tile_size = min(adaptive_tile_size, 20.0)
-                    else:
-                        adaptive_tile_size = 25.0
-                    
-                    # Giảm min_points_per_tile để không loại bỏ quá nhiều tiles nhỏ
-                    adaptive_min_points = 1000
-                    
-                    self.add_log(self.translator.get('log.sc_map_size', '📏 Map size: {size:.1f}m').replace('{size:.1f}', f'{map_size:.1f}'))
-                    self.add_log(self.translator.get('log.sc_adaptive_tile_size', '📐 Adaptive tile size: {size:.1f}m').replace('{size:.1f}', f'{adaptive_tile_size:.1f}'))
-                    
-                    cmd = (
-                        f"python3 {sc_script} "
-                        f"--input_pcd {input_pcd} "
-                        f"--output_dir {output_dir} "
-                        f"--strip_color --voxel_size 0.2 "
-                        f"--tile_size {adaptive_tile_size:.1f} "
-                        f"--min_points_per_tile {adaptive_min_points}"
-                    )
-                else:
-                    # Fallback nếu không đọc được PCD
-                    cmd = (
-                        f"python3 {sc_script} "
-                        f"--input_pcd {input_pcd} "
-                        f"--output_dir {output_dir} "
-                        f"--strip_color --voxel_size 0.2 --tile_size 20.0 --min_points_per_tile 1000"
-                    )
-            except Exception as e:
-                # Fallback nếu có lỗi
-                self.add_log(f"⚠️ Warning: Cannot calculate adaptive tile size: {e}. Using default 20m")
-                cmd = (
-                    f"python3 {sc_script} "
-                    f"--input_pcd {input_pcd} "
-                    f"--output_dir {output_dir} "
-                    f"--strip_color --voxel_size 0.2 --tile_size 20.0 --min_points_per_tile 1000"
-                )
+            cmd = (
+                f"python3 {sc_script} "
+                f"--input_pcd {input_pcd} "
+                f"--output_dir {output_dir} "
+                f"--strip_color --voxel_size 0.2 --tile_size 50.0"
+            )
             
             self.add_log(self.translator.get('log.sc_running', '▶️ Running ScanContext script...'))
             
