@@ -73,7 +73,11 @@
         "name": "名前",
         "type": "タイプ",
         "not_given": "未設定",
-        "not_available": "利用不可"
+        "not_available": "利用不可",
+        "device_connection": "デバイス接続",
+        "device_connected": "デバイス: 接続済み",
+        "device_disconnected": "デバイス: 未接続",
+        "checking_connection": "接続確認中..."
     },
     "message": {
         "select_output_dir": "録画の出力ディレクトリを選択してください。",
