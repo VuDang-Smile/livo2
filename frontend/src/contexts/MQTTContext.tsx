@@ -160,8 +160,11 @@ export const MQTTProvider: React.FC<MQTTProviderProps> = ({
         setConnectionStatus('Connected');
         setError(null);
         
-        // Subscribe topics
-        const topics = ['lidar/pcd/upload', 'lidar/pcd/processed', 'lidar/map/update', 'lidar/position/update', 'lidar/pose/update', 'lidar/vehicle/status', 'lidar/status', 'livo/vehicles/+/pose'];
+        // Subscribe topics - only subscribe to topics that backend actually publishes
+        const topics = [
+          'livo/vehicles/+/pose',           // Vehicle pose updates from backend API
+          'livo/maps/vehicle.status.updated' // Vehicle status updates from backend API
+        ];
         topics.forEach((topic) =>
           mqttClient.subscribe(topic, (err) => {
             if (err) {
@@ -228,61 +231,20 @@ export const MQTTProvider: React.FC<MQTTProviderProps> = ({
             
             console.log('🔍 [MQTT] Processed vehicle pose update:', posUpdate);
             setLastPositionUpdate(posUpdate);
-          } else if (topic === 'lidar/pcd/upload') {
-            const notification: PCDNotification = JSON.parse(payload.toString());
-            setLastPCDNotification(notification);
-          } else if (topic === 'lidar/map/update') {
-            const mapUpdate: MapUpdateNotification = JSON.parse(payload.toString());
-            setLastMapUpdate(mapUpdate);
-          } else if (topic === 'lidar/position/update') {
-            const posUpdate: PositionUpdateNotification = JSON.parse(payload.toString());
-            setLastPositionUpdate(posUpdate);
-          } else if (topic === 'lidar/pose/update') {
-            const poseMsg = JSON.parse(payload.toString());
-            console.log('🔍 Raw pose message:', poseMsg);
-            
-            const posUpdate: PositionUpdateNotification = {
-              vehicle_id: poseMsg.vehicle_id,
-              position: { 
-                x: poseMsg.position?.x ?? 0, 
-                y: poseMsg.position?.y ?? 0, 
-                z: poseMsg.position?.z ?? 0, 
-                timestamp: normalizeTimestamp(poseMsg.timestamp, false)
-              },
-              pose: {
-                frame_id: poseMsg.frame_id || 'map',
-                position: { 
-                  x: poseMsg.position?.x ?? 0, 
-                  y: poseMsg.position?.y ?? 0, 
-                  z: poseMsg.position?.z ?? 0 
-                },
-                orientation: { 
-                  w: poseMsg.orientation?.w ?? 1, 
-                  x: poseMsg.orientation?.x ?? 0, 
-                  y: poseMsg.orientation?.y ?? 0, 
-                  z: poseMsg.orientation?.z ?? 0 
-                },
-                timestamp: normalizeTimestamp(poseMsg.timestamp, false)
-              },
-              // Thêm QR data từ metadata nếu có
-              ...(poseMsg.metadata?.qr_code && {
-                qr_code: poseMsg.metadata.qr_code,
-                qr_position: poseMsg.metadata.qr_position,
-                distance_to_qr: poseMsg.metadata.distance_to_qr,
-                distance_to_origin: poseMsg.metadata.distance_to_origin,
-                qr_scan_timestamp: poseMsg.metadata.qr_scan_timestamp
-              })
-            };
-            
-            console.log('🔍 Processed position update:', posUpdate);
-            setLastPositionUpdate(posUpdate);
-          } else if (topic === 'lidar/vehicle/status') {
+          } else if (topic === 'livo/maps/vehicle.status.updated') {
             const statusMsg = JSON.parse(payload.toString());
             console.log('🔍 [MQTT] Vehicle status message received:', statusMsg);
-            setLastVehicleStatus(statusMsg);
-          } else if (topic === 'lidar/status') {
-            const lidarStatus: LidarStatusUpdate = JSON.parse(payload.toString());
-            setLastLidarStatus(lidarStatus);
+            
+            // Normalize status message format
+            const vehicleStatus: LastVehicleStatus = {
+              vehicle_id: statusMsg.vehicle_id,
+              status: statusMsg.status,
+              action: statusMsg.action,
+              timestamp: statusMsg.timestamp,
+              data: statusMsg
+            };
+            
+            setLastVehicleStatus(vehicleStatus);
           }
         } catch (err) {
           console.error('Error parsing MQTT message:', err);

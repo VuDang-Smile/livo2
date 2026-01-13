@@ -111,7 +111,18 @@ const VehicleMap: React.FC = () => {
   // Get vehicles for display based on view mode
   const displayVehicles: Vehicle[] = useMemo(() => {
     if (viewMode === '2D') {
-      return filteredVehicles;
+      // Convert 2D markers from useVehiclePose2D to Vehicle format for list display
+      return markers2D.map(marker => ({
+        id: marker.id,
+        name: marker.label || marker.id,
+        status: 'active' as const, // Default status for MQTT vehicles
+        position: { 
+          x: marker.position[0], 
+          y: marker.position[1], 
+          z: marker.position[2] 
+        },
+        timestamp: marker.lastUpdate.toISOString(),
+      }));
     } else {
       // Convert 3D markers to display format
       return markers3D.map(marker => ({
@@ -122,7 +133,7 @@ const VehicleMap: React.FC = () => {
         timestamp: new Date().toISOString(),
       }));
     }
-  }, [viewMode, filteredVehicles, markers3D]);
+  }, [viewMode, markers2D, markers3D]);
 
   const selectedVehicle = displayVehicles.find(v => v.id === selectedVehicleId);
 

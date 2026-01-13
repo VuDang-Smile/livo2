@@ -117,7 +117,7 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
   }, [lastPositionUpdate, extractPose, isExcludedVehicle]);
 
   /**
-   * Handle vehicle status updates - update status instead of removing markers
+   * Handle vehicle status updates - remove markers when status = offline
    */
   useEffect(() => {
     if (!lastVehicleStatus) return;
@@ -126,29 +126,40 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
     const newStatus = lastVehicleStatus.status;
 
     if (DEBUG) {
-      console.log('🔍 Vehicle status update:', vehicleId, '->', newStatus);
+      console.log('🔍 [useVehicleMarkers3D] Vehicle status update:', vehicleId, '->', newStatus);
     }
 
-    // Update marker status instead of removing
-    setVehicleMarkers((prev) => {
-      return prev.map(marker => {
-        if (marker.id === vehicleId) {
-          if (DEBUG) {
-            console.log('✅ Updated marker status:', vehicleId, marker.status || 'unknown', '->', newStatus);
-          }
-          // Cast status to valid VehicleMarker3D status type
-          const validStatus: "active" | "inactive" | "offline" | "maintenance" | undefined = 
-            (newStatus === 'active' || newStatus === 'inactive' || newStatus === 'offline' || newStatus === 'maintenance') 
-              ? newStatus 
-              : marker.status;
-          return {
-            ...marker,
-            status: validStatus
-          };
+    if (newStatus === 'offline') {
+      // Remove marker from canvas when vehicle goes offline
+      setVehicleMarkers((prev) => {
+        const filtered = prev.filter(marker => marker.id !== vehicleId);
+        if (filtered.length < prev.length) {
+          console.log('🗑️ [useVehicleMarkers3D] Removed marker for offline vehicle:', vehicleId);
         }
-        return marker;
+        return filtered;
       });
-    });
+    } else {
+      // Update marker status for other status changes
+      setVehicleMarkers((prev) => {
+        return prev.map(marker => {
+          if (marker.id === vehicleId) {
+            if (DEBUG) {
+              console.log('✅ Updated marker status:', vehicleId, marker.status || 'unknown', '->', newStatus);
+            }
+            // Cast status to valid VehicleMarker3D status type
+            const validStatus: "active" | "inactive" | "offline" | "maintenance" | undefined = 
+              (newStatus === 'active' || newStatus === 'inactive' || newStatus === 'offline' || newStatus === 'maintenance') 
+                ? newStatus 
+                : marker.status;
+            return {
+              ...marker,
+              status: validStatus
+            };
+          }
+          return marker;
+        });
+      });
+    }
   }, [lastVehicleStatus]);
 
   return {

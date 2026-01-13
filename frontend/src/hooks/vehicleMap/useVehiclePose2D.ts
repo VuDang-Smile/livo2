@@ -20,7 +20,7 @@ export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): Use
   const [error, setError] = useState<string | null>(null);
   const lastProcessedUpdateRef = useRef<string | null>(null);
   
-  const { lastPositionUpdate, isConnected } = useMQTT();
+  const { lastPositionUpdate, lastVehicleStatus, isConnected } = useMQTT();
   
   // Fetch map metadata from local public folder
   const fetchMetadata = useCallback(async () => {
@@ -196,6 +196,27 @@ export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): Use
     return () => clearInterval(interval);
   }, []);
   
+  // Handle vehicle status updates - remove markers when status = offline
+  useEffect(() => {
+    if (!lastVehicleStatus) return;
+
+    const vehicleId = lastVehicleStatus.vehicle_id;
+    const newStatus = lastVehicleStatus.status;
+
+    console.log('🔍 [useVehiclePose2D] Vehicle status update:', vehicleId, '->', newStatus);
+
+    if (newStatus === 'offline') {
+      // Remove marker from canvas when vehicle goes offline
+      setVehicleMarkers(prev => {
+        const filtered = prev.filter(marker => marker.id !== vehicleId);
+        if (filtered.length < prev.length) {
+          console.log('🗑️ [useVehiclePose2D] Removed marker for offline vehicle:', vehicleId);
+        }
+        return filtered;
+      });
+    }
+  }, [lastVehicleStatus]);
+
   // Log MQTT connection status changes
   useEffect(() => {
     if (isConnected) {

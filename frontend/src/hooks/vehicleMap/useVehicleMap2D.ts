@@ -125,7 +125,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
   }, [lastPositionUpdate, extractPosition, isExcludedVehicle]);
 
   /**
-   * Handle vehicle status updates - update status instead of removing vehicles
+   * Handle vehicle status updates - remove from list and canvas when status = offline
    */
   useEffect(() => {
     if (!lastVehicleStatus) return;
@@ -134,31 +134,49 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
     const newStatus = lastVehicleStatus.status;
 
     if (DEBUG) {
-      console.log('🔍 Vehicle status update:', vehicleId, '->', newStatus);
+      console.log('🔍 [useVehicleMap2D] Vehicle status update:', vehicleId, '->', newStatus);
     }
 
-    // Update vehicle status instead of removing
-    setMapVehicles((prev) => {
-      return prev.map(vehicle => {
-        if (vehicle.id === vehicleId) {
-          if (DEBUG) {
-            console.log('✅ Updated vehicle status:', vehicleId, vehicle.status, '->', newStatus);
-          }
-          // Cast status to valid Vehicle status type
-          const validStatus: "active" | "inactive" | "offline" | "maintenance" = 
-            (newStatus === 'active' || newStatus === 'inactive' || newStatus === 'offline' || newStatus === 'maintenance') 
-              ? newStatus 
-              : vehicle.status;
-          return {
-            ...vehicle,
-            status: validStatus
-          };
+    if (newStatus === 'offline') {
+      // Remove vehicle from list when status = offline
+      setMapVehicles((prev) => {
+        const filtered = prev.filter(vehicle => vehicle.id !== vehicleId);
+        if (filtered.length < prev.length) {
+          console.log('🗑️ [useVehicleMap2D] Removed vehicle from list (offline):', vehicleId);
         }
-        return vehicle;
+        return filtered;
       });
-    });
 
-    // Only remove from lastSeen if vehicle is deleted (not just offline)
+      // Remove from lastSeen tracking
+      setVehicleLastSeen(prev => {
+        const updated = new Map(prev);
+        updated.delete(vehicleId);
+        return updated;
+      });
+    } else {
+      // Update vehicle status for other status changes
+      setMapVehicles((prev) => {
+        return prev.map(vehicle => {
+          if (vehicle.id === vehicleId) {
+            if (DEBUG) {
+              console.log('✅ Updated vehicle status:', vehicleId, vehicle.status, '->', newStatus);
+            }
+            // Cast status to valid Vehicle status type
+            const validStatus: "active" | "inactive" | "offline" | "maintenance" = 
+              (newStatus === 'active' || newStatus === 'inactive' || newStatus === 'offline' || newStatus === 'maintenance') 
+                ? newStatus 
+                : vehicle.status;
+            return {
+              ...vehicle,
+              status: validStatus
+            };
+          }
+          return vehicle;
+        });
+      });
+    }
+
+    // Remove from lastSeen if vehicle is deleted
     if (newStatus === 'deleted' || (lastVehicleStatus.action && lastVehicleStatus.action === 'deleted')) {
       setVehicleLastSeen(prev => {
         const updated = new Map(prev);
