@@ -128,6 +128,7 @@ class WorkerInterface:
         self.pose_counter = 0  # Đếm số lần nhận pose
         self.pose_send_interval = 20  # Gửi lên backend mỗi 20 lần
         self.last_pose_received_time = None  # Thời gian nhận pose cuối cùng
+        self.pose_first_received_logged = False  # Đã log lần đầu nhận pose chưa
         
         # Translator for multi-language support
         self.translator = Translator('en')
@@ -328,7 +329,7 @@ class WorkerInterface:
         """Mở RViz2 để xem bản đồ (không khởi động node)"""
         # Kiểm tra map có tồn tại không
         if not self.default_map_root.exists() or not (self.default_map_root / "pose.json").exists():
-            self.log("⚠️ Map chưa sẵn sàng. Vui lòng đợi tải map hoàn tất.")
+            self.log(self.translator.get('log.map_not_ready_wait', '⚠️ Map not ready. Please wait for map download to complete.'))
             return
         
         # Tìm rviz config file từ fast_lio_localization package
@@ -369,14 +370,14 @@ class WorkerInterface:
             # Chỉ đợi process kết thúc, không log output
             proc.wait()
         except Exception as e:
-            self.log(f"Lỗi trong monitor_localization_process: {e}")
+            self.log(self.translator.get('log.error_monitor_localization', 'Error in monitor_localization_process: {error}').replace('{error}', str(e)))
         finally:
             self.root.after(0, self.on_localization_ended)
     
     def on_localization_ended(self):
         """Xử lý khi process localization kết thúc"""
         if self.is_localization_running:
-            self.log("⏹ Localization process đã dừng.")
+            self.log(self.translator.get('log.localization_process_stopped', '⏹ Localization process stopped'))
             self.root.after(0, self._handle_localization_stopped)
     
     def _handle_localization_stopped(self):
@@ -474,7 +475,7 @@ class WorkerInterface:
         
         try:
             # Kiểm tra topics có tồn tại không trước khi subscribe
-            self.log(self.translator.get('log.checking_pose_topics', '🔍 Kiểm tra pose topics...'))
+            self.log(self.translator.get('log.checking_pose_topics', '🔍 Checking pose topics...'))
             time.sleep(2)  # Đợi một chút để localization node khởi động
             
             result = subprocess.run(
@@ -489,14 +490,14 @@ class WorkerInterface:
                 topics = result.stdout
                 if '/localization' in topics or 'localization' in topics:
                     topics_found.append('/localization')
-                    self.log("✓ Topic /localization đã tồn tại")
+                    self.log(self.translator.get('log.topic_exists', '✓ Topic {topic} exists').replace('{topic}', '/localization'))
                 if '/Odometry' in topics or 'Odometry' in topics:
                     topics_found.append('/Odometry')
-                    self.log("✓ Topic /Odometry đã tồn tại")
+                    self.log(self.translator.get('log.topic_exists', '✓ Topic {topic} exists').replace('{topic}', '/Odometry'))
                 
                 if not topics_found:
-                    self.log("⚠️ Cảnh báo: Không tìm thấy topics /localization hoặc /Odometry")
-                    self.log("   Localization có thể chưa sẵn sàng, sẽ thử subscribe và đợi...")
+                    self.log(self.translator.get('log.topic_not_found_warning', '⚠️ Warning: Topics /localization or /Odometry not found'))
+                    self.log(self.translator.get('log.localization_may_not_ready', '   Localization may not be ready, will try to subscribe and wait...'))
             
             # Khởi tạo ROS2 nếu chưa có
             if not rclpy.ok():
@@ -521,10 +522,11 @@ class WorkerInterface:
             self.pose_thread.start()
             
             self.log(self.translator.get('log.pose_publisher_started', '✅ Pose publisher started'))
-            self.log("📡 Đang đợi nhận pose từ /localization hoặc /Odometry...")
+            self.log(self.translator.get('log.waiting_for_pose', '📡 Waiting for pose from /localization or /Odometry...'))
             
             # Bắt đầu timer để kiểm tra xem có nhận được pose không
             self.last_pose_received_time = None
+            self.pose_first_received_logged = False
             self._start_pose_monitoring()
             
         except Exception as e:
@@ -537,7 +539,7 @@ class WorkerInterface:
             while self.is_pose_publishing and rclpy.ok():
                 self.pose_executor.spin_once(timeout_sec=0.1)
         except Exception as e:
-            self.log(f"❌ Lỗi trong pose executor: {e}")
+            self.log(self.translator.get('log.error_pose_executor', '❌ Error in pose executor: {error}').replace('{error}', str(e)))
         finally:
             if self.pose_subscriber:
                 self.pose_subscriber.destroy_node()
@@ -573,10 +575,10 @@ class WorkerInterface:
         # Cập nhật thời gian nhận pose cuối cùng
         self.last_pose_received_time = time.time()
         
-        # Log lần đầu nhận được pose
-        if self.pose_counter == 0:
-            self.log("✅ Đã nhận được pose lần đầu!")
-            self.log(f"   Position: x={position['x']:.3f}, y={position['y']:.3f}, z={position['z']:.3f}")
+        # Log lần đầu nhận được pose (chỉ 1 lần)
+        if not self.pose_first_received_logged:
+            self.log(self.translator.get('log.pose_received', '✅ Pose received'))
+            self.pose_first_received_logged = True
         
         # Cập nhật UI (chạy trong main thread) - luôn cập nhật để hiển thị real-time
         self.root.after(0, lambda: self.update_pose_display(position, orientation, timestamp))
@@ -609,9 +611,7 @@ class WorkerInterface:
             elapsed = time.time() - self.last_pose_received_time
             if elapsed > 10:
                 # Không nhận được pose trong 10 giây
-                self.log("⚠️ Cảnh báo: Không nhận được pose trong 10 giây")
-                self.log("   Kiểm tra xem localization node có đang chạy không")
-                self.log("   Kiểm tra topics: ros2 topic list | grep -E 'localization|Odometry'")
+                self.log(self.translator.get('log.pose_not_received', '❌ No pose received in 10 seconds'))
                 # Check lại sau 10 giây nữa
                 self.root.after(10000, check_pose)
             else:
@@ -650,7 +650,7 @@ class WorkerInterface:
                         error_detail = response.text[:200]
                     except:
                         error_detail = "Không thể đọc error detail"
-                    self.log(f"⚠️ Lỗi HTTP 405 (Method Not Allowed)")
+                    self.log(self.translator.get('log.error_http_405', '⚠️ HTTP 405 error (Method Not Allowed)'))
                     self.log(f"   URL: {url}")
                     self.log(f"   Method: POST")
                     self.log(f"   Response: {error_detail}")
@@ -662,17 +662,17 @@ class WorkerInterface:
                         error_detail = response.text[:200]
                     except:
                         error_detail = ""
-                    self.log(f"⚠️ Lỗi khi gửi pose: HTTP {response.status_code} - {error_detail}")
+                    self.log(self.translator.get('log.error_sending_pose_http', '⚠️ Error sending pose: HTTP {code} - {detail}').replace('{code}', str(response.status_code)).replace('{detail}', error_detail))
                     self._last_pose_error_code = response.status_code
                 
         except requests.exceptions.RequestException as e:
             # Chỉ log lỗi, không spam log
             if not hasattr(self, '_last_pose_error') or (datetime.now() - self._last_pose_error).seconds > 10:
-                self.log(f"⚠️ Lỗi kết nối khi gửi pose: {e}")
+                self.log(self.translator.get('log.error_connection_sending_pose', '⚠️ Connection error when sending pose: {error}').replace('{error}', str(e)))
                 self._last_pose_error = datetime.now()
         except Exception as e:
             if not hasattr(self, '_last_pose_error') or (datetime.now() - self._last_pose_error).seconds > 10:
-                self.log(f"⚠️ Lỗi khi gửi pose: {e}")
+                self.log(self.translator.get('log.error_sending_pose', '⚠️ Error sending pose: {error}').replace('{error}', str(e)))
                 self._last_pose_error = datetime.now()
     
     def check_livox_driver_running(self):
@@ -695,22 +695,24 @@ class WorkerInterface:
                 has_imu = '/livox/imu' in topics or 'livox/imu' in topics
                 
                 if has_lidar and has_imu:
-                    self.log(f"✓ Tìm thấy topics: lidar={'/livox/lidar' if '/livox/lidar' in topics else 'livox/lidar'}, imu={'/livox/imu' if '/livox/imu' in topics else 'livox/imu'}")
+                    lidar_topic = '/livox/lidar' if '/livox/lidar' in topics else 'livox/lidar'
+                    imu_topic = '/livox/imu' if '/livox/imu' in topics else 'livox/imu'
+                    self.log(self.translator.get('log.topics_found', '✓ Found topics: lidar={lidar}, imu={imu}').replace('{lidar}', lidar_topic).replace('{imu}', imu_topic))
                     return True
                 else:
-                    # Log chi tiết để debug
+                    # Log chi tiết để debug (chỉ khi không tìm thấy)
                     if not has_lidar:
-                        self.log("⚠️ Không tìm thấy topic /livox/lidar hoặc livox/lidar")
+                        self.log(self.translator.get('log.topic_not_found', '⚠️ Topic {topic} not found').replace('{topic}', '/livox/lidar'))
                     if not has_imu:
-                        self.log("⚠️ Không tìm thấy topic /livox/imu hoặc livox/imu")
+                        self.log(self.translator.get('log.topic_not_found', '⚠️ Topic {topic} not found').replace('{topic}', '/livox/imu'))
                     # Log tất cả topics có chứa 'livox' để debug
                     livox_topics = [t.strip() for t in topics.split('\n') if 'livox' in t.lower()]
                     if livox_topics:
-                        self.log(f"   Topics có chứa 'livox': {', '.join(livox_topics)}")
+                        self.log(self.translator.get('log.livox_topics_found', '   Topics containing \'livox\': {topics}').replace('{topics}', ', '.join(livox_topics)))
             
             return False
         except Exception as e:
-            self.log(f"⚠️ Lỗi khi kiểm tra driver: {e}")
+            self.log(self.translator.get('log.error_checking_driver', '⚠️ Error checking driver: {error}').replace('{error}', str(e)))
             return False
     
     def start_livox_driver(self):
@@ -726,12 +728,12 @@ class WorkerInterface:
             
             # Kiểm tra setup scripts
             if not os.path.exists(ros2_setup):
-                self.log(f"❌ ROS2 setup không tồn tại tại: {ros2_setup}")
+                self.log(self.translator.get('log.ros2_setup_not_found', '❌ ROS2 setup not found at: {path}').replace('{path}', ros2_setup))
                 return False
             
             if not drive_ws_setup.exists():
-                self.log(f"❌ Drive workspace chưa được build: {drive_ws_setup}")
-                self.log("Vui lòng build drive_ws trước khi chạy driver")
+                self.log(self.translator.get('log.drive_ws_not_built', '❌ Drive workspace not built: {path}').replace('{path}', str(drive_ws_setup)))
+                self.log(self.translator.get('log.please_build_drive_ws', 'Please build drive_ws before running driver'))
                 return False
             
             # Launch file path
@@ -776,7 +778,7 @@ class WorkerInterface:
                     return False
             
         except Exception as e:
-            self.log(f"❌ Lỗi khi khởi động Livox driver: {e}")
+            self.log(self.translator.get('log.error_starting_livox_driver', '❌ Error starting Livox driver: {error}').replace('{error}', str(e)))
             self.is_livox_driver_running = False
             self.livox_driver_process = None
             return False
@@ -799,7 +801,7 @@ class WorkerInterface:
                     elif any(keyword in line.lower() for keyword in ['warning', 'warn']):
                         self.log(f"⚠️ Driver WARNING: {line}")
         except Exception as e:
-            self.log(f"Lỗi khi đọc output từ driver: {e}")
+            self.log(self.translator.get('log.error_reading_driver_output', 'Error reading driver output: {error}').replace('{error}', str(e)))
         finally:
             # Khi process kết thúc
             if proc.poll() is not None:
@@ -832,7 +834,7 @@ class WorkerInterface:
                     else:
                         self.livox_driver_process.kill()
             except Exception as e:
-                self.log(f"⚠️ Lỗi khi dừng driver: {e}")
+                self.log(self.translator.get('log.error_stopping_driver', '⚠️ Error stopping driver: {error}').replace('{error}', str(e)))
             finally:
                 self.livox_driver_process = None
         
@@ -910,7 +912,7 @@ class WorkerInterface:
                 # Nếu không tìm thấy, sử dụng giá trị mặc định
                 data = {}
         except Exception as e:
-            self.log(f"⚠️ Lỗi khi lấy thông tin vehicle: {e}")
+            self.log(self.translator.get('log.error_getting_vehicle_info', '⚠️ Error getting vehicle info: {error}').replace('{error}', str(e)))
             data = {}
 
         # Xử lý name: nếu null hoặc None thì hiển thị "not given"
@@ -1142,9 +1144,7 @@ class WorkerInterface:
                                                    font=("Consolas", 10), relief=tk.SUNKEN, bd=1)
         self.log_panel.pack(fill=tk.BOTH, expand=True)
         
-        self.log("INFO: Connection established with Device.")
-        self.log("INFO: LiDAR sensors calibrated.")
-        self.log("SUCCESS: System ready for movement.")
+        self.log(self.translator.get('log.system_ready', '✅ System ready'))
 
     def get_mac_address(self):
         try:
@@ -1182,30 +1182,39 @@ class WorkerInterface:
         
         # Kiểm tra map có tồn tại không
         if not self.default_map_root.exists() or not (self.default_map_root / "pose.json").exists():
-            self.log("⚠️ Map chưa sẵn sàng. Vui lòng đợi tải map hoàn tất.")
+            self.log(self.translator.get('log.map_not_ready_wait', '⚠️ Map not ready. Please wait for map download to complete.'))
             return
         
-        # Kiểm tra và khởi động Livox driver nếu chưa chạy
-        self.log("=" * 60)
-        self.log(self.translator.get('log.checking_livox_driver', '🔍 Kiểm tra Livox driver...'))
+        # Kiểm tra xem có thiết bị thật không (có topics /livox/lidar và /livox/imu)
+        # Nếu không có thiết bị thật, bỏ qua việc khởi động driver (giả định đang replay bag)
+        has_real_device = self.check_livox_driver_running()
         
-        if not self.check_livox_driver_running():
-            self.log(self.translator.get('log.livox_driver_not_running', '⚠️ Livox driver chưa chạy, đang khởi động...'))
-            if not self.start_livox_driver():
-                self.log(self.translator.get('log.failed_to_start_driver', '❌ Không thể khởi động Livox driver. Vui lòng kiểm tra lại.'))
-                return
+        if has_real_device:
+            # Có thiết bị thật, kiểm tra và khởi động driver nếu cần
+            self.log("=" * 60)
+            self.log(self.translator.get('log.checking_livox_driver', '🔍 Kiểm tra Livox driver...'))
+            
+            if not self.is_livox_driver_running:
+                self.log(self.translator.get('log.livox_driver_not_running', '⚠️ Livox driver chưa chạy, đang khởi động...'))
+                if not self.start_livox_driver():
+                    self.log(self.translator.get('log.failed_to_start_driver', '❌ Không thể khởi động Livox driver. Vui lòng kiểm tra lại.'))
+                    return
+            else:
+                self.log(self.translator.get('log.livox_driver_already_running', '✅ Livox driver đã đang chạy'))
         else:
-            self.log(self.translator.get('log.livox_driver_already_running', '✅ Livox driver đã đang chạy'))
+            # Không có thiết bị thật, bỏ qua việc khởi động driver (đang replay bag)
+            self.log("=" * 60)
+            self.log(self.translator.get('log.no_real_device_detected', '📦 No real device detected, skipping driver startup (assuming bag replay)'))
         
         # Script helper
         run_script = Path(project_root) / "scripts" / "run_localization.sh"
         if not run_script.exists():
-            self.log(f"❌ Không tìm thấy script chạy localization tại: {run_script}")
+            self.log(self.translator.get('log.localization_script_not_found', '❌ Localization script not found at: {path}').replace('{path}', str(run_script)))
             return
         
         self.log("=" * 60)
-        self.log("🚀 Đang khởi động Localization node...")
-        self.log(f"📁 Map: {self.default_map_root}")
+        self.log(self.translator.get('log.starting_localization_node', '🚀 Starting Localization node...'))
+        self.log(self.translator.get('log.map_path', '📁 Map: {path}').replace('{path}', str(self.default_map_root)))
         
         try:
             # Chạy localization script với RViz disabled (chỉ chạy node)
@@ -1235,17 +1244,9 @@ class WorkerInterface:
             self.btn_stop.config(state=tk.NORMAL)
             self.status_text.config(text=self.translator.get('label.localization_running', 'System: Localization running...'))
             self.log(self.translator.get('log.localization_node_started', '✅ Localization node started.'))
-            self.log("")
-            self.log("📌 LƯU Ý QUAN TRỌNG:")
-            self.log("   Để localization hoạt động, bạn cần:")
-            self.log("   1. Mở RViz2 (nút Launch RViz2)")
-            self.log("   2. Sử dụng tool '2D Pose Estimate' trong RViz2 để set initial pose")
-            self.log("   3. Đợi localization khởi tạo (có thể mất vài giây)")
-            self.log("   4. Sau đó pose sẽ bắt đầu được publish lên /localization")
-            self.log("")
             
         except Exception as e:
-            self.log(f"❌ Lỗi khi khởi động localization: {e}")
+            self.log(self.translator.get('log.error_starting_localization', '❌ Error starting localization: {error}').replace('{error}', str(e)))
             self.is_localization_running = False
             self.is_running = False
 
@@ -1413,9 +1414,9 @@ class WorkerInterface:
                 self.log(self.translator.get('log.cannot_update_vehicle_status', '⚠️ Cannot update vehicle status: HTTP {code}').replace('{code}', str(response.status_code)))
                 
         except requests.exceptions.RequestException as e:
-            self.log(f"⚠️ Lỗi kết nối khi cập nhật trạng thái: {e}")
+            self.log(self.translator.get('log.error_connection_updating_status', '⚠️ Connection error when updating status: {error}').replace('{error}', str(e)))
         except Exception as e:
-            self.log(f"⚠️ Lỗi khi cập nhật trạng thái: {e}")
+            self.log(self.translator.get('log.error_updating_status', '⚠️ Error updating status: {error}').replace('{error}', str(e)))
     
     def on_closing(self):
         """Xử lý khi đóng cửa sổ"""
