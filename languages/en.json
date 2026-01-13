@@ -73,7 +73,11 @@
         "name": "Name",
         "type": "Type",
         "not_given": "not given",
-        "not_available": "N/A"
+        "not_available": "N/A",
+        "device_connection": "Device Connection",
+        "device_connected": "Device: Connected",
+        "device_disconnected": "Device: Disconnected",
+        "checking_connection": "Checking connection..."
     },
     "message": {
         "select_output_dir": "Please select an output directory for recordings.",

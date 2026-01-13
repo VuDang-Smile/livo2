@@ -119,6 +119,12 @@ class WorkerInterface:
         self.livox_driver_process = None
         self.is_livox_driver_running = False
         
+        # Livox device connection info
+        self.livox_ip = self._get_livox_ip_from_config()  # IP từ config hoặc mặc định
+        self.is_livox_device_connected = False  # Trạng thái kết nối thiết bị (ping)
+        self.device_connection_timer_id = None
+        self.device_connection_update_interval = 5000  # Cập nhật mỗi 5 giây
+        
         # Pose publishing
         self.pose_subscriber = None
         self.pose_executor = None
@@ -159,6 +165,7 @@ class WorkerInterface:
         self.setup_options()
         self.setup_vehicle_info()
         self.setup_map_info()
+        self.setup_device_connection_info()
         self.setup_pose_display()
 
         # Cài đặt phần Log bên phải
@@ -174,6 +181,9 @@ class WorkerInterface:
         
         # Tự động tải map và QR khi khởi động
         self.download_map_and_qr()
+        
+        # Bắt đầu monitoring kết nối thiết bị định kỳ
+        self.start_device_connection_monitoring()
         
         # Thêm handler khi đóng cửa sổ
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -289,6 +299,12 @@ class WorkerInterface:
             self.vehicle_info_frame.config(text=self.translator.get('label.vehicle_information', 'Vehicle Information'))
         if hasattr(self, 'map_info_frame'):
             self.map_info_frame.config(text=self.translator.get('label.map_information', 'Map Information'))
+        if hasattr(self, 'device_connection_frame'):
+            self.device_connection_frame.config(text=self.translator.get('label.device_connection', 'Device Connection'))
+            # Cập nhật lại IP và trạng thái
+            if hasattr(self, 'device_ip_label'):
+                self.device_ip_label.config(text=f"IP: {self.livox_ip}")
+            self.check_device_connection()
         if hasattr(self, 'pose_display_frame'):
             self.pose_display_frame.config(text=self.translator.get('label.pose_orientation', 'Pose & Orientation'))
 
@@ -1028,6 +1044,128 @@ class WorkerInterface:
             self.map_info_label.config(text=self.translator.get('label.map_valid', '✅ Map valid: {count} tiles').replace('{count}', str(num_tiles)), foreground="green")
             self.map_detail_label.config(text=detail_text)
     
+    def _get_livox_ip_from_config(self):
+        """Đọc IP của Livox MID360 từ config file"""
+        try:
+            config_path = Path(project_root) / "dependencies" / "drive_ws" / "src" / "livox_ros_driver2" / "config" / "MID360_config.json"
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    # Thử lấy từ lidar_configs trước
+                    if 'lidar_configs' in config and len(config['lidar_configs']) > 0:
+                        ip = config['lidar_configs'][0].get('ip')
+                        if ip:
+                            return ip
+                    # Nếu không có, thử lấy từ host_net_info
+                    if 'MID360' in config and 'host_net_info' in config['MID360']:
+                        if isinstance(config['MID360']['host_net_info'], list) and len(config['MID360']['host_net_info']) > 0:
+                            lidar_ip = config['MID360']['host_net_info'][0].get('lidar_ip')
+                            if lidar_ip and isinstance(lidar_ip, list) and len(lidar_ip) > 0:
+                                return lidar_ip[0]
+        except Exception as e:
+            pass  # Ignore errors, dùng IP mặc định
+        
+        # IP mặc định
+        return "192.168.1.109"
+    
+    def setup_device_connection_info(self):
+        """Thiết lập phần hiển thị thông tin kết nối thiết bị Livox"""
+        frame = tk.LabelFrame(self.sidebar, text=self.translator.get('label.device_connection', 'Device Connection'), padx=10, pady=10)
+        frame.pack(fill=tk.X, pady=5, padx=5)
+        self.device_connection_frame = frame  # Store reference for update_ui_texts
+        
+        # Label hiển thị IP
+        self.device_ip_label = tk.Label(
+            frame,
+            text=f"IP: {self.livox_ip}",
+            foreground="gray",
+            font=("Arial", 8),
+            wraplength=280,
+            justify=tk.LEFT
+        )
+        self.device_ip_label.pack(anchor=tk.W, pady=2)
+        
+        # Label hiển thị trạng thái kết nối
+        self.device_status_label = tk.Label(
+            frame,
+            text=self.translator.get('label.checking_connection', 'Checking connection...'),
+            foreground="gray",
+            font=("Arial", 9, "bold"),
+            wraplength=280,
+            justify=tk.LEFT
+        )
+        self.device_status_label.pack(anchor=tk.W, pady=2)
+        
+        # Cập nhật trạng thái ban đầu
+        self.check_device_connection()
+    
+    def check_device_connection(self):
+        """Kiểm tra kết nối thiết bị Livox bằng ping"""
+        if not self.livox_ip:
+            return
+        
+        def check():
+            try:
+                # Ping nhanh (1 gói tin, chờ 1 giây)
+                # Dùng 'n' cho Windows, 'c' cho Linux
+                param = '-n' if os.name == 'nt' else '-c'
+                result = subprocess.run(
+                    ['ping', param, '1', '-W', '1', self.livox_ip],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                
+                is_connected = (result.returncode == 0)
+                
+                # Cập nhật UI trong main thread
+                self.root.after(0, lambda: self._update_device_connection_ui(is_connected))
+                
+            except Exception as e:
+                # Nếu có lỗi, coi như không kết nối
+                self.root.after(0, lambda: self._update_device_connection_ui(False))
+        
+        # Chạy trong thread riêng để không block UI
+        threading.Thread(target=check, daemon=True).start()
+    
+    def _update_device_connection_ui(self, is_connected):
+        """Cập nhật UI hiển thị trạng thái kết nối thiết bị"""
+        if not hasattr(self, 'device_status_label'):
+            return
+        
+        self.is_livox_device_connected = is_connected
+        
+        if is_connected:
+            self.device_status_label.config(
+                text="● " + self.translator.get('label.device_connected', 'Device: Connected'),
+                foreground="green"
+            )
+        else:
+            self.device_status_label.config(
+                text="● " + self.translator.get('label.device_disconnected', 'Device: Disconnected'),
+                foreground="red"
+            )
+    
+    def start_device_connection_monitoring(self):
+        """Bắt đầu monitoring kết nối thiết bị định kỳ"""
+        def update_periodically():
+            if hasattr(self, 'device_status_label'):
+                self.check_device_connection()
+            # Lên lịch cập nhật tiếp theo
+            self.device_connection_timer_id = self.root.after(
+                self.device_connection_update_interval,
+                update_periodically
+            )
+        
+        # Bắt đầu cập nhật ngay lập tức và sau đó định kỳ
+        update_periodically()
+    
+    def stop_device_connection_monitoring(self):
+        """Dừng monitoring kết nối thiết bị"""
+        if self.device_connection_timer_id:
+            self.root.after_cancel(self.device_connection_timer_id)
+            self.device_connection_timer_id = None
+    
     def setup_pose_display(self):
         """Thiết lập phần hiển thị pose và orientation"""
         frame = tk.LabelFrame(self.sidebar, text=self.translator.get('label.pose_orientation', 'Pose & Orientation'), padx=10, pady=10)
@@ -1423,6 +1561,9 @@ class WorkerInterface:
     
     def on_closing(self):
         """Xử lý khi đóng cửa sổ"""
+        # Dừng monitoring kết nối thiết bị
+        self.stop_device_connection_monitoring()
+        
         # Cập nhật trạng thái vehicle thành offline
         if self.vehicle_id:
             self.update_vehicle_status("offline")
