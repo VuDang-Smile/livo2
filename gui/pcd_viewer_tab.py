@@ -328,10 +328,11 @@ class PCDViewerTab(ttk.Frame):
         # Build command
         ros2_setup = "/opt/ros/jazzy/setup.bash"
         
-        # Build launch command
+        # Build launch command - đảm bảo đường dẫn được quote đúng cách
+        pcd_path_quoted = f'"{pcd_path}"' if ' ' in pcd_path else pcd_path
         launch_cmd = (
             f"ros2 launch fast_livo pcd_viewer.launch.py "
-            f"pcd_file:={pcd_path} "
+            f"pcd_file:={pcd_path_quoted} "
             f"topic_name:={topic_name} "
             f"frame_id:={frame_id} "
             f"publish_rate:={publish_rate} "
@@ -385,10 +386,17 @@ class PCDViewerTab(ttk.Frame):
             threading.Thread(target=self.monitor_viewer_process, daemon=True).start()
             
             self.log("✅ PCD viewer đã được khởi động")
+            self.log("📊 Đang chờ node khởi động và publish point cloud...")
+            self.log("💡 Nếu RViz không hiển thị, kiểm tra:")
+            self.log("   1. PCD file có tồn tại và hợp lệ không")
+            self.log("   2. Node có publish lên topic không (dùng: ros2 topic echo /pcd_map)")
+            self.log("   3. RViz có subscribe đúng topic không")
             
         except Exception as e:
             error_msg = f"Không thể bắt đầu PCD viewer: {e}"
             self.log(f"❌ Lỗi: {error_msg}")
+            import traceback
+            self.log(f"📋 Chi tiết lỗi:\n{traceback.format_exc()}")
             messagebox.showerror("Lỗi", error_msg)
             self.is_viewer_running = False
             self.start_btn.config(state=tk.NORMAL)
@@ -462,23 +470,32 @@ class PCDViewerTab(ttk.Frame):
                     break
                 line = line.strip()
                 if line:
-                    # Log output
-                    if any(keyword in line.lower() for keyword in ['error', 'fatal', 'exception', 'failed']):
+                    # Log output với phân loại rõ ràng
+                    line_lower = line.lower()
+                    if any(keyword in line_lower for keyword in ['error', 'fatal', 'exception', 'failed', 'cannot', 'unable']):
                         self.log(f"❌ ERROR: {line}")
-                    elif any(keyword in line.lower() for keyword in ['warning', 'warn']):
+                    elif any(keyword in line_lower for keyword in ['warning', 'warn']):
                         self.log(f"⚠️  WARNING: {line}")
+                    elif any(keyword in line_lower for keyword in ['loaded', 'publishing', 'published', 'started', 'rviz', 'found', 'using']):
+                        self.log(f"ℹ️  INFO: {line}")
+                    elif any(keyword in line_lower for keyword in ['topic', 'frame', 'rate', 'loop', 'pcd']):
+                        # Log các thông tin cấu hình
+                        self.log(f"⚙️  {line}")
                     else:
-                        # Log các dòng quan trọng
-                        if any(keyword in line.lower() for keyword in ['loaded', 'publishing', 'started', 'rviz']):
+                        # Log các dòng khác (có thể là debug info)
+                        if 'pcd_viewer' in line_lower or 'rviz' in line_lower:
                             self.log(line)
         except Exception as e:
-            self.log(f"Lỗi khi đọc output: {e}")
+            self.log(f"❌ Lỗi khi đọc output: {e}")
+            import traceback
+            self.log(f"📋 Chi tiết: {traceback.format_exc()}")
         
         # Kiểm tra exit code
         if self.pcd_viewer_process.poll() is not None:
             exit_code = self.pcd_viewer_process.poll()
             if exit_code != 0:
                 self.log(f"✗ PCD viewer đã dừng với exit code: {exit_code}")
+                self.log("💡 Kiểm tra log trên để xem lỗi chi tiết")
             else:
                 self.log(f"✓ PCD viewer đã hoàn thành")
             
