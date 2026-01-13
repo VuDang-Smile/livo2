@@ -12,7 +12,7 @@
           },
           "host_net_info": [
               {
-                  "lidar_ip": ["192.168.1.148"],
+                  "lidar_ip": ["192.168.1.109"],
                   "host_ip": "192.168.1.50",
                   "cmd_data_port": 56101,
                   "push_msg_port": 56201,
@@ -24,7 +24,7 @@
       },
       "lidar_configs": [
           {
-              "ip": "192.168.1.148", 
+              "ip": "192.168.1.109", 
               "pcl_data_type": 1,
               "pattern_mode": 0,
               "extrinsic_parameter": {

@@ -40,7 +40,8 @@ def generate_launch_description():
         output='screen',
         parameters=livox_ros2_params,
         remappings=[
-            ('livox/points', '/livox/lidar'),  # Remap to /livox/lidar
+            ('livox/points', '/livox/lidar'),  # Remap to /livox/lidar (CustomMsg)
+            ('livox/imu', '/livox/imu'),  # Remap to /livox/imu để đảm bảo consistency với bag file
         ]
         )
 

@@ -7,6 +7,7 @@ import os
 import sys
 import requests
 import threading
+import time
 import zipfile
 import shutil
 import json
@@ -91,6 +92,8 @@ class PoseSubscriber(Node):
                 
         except Exception as e:
             self.get_logger().error(f'Lỗi xử lý pose: {e}')
+            import traceback
+            self.get_logger().error(traceback.format_exc())
 
 
 class WorkerInterface:
@@ -112,6 +115,10 @@ class WorkerInterface:
         self.loc_process = None
         self.is_localization_running = False
         
+        # Livox driver process
+        self.livox_driver_process = None
+        self.is_livox_driver_running = False
+        
         # Pose publishing
         self.pose_subscriber = None
         self.pose_executor = None
@@ -120,6 +127,7 @@ class WorkerInterface:
         self.is_pose_publishing = False
         self.pose_counter = 0  # Đếm số lần nhận pose
         self.pose_send_interval = 20  # Gửi lên backend mỗi 20 lần
+        self.last_pose_received_time = None  # Thời gian nhận pose cuối cùng
         
         # Translator for multi-language support
         self.translator = Translator('en')
@@ -465,6 +473,31 @@ class WorkerInterface:
             return
         
         try:
+            # Kiểm tra topics có tồn tại không trước khi subscribe
+            self.log(self.translator.get('log.checking_pose_topics', '🔍 Kiểm tra pose topics...'))
+            time.sleep(2)  # Đợi một chút để localization node khởi động
+            
+            result = subprocess.run(
+                ['ros2', 'topic', 'list'],
+                capture_output=True,
+                text=True,
+                timeout=3
+            )
+            
+            topics_found = []
+            if result.returncode == 0:
+                topics = result.stdout
+                if '/localization' in topics or 'localization' in topics:
+                    topics_found.append('/localization')
+                    self.log("✓ Topic /localization đã tồn tại")
+                if '/Odometry' in topics or 'Odometry' in topics:
+                    topics_found.append('/Odometry')
+                    self.log("✓ Topic /Odometry đã tồn tại")
+                
+                if not topics_found:
+                    self.log("⚠️ Cảnh báo: Không tìm thấy topics /localization hoặc /Odometry")
+                    self.log("   Localization có thể chưa sẵn sàng, sẽ thử subscribe và đợi...")
+            
             # Khởi tạo ROS2 nếu chưa có
             if not rclpy.ok():
                 rclpy.init()
@@ -488,6 +521,11 @@ class WorkerInterface:
             self.pose_thread.start()
             
             self.log(self.translator.get('log.pose_publisher_started', '✅ Pose publisher started'))
+            self.log("📡 Đang đợi nhận pose từ /localization hoặc /Odometry...")
+            
+            # Bắt đầu timer để kiểm tra xem có nhận được pose không
+            self.last_pose_received_time = None
+            self._start_pose_monitoring()
             
         except Exception as e:
             self.log(self.translator.get('log.error_starting_pose_publisher', '❌ Error starting pose publisher: {error}').replace('{error}', str(e)))
@@ -532,6 +570,14 @@ class WorkerInterface:
         if not self.vehicle_id:
             return
         
+        # Cập nhật thời gian nhận pose cuối cùng
+        self.last_pose_received_time = time.time()
+        
+        # Log lần đầu nhận được pose
+        if self.pose_counter == 0:
+            self.log("✅ Đã nhận được pose lần đầu!")
+            self.log(f"   Position: x={position['x']:.3f}, y={position['y']:.3f}, z={position['z']:.3f}")
+        
         # Cập nhật UI (chạy trong main thread) - luôn cập nhật để hiển thị real-time
         self.root.after(0, lambda: self.update_pose_display(position, orientation, timestamp))
         
@@ -547,6 +593,33 @@ class WorkerInterface:
                 args=(position, orientation, timestamp),
                 daemon=True
             ).start()
+    
+    def _start_pose_monitoring(self):
+        """Bắt đầu monitoring để kiểm tra xem có nhận được pose không"""
+        def check_pose():
+            if not self.is_pose_publishing:
+                return
+            
+            if self.last_pose_received_time is None:
+                # Chưa nhận được pose, kiểm tra lại sau 5 giây
+                self.root.after(5000, check_pose)
+                return
+            
+            # Đã nhận được pose, không cần check nữa
+            elapsed = time.time() - self.last_pose_received_time
+            if elapsed > 10:
+                # Không nhận được pose trong 10 giây
+                self.log("⚠️ Cảnh báo: Không nhận được pose trong 10 giây")
+                self.log("   Kiểm tra xem localization node có đang chạy không")
+                self.log("   Kiểm tra topics: ros2 topic list | grep -E 'localization|Odometry'")
+                # Check lại sau 10 giây nữa
+                self.root.after(10000, check_pose)
+            else:
+                # Vẫn nhận được pose, check lại sau 10 giây
+                self.root.after(10000, check_pose)
+        
+        # Bắt đầu check sau 5 giây
+        self.root.after(5000, check_pose)
     
     def send_pose_to_backend(self, position, orientation, timestamp):
         """Gửi pose lên backend API"""
@@ -601,6 +674,181 @@ class WorkerInterface:
             if not hasattr(self, '_last_pose_error') or (datetime.now() - self._last_pose_error).seconds > 10:
                 self.log(f"⚠️ Lỗi khi gửi pose: {e}")
                 self._last_pose_error = datetime.now()
+    
+    def check_livox_driver_running(self):
+        """Kiểm tra xem Livox driver có đang chạy không bằng cách kiểm tra topics"""
+        try:
+            # Kiểm tra topics /livox/lidar và livox/imu có tồn tại không
+            # Lưu ý: Driver publish livox/imu (không có / ở đầu), nhưng ROS2 có thể normalize
+            result = subprocess.run(
+                ['ros2', 'topic', 'list'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            
+            if result.returncode == 0:
+                topics = result.stdout
+                # Kiểm tra cả /livox/lidar và livox/lidar (ROS2 có thể normalize)
+                has_lidar = '/livox/lidar' in topics or 'livox/lidar' in topics
+                # Kiểm tra cả /livox/imu và livox/imu (driver publish livox/imu)
+                has_imu = '/livox/imu' in topics or 'livox/imu' in topics
+                
+                if has_lidar and has_imu:
+                    self.log(f"✓ Tìm thấy topics: lidar={'/livox/lidar' if '/livox/lidar' in topics else 'livox/lidar'}, imu={'/livox/imu' if '/livox/imu' in topics else 'livox/imu'}")
+                    return True
+                else:
+                    # Log chi tiết để debug
+                    if not has_lidar:
+                        self.log("⚠️ Không tìm thấy topic /livox/lidar hoặc livox/lidar")
+                    if not has_imu:
+                        self.log("⚠️ Không tìm thấy topic /livox/imu hoặc livox/imu")
+                    # Log tất cả topics có chứa 'livox' để debug
+                    livox_topics = [t.strip() for t in topics.split('\n') if 'livox' in t.lower()]
+                    if livox_topics:
+                        self.log(f"   Topics có chứa 'livox': {', '.join(livox_topics)}")
+            
+            return False
+        except Exception as e:
+            self.log(f"⚠️ Lỗi khi kiểm tra driver: {e}")
+            return False
+    
+    def start_livox_driver(self):
+        """Khởi động Livox driver"""
+        if self.is_livox_driver_running:
+            return True
+        
+        try:
+            # Paths
+            drive_ws_path = Path(project_root) / "dependencies" / "drive_ws"
+            drive_ws_setup = drive_ws_path / "install" / "setup.sh"
+            ros2_setup = "/opt/ros/jazzy/setup.bash"
+            
+            # Kiểm tra setup scripts
+            if not os.path.exists(ros2_setup):
+                self.log(f"❌ ROS2 setup không tồn tại tại: {ros2_setup}")
+                return False
+            
+            if not drive_ws_setup.exists():
+                self.log(f"❌ Drive workspace chưa được build: {drive_ws_setup}")
+                self.log("Vui lòng build drive_ws trước khi chạy driver")
+                return False
+            
+            # Launch file path
+            launch_file = "msg_MID360_launch.py"
+            
+            # Build command
+            cmd = f"source {ros2_setup} && source {drive_ws_setup} && ros2 launch livox_ros_driver2 {launch_file}"
+            
+            self.log(self.translator.get('log.starting_livox_driver', '🚀 Đang khởi động Livox driver...'))
+            self.log(f"Command: {cmd}")
+            
+            # Start process
+            self.livox_driver_process = subprocess.Popen(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                preexec_fn=os.setsid if hasattr(os, 'setsid') else None
+            )
+            
+            self.is_livox_driver_running = True
+            threading.Thread(target=self.monitor_livox_driver_output, daemon=True).start()
+            
+            # Đợi một chút để driver khởi động
+            time.sleep(3)
+            
+            # Kiểm tra lại topics
+            if self.check_livox_driver_running():
+                self.log(self.translator.get('log.livox_driver_started', '✅ Livox driver đã khởi động thành công'))
+                return True
+            else:
+                self.log(self.translator.get('log.livox_driver_topics_not_found', '⚠️ Driver đã khởi động nhưng topics chưa xuất hiện, đợi thêm...'))
+                # Đợi thêm 2 giây
+                time.sleep(2)
+                if self.check_livox_driver_running():
+                    self.log(self.translator.get('log.livox_driver_started', '✅ Livox driver đã khởi động thành công'))
+                    return True
+                else:
+                    self.log(self.translator.get('log.livox_driver_topics_still_not_found', '⚠️ Topics vẫn chưa xuất hiện, có thể driver chưa sẵn sàng'))
+                    return False
+            
+        except Exception as e:
+            self.log(f"❌ Lỗi khi khởi động Livox driver: {e}")
+            self.is_livox_driver_running = False
+            self.livox_driver_process = None
+            return False
+    
+    def monitor_livox_driver_output(self):
+        """Monitor output của Livox driver process"""
+        proc = self.livox_driver_process
+        if not proc:
+            return
+        
+        try:
+            for line in iter(proc.stdout.readline, ''):
+                if not line:
+                    break
+                line = line.strip()
+                if line:
+                    # Chỉ log lỗi và cảnh báo để tránh spam
+                    if any(keyword in line.lower() for keyword in ['error', 'fatal', 'exception', 'failed', 'cannot', 'unable']):
+                        self.log(f"❌ Driver ERROR: {line}")
+                    elif any(keyword in line.lower() for keyword in ['warning', 'warn']):
+                        self.log(f"⚠️ Driver WARNING: {line}")
+        except Exception as e:
+            self.log(f"Lỗi khi đọc output từ driver: {e}")
+        finally:
+            # Khi process kết thúc
+            if proc.poll() is not None:
+                self.root.after(0, self._handle_driver_stopped)
+    
+    def _handle_driver_stopped(self):
+        """Xử lý khi driver dừng"""
+        if self.is_livox_driver_running:
+            self.log(self.translator.get('log.livox_driver_stopped', '⏹ Livox driver đã dừng'))
+            self.is_livox_driver_running = False
+            self.livox_driver_process = None
+    
+    def stop_livox_driver(self):
+        """Dừng Livox driver"""
+        if not self.is_livox_driver_running:
+            return
+        
+        if self.livox_driver_process:
+            try:
+                self.log(self.translator.get('log.stopping_livox_driver', '🛑 Đang dừng Livox driver...'))
+                if hasattr(os, 'setsid'):
+                    os.killpg(os.getpgid(self.livox_driver_process.pid), signal.SIGTERM)
+                else:
+                    self.livox_driver_process.terminate()
+                self.livox_driver_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                if self.livox_driver_process:
+                    if hasattr(os, 'setsid'):
+                        os.killpg(os.getpgid(self.livox_driver_process.pid), signal.SIGKILL)
+                    else:
+                        self.livox_driver_process.kill()
+            except Exception as e:
+                self.log(f"⚠️ Lỗi khi dừng driver: {e}")
+            finally:
+                self.livox_driver_process = None
+        
+        # Kill tất cả các node liên quan đến livox driver
+        try:
+            subprocess.run(
+                ['pkill', '-f', 'livox_ros_driver2'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3
+            )
+        except:
+            pass
+        
+        self.is_livox_driver_running = False
+        self.log(self.translator.get('log.livox_driver_stopped', '⏹ Livox driver đã dừng'))
     
     def setup_vehicle_info(self):
         device_id = self.get_mac_address()
@@ -937,6 +1185,18 @@ class WorkerInterface:
             self.log("⚠️ Map chưa sẵn sàng. Vui lòng đợi tải map hoàn tất.")
             return
         
+        # Kiểm tra và khởi động Livox driver nếu chưa chạy
+        self.log("=" * 60)
+        self.log(self.translator.get('log.checking_livox_driver', '🔍 Kiểm tra Livox driver...'))
+        
+        if not self.check_livox_driver_running():
+            self.log(self.translator.get('log.livox_driver_not_running', '⚠️ Livox driver chưa chạy, đang khởi động...'))
+            if not self.start_livox_driver():
+                self.log(self.translator.get('log.failed_to_start_driver', '❌ Không thể khởi động Livox driver. Vui lòng kiểm tra lại.'))
+                return
+        else:
+            self.log(self.translator.get('log.livox_driver_already_running', '✅ Livox driver đã đang chạy'))
+        
         # Script helper
         run_script = Path(project_root) / "scripts" / "run_localization.sh"
         if not run_script.exists():
@@ -975,6 +1235,14 @@ class WorkerInterface:
             self.btn_stop.config(state=tk.NORMAL)
             self.status_text.config(text=self.translator.get('label.localization_running', 'System: Localization running...'))
             self.log(self.translator.get('log.localization_node_started', '✅ Localization node started.'))
+            self.log("")
+            self.log("📌 LƯU Ý QUAN TRỌNG:")
+            self.log("   Để localization hoạt động, bạn cần:")
+            self.log("   1. Mở RViz2 (nút Launch RViz2)")
+            self.log("   2. Sử dụng tool '2D Pose Estimate' trong RViz2 để set initial pose")
+            self.log("   3. Đợi localization khởi tạo (có thể mất vài giây)")
+            self.log("   4. Sau đó pose sẽ bắt đầu được publish lên /localization")
+            self.log("")
             
         except Exception as e:
             self.log(f"❌ Lỗi khi khởi động localization: {e}")
@@ -985,6 +1253,9 @@ class WorkerInterface:
         """Dừng localization node"""
         self.stop_pose_publishing()
         self.stop_localization()
+        # Dừng Livox driver nếu đã khởi động tự động
+        if self.is_livox_driver_running:
+            self.stop_livox_driver()
         self.is_running = False
         self.btn_start.config(text=self.translator.get('button.start_moving', '▶ START MOVING'), state=tk.NORMAL)
         self.btn_stop.config(state=tk.DISABLED)
@@ -1155,6 +1426,10 @@ class WorkerInterface:
         # Dừng tất cả các process đang chạy
         if self.is_running:
             self.stop_system()
+        
+        # Dừng Livox driver nếu đang chạy
+        if self.is_livox_driver_running:
+            self.stop_livox_driver()
         
         # Đóng cửa sổ
         self.root.destroy()
