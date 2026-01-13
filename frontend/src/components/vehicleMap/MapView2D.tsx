@@ -26,13 +26,14 @@ const MapView2D: React.FC<MapView2DProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hoveredVehicle, setHoveredVehicle] = useState<string | null>(null);
   
-  // Determine image URL
+  // Determine image URL - use floorplan_2d images when metadata is available
   const imageUrl = useMemo(() => {
-    if (uploadId && mapMetadata) {
-      return getMapImageUrl(uploadId, view);
+    if (mapMetadata) {
+      // Use floorplan_2d images from public folder
+      return getMapImageUrl('', view); // uploadId not needed for local files
     }
-    return '/2Dmap.png'; // Fallback to default
-  }, [uploadId, view, mapMetadata]);
+    return '/2Dmap.png'; // Fallback to default only if no metadata
+  }, [view, mapMetadata]);
   
   // Load map image
   const { image: mapImage, error: imageError } = useMapImage(imageUrl);
@@ -83,6 +84,10 @@ const MapView2D: React.FC<MapView2DProps> = ({
     }
 
     // Draw vehicle markers
+    if (vehicleMarkers.length > 0) {
+      console.log(`🎨 [MapView2D] Rendering ${vehicleMarkers.length} markers on ${view} view`);
+    }
+    
     vehicleMarkers.forEach(marker => {
       const isSelected = marker.id === selectedVehicleId;
       const isHovered = marker.id === hoveredVehicle;
@@ -102,10 +107,13 @@ const MapView2D: React.FC<MapView2DProps> = ({
         
         x = offsetX + (marker.position[0] / mapImage.naturalWidth) * scaledWidth;
         y = offsetY + (marker.position[1] / mapImage.naturalHeight) * scaledHeight;
+        
+        console.log(`🎨 [MapView2D] Marker ${marker.id}: pixel=[${marker.position[0]}, ${marker.position[1]}], canvas=[${x.toFixed(1)}, ${y.toFixed(1)}]`);
       } else {
         // Fallback: use relative position
         x = (marker.position[0] / 1000) * canvas.width;
         y = (marker.position[1] / 1000) * canvas.height;
+        console.log(`🎨 [MapView2D] Marker ${marker.id}: fallback position=[${x.toFixed(1)}, ${y.toFixed(1)}]`);
       }
       
       // Vehicle color

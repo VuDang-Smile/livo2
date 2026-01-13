@@ -45,19 +45,26 @@ export function getMQTTWebSocketUrl(): string {
 }
 
 /**
- * Build URL for map image based on upload_id and view
+ * Build URL for map image based on view
+ * Uses local public folder for testing (uploadId parameter is ignored)
  */
-export function getMapImageUrl(uploadId: string, view: 'top' | 'side_x' | 'side_y'): string {
-  const backendUrl = getBackendUrl();
-  return `${backendUrl}/maps/${uploadId}/images/${view}`;
+export function getMapImageUrl(uploadId: string | undefined, view: 'top' | 'side_x' | 'side_y'): string {
+  // Use local public folder for testing - uploadId is not needed
+  const imageMap: Record<'top' | 'side_x' | 'side_y', string> = {
+    top: '/floorplan_2d/merge_all_hba_top.png',
+    side_x: '/floorplan_2d/merge_all_hba_side_x.png',
+    side_y: '/floorplan_2d/merge_all_hba_side_y.png'
+  };
+  return imageMap[view];
 }
 
 /**
  * Build URL for map metadata JSON
+ * Uses local public folder for testing
  */
 export function getMapMetadataUrl(uploadId: string): string {
-  const backendUrl = getBackendUrl();
-  return `${backendUrl}/maps/${uploadId}/metadata`;
+  // Use local public folder for testing
+  return '/floorplan_2d/merge_all_hba_metadata.json';
 }
 
 /**

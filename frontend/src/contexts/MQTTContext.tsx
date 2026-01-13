@@ -161,7 +161,7 @@ export const MQTTProvider: React.FC<MQTTProviderProps> = ({
         setError(null);
         
         // Subscribe topics
-        const topics = ['lidar/pcd/upload', 'lidar/pcd/processed', 'lidar/map/update', 'lidar/position/update', 'lidar/pose/update', 'lidar/vehicle/status', 'lidar/status'];
+        const topics = ['lidar/pcd/upload', 'lidar/pcd/processed', 'lidar/map/update', 'lidar/position/update', 'lidar/pose/update', 'lidar/vehicle/status', 'lidar/status', 'livo/vehicles/+/pose'];
         topics.forEach((topic) =>
           mqttClient.subscribe(topic, (err) => {
             if (err) {
@@ -177,7 +177,58 @@ export const MQTTProvider: React.FC<MQTTProviderProps> = ({
       mqttClient.on('message', (topic, payload) => {
         try {
           console.log('MQTT message received:', topic, payload.toString());
-          if (topic === 'lidar/pcd/upload') {
+          
+          // Handle vehicle pose updates from backend API (livo/vehicles/{vehicle_id}/pose)
+          if (topic.startsWith('livo/vehicles/') && topic.endsWith('/pose')) {
+            const vehiclePoseMsg = JSON.parse(payload.toString());
+            console.log('🔍 [MQTT] Vehicle pose message from backend:', vehiclePoseMsg);
+            
+            // Extract vehicle_id from topic or payload
+            const topicParts = topic.split('/');
+            const vehicleId = vehiclePoseMsg.vehicle_id || topicParts[topicParts.length - 2];
+            
+            if (!vehicleId) {
+              console.warn('[MQTT] Cannot extract vehicle_id from topic or payload:', topic);
+              return;
+            }
+            
+            // Normalize backend pose format to PositionUpdateNotification format
+            const poseData = vehiclePoseMsg.pose || {};
+            const position = poseData.position || {};
+            const orientation = poseData.orientation || {};
+            const timestamp = poseData.timestamp || vehiclePoseMsg.timestamp;
+            
+            const normalizedTimestamp = normalizeTimestamp(timestamp, true);
+            const timestampString = typeof normalizedTimestamp === 'string' ? normalizedTimestamp : new Date(normalizedTimestamp).toISOString();
+            
+            const posUpdate: PositionUpdateNotification = {
+              vehicle_id: vehicleId,
+              position: {
+                x: position.x ?? 0,
+                y: position.y ?? 0,
+                z: position.z ?? 0,
+                timestamp: timestampString
+              },
+              pose: {
+                frame_id: 'map',
+                position: {
+                  x: position.x ?? 0,
+                  y: position.y ?? 0,
+                  z: position.z ?? 0
+                },
+                orientation: {
+                  w: orientation.w ?? 1,
+                  x: orientation.x ?? 0,
+                  y: orientation.y ?? 0,
+                  z: orientation.z ?? 0
+                },
+                timestamp: timestampString
+              }
+            };
+            
+            console.log('🔍 [MQTT] Processed vehicle pose update:', posUpdate);
+            setLastPositionUpdate(posUpdate);
+          } else if (topic === 'lidar/pcd/upload') {
             const notification: PCDNotification = JSON.parse(payload.toString());
             setLastPCDNotification(notification);
           } else if (topic === 'lidar/map/update') {
