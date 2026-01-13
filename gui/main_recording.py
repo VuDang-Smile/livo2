@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 import time
+import queue
 from datetime import datetime
 from pathlib import Path
 import subprocess
@@ -68,7 +69,15 @@ class LivoxApp:
         
         
         self.is_recording = False
+        
+        # Queue để giao tiếp giữa threads và main thread (thread-safe)
+        self.ui_queue = queue.Queue()
+        
         self._setup_layout()
+        
+        # Start queue processor để xử lý UI updates từ threads
+        self._process_ui_queue()
+        
         self.recorder = Recorder(log_callback=self.log)
         self.theta_driver = ThetaDriver(log_callback=self.log, update_ui_theta_connected = self.update_ui_theta_connected, canvas = self.canvas)
         self.livox_tab = LivoxTab(log_callback=self.log, update_label_livo_connected=self.update_label_livo_connected)
@@ -559,12 +568,45 @@ class LivoxApp:
             self.log(translator.get("log.directory_selected").replace("{path}", directory))
 
     def log(self, message):
-        """Thêm message vào log"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
-        self.log_text.see(tk.END)
-        self.log_text.config(state=tk.DISABLED)
+        """Thêm message vào log - thread-safe qua queue"""
+        # Kiểm tra xem đang ở main thread hay không
+        if threading.current_thread() is threading.main_thread():
+            # Nếu là main thread, gọi trực tiếp
+            self._log_impl(message)
+        else:
+            # Nếu là thread khác, đưa vào queue
+            self.ui_queue.put(('log', message))
+    
+    def _log_impl(self, message):
+        """Implementation của log - chỉ được gọi từ main thread"""
+        try:
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.log_text.config(state=tk.NORMAL)
+            self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+            self.log_text.see(tk.END)
+            self.log_text.config(state=tk.DISABLED)
+        except Exception as e:
+            # Nếu có lỗi, in ra console để không mất thông tin
+            print(f"Error in log: {e}")
+    
+    def _process_ui_queue(self):
+        """Xử lý queue để update UI từ threads - chỉ chạy trong main thread"""
+        try:
+            while True:
+                try:
+                    action, *args = self.ui_queue.get_nowait()
+                    if action == 'log':
+                        self._log_impl(args[0])
+                    elif action == 'update_ui':
+                        callback = args[0]
+                        callback()
+                except queue.Empty:
+                    break
+        except Exception as e:
+            print(f"Error processing UI queue: {e}")
+        
+        # Schedule lại sau 50ms để tiếp tục xử lý queue
+        self.root.after(50, self._process_ui_queue)
 
     def clear_logs(self):
         """Xóa toàn bộ nội dung trong Log Text"""
@@ -713,26 +755,45 @@ class LivoxApp:
         # self.label_livox.config(text=full_text_livox, fg=color)
     
     def stop_livox_driver(self):
-        """Stop tất cả drivers và đảm bảo cleanup hoàn toàn"""
-        try:
-            # Stop theo thứ tự để tránh dependency issues
-            if hasattr(self, 'livox_tab') and self.livox_tab:
-                self.livox_tab.stop_ros_subscriber()
-                self.livox_tab.stop_converter()
-                self.livox_tab.stop_livox_driver()
-            
-            if hasattr(self, 'theta_driver') and self.theta_driver:
-                self.theta_driver.stop_all()
-            
-            # Chờ một chút để đảm bảo processes đã dừng
-            time.sleep(0.5)
-            
-            # Cập nhật UI để enable lại nút start và disable nút stop
-            self.update_ui_theta_connected(False)
-        except Exception as e:
-            self.log(translator.get("log.error_stop_drivers").replace("{error}", str(e)))
-            # Đảm bảo UI được cập nhật ngay cả khi có lỗi
-            self.update_ui_theta_connected(False)
+        """Stop tất cả drivers và đảm bảo cleanup hoàn toàn - chạy trong thread để không block UI"""
+        # Update UI ngay lập tức để không block
+        self.update_ui_theta_connected(False)
+        
+        # Stop operations chạy trong thread riêng
+        def stop_drivers_thread():
+            try:
+                # Stop theo thứ tự để tránh dependency issues
+                if hasattr(self, 'livox_tab') and self.livox_tab:
+                    try:
+                        self.livox_tab.stop_ros_subscriber()
+                    except Exception as e:
+                        self.log(f"⚠️  Lỗi khi stop ROS subscriber: {e}")
+                    
+                    try:
+                        self.livox_tab.stop_converter()
+                    except Exception as e:
+                        self.log(f"⚠️  Lỗi khi stop converter: {e}")
+                    
+                    try:
+                        self.livox_tab.stop_livox_driver()
+                    except Exception as e:
+                        self.log(f"⚠️  Lỗi khi stop livox driver: {e}")
+                
+                if hasattr(self, 'theta_driver') and self.theta_driver:
+                    try:
+                        self.theta_driver.stop_all()
+                    except Exception as e:
+                        self.log(f"⚠️  Lỗi khi stop theta driver: {e}")
+                
+                self.log("✓ Tất cả drivers đã được dừng")
+            except Exception as e:
+                error_msg = translator.get("log.error_stop_drivers").replace("{error}", str(e))
+                self.log(f"✗ {error_msg}")
+                import traceback
+                self.log(traceback.format_exc())
+        
+        # Chạy stop trong thread riêng để không block UI
+        threading.Thread(target=stop_drivers_thread, daemon=True, name="StopDrivers").start()
     
     def start_livox_driver(self):
         """Start livox driver với proper sequencing và cleanup"""
@@ -744,34 +805,76 @@ class LivoxApp:
             try:
                 # Đảm bảo stop tất cả processes cũ trước
                 self.log(translator.get("log.stopping_recording"))
-                self.stop_livox_driver()
+                try:
+                    self.stop_livox_driver()
+                except Exception as e:
+                    self.log(f"⚠️  Lỗi khi stop drivers cũ: {e}")
                 
                 # Chờ đủ lâu để các process cũ giải phóng port và resources
                 time.sleep(1.5)
                 
                 self.log(translator.get("log.starting_livox_theta_drivers"))
-                self.check_mid360_connection()
                 
-                # Khởi chạy các driver theo thứ tự
-                self.theta_driver.check_theta_usb_connection(self.check_theta_usb_callback)
-                self.theta_driver.launch_theta_driver()
+                # Kiểm tra kết nối MID360
+                try:
+                    self.check_mid360_connection()
+                except Exception as e:
+                    self.log(f"⚠️  Lỗi khi kiểm tra MID360: {e}")
+                
+                # Khởi chạy các driver theo thứ tự với error handling riêng
+                try:
+                    self.theta_driver.check_theta_usb_connection(self.check_theta_usb_callback)
+                except Exception as e:
+                    self.log(f"⚠️  Lỗi khi kiểm tra Theta USB: {e}")
+                
+                try:
+                    self.theta_driver.launch_theta_driver()
+                except Exception as e:
+                    self.log(f"✗ Lỗi khi launch Theta driver: {e}")
+                    import traceback
+                    self.log(traceback.format_exc())
+                    raise
                 
                 # Chờ một chút để theta driver khởi động
                 time.sleep(0.5)
                 
-                self.livox_tab.start_livox_driver()
+                # Kiểm tra theta driver đã start thành công chưa
+                if hasattr(self.theta_driver, 'theta_driver_process') and \
+                   self.theta_driver.theta_driver_process and \
+                   self.theta_driver.theta_driver_process.poll() is not None:
+                    self.log("⚠️  Theta driver process đã dừng ngay sau khi start")
+                
+                try:
+                    self.livox_tab.start_livox_driver()
+                except Exception as e:
+                    self.log(f"✗ Lỗi khi start Livox driver: {e}")
+                    import traceback
+                    self.log(traceback.format_exc())
+                    raise
+                
+                # Chờ một chút để đảm bảo tất cả processes đã ổn định
+                time.sleep(0.5)
                 
                 self.log(translator.get("log.system_restarted"))
                 success = True
             except Exception as e:
-                self.log(translator.get("log.error_start_drivers").replace("{error}", str(e)))
+                error_msg = translator.get("log.error_start_drivers").replace("{error}", str(e))
+                self.log(f"✗ {error_msg}")
                 import traceback
                 self.log(translator.get("log.details").replace("{details}", traceback.format_exc()))
+                # Đảm bảo UI được cập nhật ngay cả khi có lỗi
+                try:
+                    self.update_ui_theta_connected(False)
+                except:
+                    pass
             finally:
                 # Chỉ enable lại nút start nếu có lỗi
                 # Nếu start thành công, nút start sẽ được disable bởi update_ui_theta_connected()
                 if not success:
-                    self.root.after(0, lambda: self.btn_start_livox.config(state=tk.NORMAL))
+                    try:
+                        self.root.after(0, lambda: self.btn_start_livox.config(state=tk.NORMAL))
+                    except:
+                        pass
         
         # Chạy trong thread riêng để không block UI
         threading.Thread(target=run_start, daemon=True).start()
