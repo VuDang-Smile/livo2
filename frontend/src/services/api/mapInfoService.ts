@@ -36,13 +36,15 @@ export class MapInfoService {
    */
   async getCurrentMapInfo(): Promise<MapInfo> {
     try {
-      const response = await fetch(this.metadataUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
+      const response = await fetch(this.metadataUrl
+      //   , {
+      //   method: 'GET',
+      //   headers: {
+      //     'Content-Type': 'application/json',
+      //   },
+      // }
+    );
+      
       if (!response.ok) {
         const text = await response.text();
         throw new Error(
