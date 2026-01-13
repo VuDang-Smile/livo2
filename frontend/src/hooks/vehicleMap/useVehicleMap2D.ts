@@ -3,7 +3,6 @@ import { useMQTT } from '../../contexts/MQTTContext';
 import { Vehicle, VehicleMapResponse } from '../../types/vehicleMap2D';
 import { UseVehicleMap2DResult } from '../../types/monitoring';
 import { useMQTTPositionHandler } from '../shared/useMQTTPositionHandler';
-import { useVehicleMapService } from '../api/useVehicleMapService';
 import { useVehicleTimeout } from '../shared/useVehicleTimeout';
 import {
   extractTimestampStringFromMQTT,
@@ -14,10 +13,10 @@ const DEBUG = process.env.REACT_APP_DEBUG_LOGS === '1';
 
 /**
  * Hook to manage vehicles and map data for 2D map mode
- * Handles MQTT position updates, API vehicle fetching, and timeout cleanup
+ * Handles MQTT position updates and timeout cleanup
+ * Note: API calls removed - using local files instead
  */
 export function useVehicleMap2D(): UseVehicleMap2DResult {
-  const vehicleMapService = useVehicleMapService();
   const [mapData, setMapData] = useState<VehicleMapResponse | null>(null);
   const [mapVehicles, setMapVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -38,88 +37,18 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
   }, [lastPositionUpdate]);
 
   /**
-   * Load map data and vehicles from API
+   * Load map data - API calls removed, using local files instead
+   * This function is kept for backward compatibility but does nothing
    */
   const loadMapData = useCallback(async () => {
-    if (!vehicleMapService) return; // Skip if service not ready
-    try {
-      setLoading(true);
-      setError('');
-      const [mapResponse, vehicleData] = await Promise.all([
-        vehicleMapService.getLatest2DMap(),
-        vehicleMapService.getVehiclesWithPositions()
-      ]);
-      setMapData(mapResponse);
-
-      if (DEBUG) {
-        console.log('🔍 [Monitoring] API vehicle data:', vehicleData);
-      }
-
-      // Mark API vehicles with source='api'
-      const apiVehicles = vehicleData.map((v: Vehicle) => ({
-        ...v,
-        source: 'api' as const
-      }));
-
-      // Merge API vehicles with MQTT vehicles instead of overwriting
-      setMapVehicles(prevVehicles => {
-        // Get existing MQTT vehicles
-        const mqttVehicles = prevVehicles.filter(
-          v => (v as Vehicle & { source?: string }).source === 'mqtt'
-        );
-        const apiVehiclesOnly = apiVehicles.filter(
-          (apiV: Vehicle & { source: 'api' }) =>
-            !mqttVehicles.some(mqttV => mqttV.id === apiV.id)
-        );
-
-        const mergedVehicles = [...mqttVehicles, ...apiVehiclesOnly];
-
-        if (DEBUG) {
-          console.log('🔍 [Monitoring] Merging vehicles:', {
-            mqttCount: mqttVehicles.length,
-            apiCount: apiVehiclesOnly.length,
-            totalCount: mergedVehicles.length
-          });
-        }
-
-        return mergedVehicles;
-      });
-
-      if (DEBUG) {
-        console.info('[Monitoring] loadMapData', {
-          unit: mapResponse?.unit,
-          modelUrl: mapResponse?.modelUrl,
-          vehiclesCount: vehicleData.length
-        });
-      }
-    } catch (e: any) {
-      console.error('❌ [Monitoring] Error loading map data:', e);
-      // Nếu không có PCD/floorplan, không coi là lỗi fatal cho toàn bộ tab
-      const message = e?.message || 'Error loading map data';
-      if (
-        message.includes('No PCD files available') ||
-        message.includes('No floorplan available')
-      ) {
-        // Trường hợp thiếu dữ liệu: không coi là lỗi, chỉ clear mapData
-        setMapData(null);
-        setError('');
-      } else {
-        // Các lỗi khác vẫn cần hiển thị
-        setError(message);
-      }
-    } finally {
-      setLoading(false);
+    // API calls removed - using local files from /floorplan_2d/ instead
+    if (DEBUG) {
+      console.log('ℹ️ [useVehicleMap2D] loadMapData called but API calls are disabled - using local files');
     }
-  }, [vehicleMapService]);
-
-  /**
-   * Auto-load map data when service becomes available
-   */
-  useEffect(() => {
-    if (vehicleMapService) {
-      loadMapData();
-    }
-  }, [vehicleMapService, loadMapData]);
+    setMapData(null); // Clear mapData as we're not using API
+    setError('');
+    setLoading(false);
+  }, []);
 
   /**
    * Handle MQTT position updates for 2D map

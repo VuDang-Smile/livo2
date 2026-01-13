@@ -10,7 +10,7 @@
  */
 
 import { MapMetadata } from '../../types/mapMetadata';
-import { getMapMetadataUrl, getCurrentMap } from '../../constants/mapConfig';
+import { getMapMetadataUrl } from '../../constants/mapConfig';
 
 export class MapMetadataService {
   private cache: Map<string, MapMetadata> = new Map();
@@ -21,21 +21,12 @@ export class MapMetadataService {
 
   /**
    * Get latest map metadata from current map
+   * @deprecated API calls removed - use local files from /floorplan_2d/ instead
    */
   async getLatestMapMetadata(): Promise<MapMetadata> {
-    try {
-      // Get current map first
-      const currentMap = await getCurrentMap();
-      if (!currentMap || !currentMap.upload_id) {
-        throw new Error('No current map available');
-      }
-
-      // Get metadata for current map
-      return this.getCachedMapMetadata(currentMap.upload_id);
-    } catch (error) {
-      console.error('Failed to get latest map metadata:', error);
-      throw error;
-    }
+    // API calls removed - using local files instead
+    // This method is kept for backward compatibility but should not be used
+    throw new Error('getLatestMapMetadata is deprecated - use local files from /floorplan_2d/ instead');
   }
 
   /**

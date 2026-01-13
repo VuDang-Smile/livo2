@@ -69,20 +69,21 @@ export function getMapMetadataUrl(uploadId: string): string {
 
 /**
  * Get current map from backend
+ * @deprecated API calls removed - using local files from /floorplan_2d/ instead
  */
-export async function getCurrentMap(): Promise<any> {
-  const backendUrl = getBackendUrl();
-  const response = await fetch(`${backendUrl}/maps/current`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to get current map: ${response.statusText}`);
-  }
-  
-  return await response.json();
-}
+// export async function getCurrentMap(): Promise<any> {
+//   const backendUrl = getBackendUrl();
+//   const response = await fetch(`${backendUrl}/maps/current`, {
+//     method: 'GET',
+//     headers: {
+//       'Content-Type': 'application/json',
+//     },
+//   });
+//   
+//   if (!response.ok) {
+//     throw new Error(`Failed to get current map: ${response.statusText}`);
+//   }
+//   
+//   return await response.json();
+// }
 

@@ -8,7 +8,7 @@ import MapView2D from '../components/vehicleMap/MapView2D';
 import { PCDClipControls } from '../components/PCDClipControls';
 import { PointCloudBounds } from '../components/PCDMap';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
-import { getCurrentMap, getMapMetadataUrl } from '../constants/mapConfig';
+import { getMapMetadataUrl } from '../constants/mapConfig';
 import { MapMetadata } from '../types/mapMetadata';
 import { Vehicle } from '../types/vehicleMap2D';
 
@@ -43,33 +43,11 @@ const VehicleMap: React.FC = () => {
   const { vehicleMarkers: markers2D, mapMetadata: poseMetadata } = useVehiclePose2D(selectedView);
   const { filteredVehicles } = useVehicleMap2D();
 
-  // Load map metadata when component mounts
+  // Map metadata is now loaded by useVehiclePose2D hook from local files
+  // No need to load from API anymore
   useEffect(() => {
-    const loadMapMetadata = async () => {
-      setIsLoadingMetadata(true);
-      try {
-        const currentMap = await getCurrentMap();
-        if (currentMap && currentMap.upload_id) {
-          setUploadId(currentMap.upload_id);
-          
-          // Load metadata JSON
-          const metadataUrl = getMapMetadataUrl(currentMap.upload_id);
-          const response = await fetch(metadataUrl);
-          if (response.ok) {
-            const metadata = await response.json();
-            setMapMetadata(metadata);
-          } else {
-            console.warn('Failed to load map metadata');
-          }
-        }
-      } catch (error) {
-        console.error('Error loading map metadata:', error);
-      } finally {
-        setIsLoadingMetadata(false);
-      }
-    };
-    
-    loadMapMetadata();
+    // Metadata is loaded by useVehiclePose2D hook, so we don't need to load it here
+    setIsLoadingMetadata(false);
   }, []);
 
   const toggleFullscreen = () => {
