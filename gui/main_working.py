@@ -7,6 +7,7 @@ import os
 import sys
 import requests
 import threading
+import time
 import zipfile
 import shutil
 import json
@@ -19,7 +20,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from languages.translate_engine import translator
+from languages.translate_engine import Translator
 from contants.API import VEHICLE_ENDPOINT, API_TIMEOUT, HEADERS, BACKEND_HOST
 
 # ROS2 imports (optional)
@@ -91,6 +92,8 @@ class PoseSubscriber(Node):
                 
         except Exception as e:
             self.get_logger().error(f'Lỗi xử lý pose: {e}')
+            import traceback
+            self.get_logger().error(traceback.format_exc())
 
 
 class WorkerInterface:
@@ -112,6 +115,10 @@ class WorkerInterface:
         self.loc_process = None
         self.is_localization_running = False
         
+        # Livox driver process
+        self.livox_driver_process = None
+        self.is_livox_driver_running = False
+        
         # Pose publishing
         self.pose_subscriber = None
         self.pose_executor = None
@@ -120,10 +127,23 @@ class WorkerInterface:
         self.is_pose_publishing = False
         self.pose_counter = 0  # Đếm số lần nhận pose
         self.pose_send_interval = 20  # Gửi lên backend mỗi 20 lần
+        self.last_pose_received_time = None  # Thời gian nhận pose cuối cùng
+        self.pose_first_received_logged = False  # Đã log lần đầu nhận pose chưa
+        
+        # Translator for multi-language support
+        self.translator = Translator('en')
+        self.current_lang = 'en'
+        
+        # Set title with translator
+        self.root.title(self.translator.get('title.worker_interface', 'Worker Interface | System Monitoring'))
+        
+        # Setup language button FIRST (before main container)
+        self.setup_language_button()
 
         # --- Main Container ---
         self.main_container = tk.Frame(root)
-        self.main_container.pack(fill=tk.BOTH, expand=True)
+        # Pack AFTER language button to ensure language button is on top
+        self.main_container.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         # --- PHẦN 1: SIDEBAR (Bên trái) ---
         self.sidebar = tk.Frame(self.main_container, width=320, relief=tk.SUNKEN, bd=1)
@@ -144,6 +164,9 @@ class WorkerInterface:
         # Cài đặt phần Log bên phải
         self.setup_log_area()
         
+        # Update UI texts after all components are set up
+        self.update_ui_texts()
+        
         # Cập nhật trạng thái vehicle thành online khi khởi động
         # Gọi sau khi setup_vehicle_info để có vehicle_id
         if self.vehicle_id:
@@ -154,23 +177,139 @@ class WorkerInterface:
         
         # Thêm handler khi đóng cửa sổ
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+    
+    def setup_language_button(self):
+        """Setup language toggle button"""
+        lang_frame = tk.Frame(self.root)
+        lang_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+        
+        lang_names = {'en': 'English', 'jp': '日本語'}
+        self.lang_button = tk.Button(
+            lang_frame,
+            text=f"🌐 {lang_names.get(self.current_lang, 'English')}",
+            font=("Arial", 9, "bold"),
+            fg="#0066cc",
+            bg="#e8e8e8",
+            activebackground="#d0d0d0",
+            activeforeground="#0066cc",
+            relief=tk.RAISED,
+            bd=1,
+            padx=12,
+            pady=6,
+            cursor="hand2",
+            command=self.toggle_language
+        )
+        self.lang_button.pack(side=tk.RIGHT)
+    
+    def toggle_language(self):
+        """Toggle between English and Japanese"""
+        if self.current_lang == 'en':
+            self.change_language('jp')
+        else:
+            self.change_language('en')
+    
+    def change_language(self, lang_code):
+        """Change language and update UI"""
+        self.current_lang = lang_code
+        self.translator.switch_language(lang_code)
+        
+        lang_names = {'en': 'English', 'jp': '日本語'}
+        self.lang_button.config(text=f"🌐 {lang_names.get(lang_code, 'English')}")
+        
+        self.update_ui_texts()
+    
+    def update_ui_texts(self):
+        """Update all UI texts based on current language"""
+        self.root.title(self.translator.get('title.worker_interface', 'Worker Interface | System Monitoring'))
+        
+        # Update movement control frame
+        if hasattr(self, 'btn_start'):
+            self.btn_start.config(text=self.translator.get('button.start_moving', '▶ START MOVING'))
+        if hasattr(self, 'btn_stop'):
+            self.btn_stop.config(text=self.translator.get('button.stop', 'STOP'))
+        if hasattr(self, 'status_text'):
+            current_text = self.status_text.cget('text')
+            if 'Đang tải map' in current_text or 'Loading map' in current_text:
+                self.status_text.config(text=self.translator.get('label.loading_map', 'System: Loading map...'))
+            elif 'Đã dừng' in current_text or 'Stopped' in current_text:
+                self.status_text.config(text=self.translator.get('label.stopped', 'System: Stopped'))
+            elif 'Localization đang chạy' in current_text or 'Localization running' in current_text:
+                self.status_text.config(text=self.translator.get('label.localization_running', 'System: Localization running...'))
+            elif 'Ready to start' in current_text or 'Sẵn sàng' in current_text:
+                self.status_text.config(text=self.translator.get('label.system_ready', 'System: Ready to start'))
+        
+        # Update preview frame
+        if hasattr(self, 'btn_rviz'):
+            self.btn_rviz.config(text="📊 " + self.translator.get("button.launch_rviz2", "Launch RViz2"))
+        
+        # Update log area
+        if hasattr(self, 'log_title_label'):
+            self.log_title_label.config(text=self.translator.get('label.system_monitoring_logs', 'SYSTEM MONITORING LOGS'))
+        if hasattr(self, 'btn_clear_log'):
+            self.btn_clear_log.config(text=self.translator.get('button.clear_log', 'Clear Log'))
+        
+        # Update vehicle info labels
+        if hasattr(self, 'vehicle_info_label_widgets'):
+            for key, label_widget in self.vehicle_info_label_widgets.items():
+                if key == 'device_id':
+                    label_widget.config(text=self.translator.get('label.device_id', 'Device Id') + ":")
+                elif key == 'vehicle_id':
+                    label_widget.config(text=self.translator.get('label.vehicle_id', 'Vehicle Id') + ":")
+                elif key == 'name':
+                    label_widget.config(text=self.translator.get('label.name', 'Name') + ":")
+                elif key == 'type':
+                    label_widget.config(text=self.translator.get('label.type', 'Type') + ":")
+                elif key == 'status':
+                    label_widget.config(text=self.translator.get('label.status', 'Status') + ":")
+        
+        # Refresh vehicle info to update translated values (not given, N/A)
+        if hasattr(self, 'vehicle_info_labels'):
+            self.refresh_vehicle_info()
+        
+        # Update map info (will be updated by update_map_info)
+        if hasattr(self, 'map_info_label'):
+            self.update_map_info()
+        
+        # Update pose display labels
+        if hasattr(self, 'pos_label'):
+            self.pos_label.config(text=self.translator.get('label.position', 'Position:'))
+        if hasattr(self, 'orient_label'):
+            self.orient_label.config(text=self.translator.get('label.orientation', 'Orientation:'))
+        if hasattr(self, 'pose_status_label'):
+            current_text = self.pose_status_label.cget('text')
+            if 'Chưa có dữ liệu' in current_text or 'No data' in current_text:
+                self.pose_status_label.config(text=self.translator.get('label.no_data', 'No data'))
+        
+        # Update frame titles
+        if hasattr(self, 'movement_control_frame'):
+            self.movement_control_frame.config(text=self.translator.get('label.movement_control', 'Movement Control'))
+        if hasattr(self, 'preview_frame'):
+            self.preview_frame.config(text=self.translator.get('label.preview', 'Preview'))
+        if hasattr(self, 'vehicle_info_frame'):
+            self.vehicle_info_frame.config(text=self.translator.get('label.vehicle_information', 'Vehicle Information'))
+        if hasattr(self, 'map_info_frame'):
+            self.map_info_frame.config(text=self.translator.get('label.map_information', 'Map Information'))
+        if hasattr(self, 'pose_display_frame'):
+            self.pose_display_frame.config(text=self.translator.get('label.pose_orientation', 'Pose & Orientation'))
 
     def setup_movement_control(self):
-        frame = tk.LabelFrame(self.sidebar, text="Movement Control", padx=10, pady=10)
+        frame = tk.LabelFrame(self.sidebar, text=self.translator.get('label.movement_control', 'Movement Control'), padx=10, pady=10)
         frame.pack(fill=tk.X, pady=5, padx=5)
+        self.movement_control_frame = frame  # Store reference for update_ui_texts
 
-        self.btn_start = tk.Button(frame, text="▶ START MOVING", command=self.toggle_movement, state=tk.DISABLED)
+        self.btn_start = tk.Button(frame, text=self.translator.get('button.start_moving', '▶ START MOVING'), command=self.toggle_movement, state=tk.DISABLED)
         self.btn_start.pack(fill=tk.X, pady=2)
 
-        self.btn_stop = tk.Button(frame, text="STOP", command=self.stop_system, state=tk.DISABLED)
+        self.btn_stop = tk.Button(frame, text=self.translator.get('button.stop', 'STOP'), command=self.stop_system, state=tk.DISABLED)
         self.btn_stop.pack(fill=tk.X, pady=2)
 
-        self.status_text = tk.Label(frame, text="System: Đang tải map...", font=("Arial", 9, "italic"))
+        self.status_text = tk.Label(frame, text=self.translator.get('label.loading_map', 'System: Loading map...'), font=("Arial", 9, "italic"))
         self.status_text.pack(pady=5)
 
     def setup_options(self):
-        frame = tk.LabelFrame(self.sidebar, text="Preview", padx=5, pady=5)
+        frame = tk.LabelFrame(self.sidebar, text=self.translator.get('label.preview', 'Preview'), padx=5, pady=5)
         frame.pack(fill=tk.X, pady=5, padx=5)
+        self.preview_frame = frame  # Store reference for update_ui_texts
 
         # self.rviz_var = tk.BooleanVar(value=False)
         # self.chk_rviz = tk.Checkbutton(frame, text="Show RViz2 Interface", 
@@ -180,7 +319,7 @@ class WorkerInterface:
 
         self.btn_rviz = tk.Button(
             frame, 
-            text="📊 " + translator.get("button.launch_rviz2"), 
+            text="📊 " + self.translator.get("button.launch_rviz2", "Launch RViz2"), 
             command=self.open_rviz,
             width=10
         )
@@ -190,7 +329,7 @@ class WorkerInterface:
         """Mở RViz2 để xem bản đồ (không khởi động node)"""
         # Kiểm tra map có tồn tại không
         if not self.default_map_root.exists() or not (self.default_map_root / "pose.json").exists():
-            self.log("⚠️ Map chưa sẵn sàng. Vui lòng đợi tải map hoàn tất.")
+            self.log(self.translator.get('log.map_not_ready_wait', '⚠️ Map not ready. Please wait for map download to complete.'))
             return
         
         # Tìm rviz config file từ fast_lio_localization package
@@ -200,15 +339,15 @@ class WorkerInterface:
         if not rviz_config_file.exists():
             rviz_config_file = self.workspace_path / "src" / "fast_lio_localization" / "rviz_cfg" / "localization.rviz"
         
-        self.log("🚀 Đang mở RViz2...")
+        self.log(self.translator.get('log.opening_rviz2', '🚀 Opening RViz2...'))
         
         # Kiểm tra xem file có tồn tại không để tránh lỗi im lặng
         if not rviz_config_file.exists():
-            self.log(f"⚠️ Cảnh báo: Không tìm thấy file cấu hình tại {rviz_config_file}. Sẽ mở RViz mặc định.")
+            self.log(self.translator.get('log.rviz_config_not_found', '⚠️ Warning: Config file not found at {path}. Will open RViz with default.').replace('{path}', str(rviz_config_file)))
             cmd = ['rviz2']
         else:
             cmd = ['rviz2', '-d', str(rviz_config_file)]
-            self.log(f"📋 Sử dụng config: {rviz_config_file.name}")
+            self.log(self.translator.get('log.using_config', '📋 Using config: {name}').replace('{name}', rviz_config_file.name))
 
         try:
             subprocess.Popen(
@@ -216,10 +355,10 @@ class WorkerInterface:
                 stdout=subprocess.DEVNULL, # Ẩn log của RViz để đỡ rối terminal
                 stderr=subprocess.STDOUT
             )
-            self.log("✅ RViz2 đã được mở. Lưu ý: Cần khởi động node (START MOVING) để hiển thị map.")
+            self.log(self.translator.get('log.rviz2_opened', '✅ RViz2 opened. Note: Need to start node (START MOVING) to display map.'))
             
         except Exception as e:
-            self.log(f"❌ Lỗi khi thực thi lệnh rviz2: {e}")
+            self.log(self.translator.get('log.error_executing_rviz2', '❌ Error executing rviz2: {error}').replace('{error}', str(e)))
     
     def monitor_localization_process(self):
         """Theo dõi output của process localization"""
@@ -231,23 +370,23 @@ class WorkerInterface:
             # Chỉ đợi process kết thúc, không log output
             proc.wait()
         except Exception as e:
-            self.log(f"Lỗi trong monitor_localization_process: {e}")
+            self.log(self.translator.get('log.error_monitor_localization', 'Error in monitor_localization_process: {error}').replace('{error}', str(e)))
         finally:
             self.root.after(0, self.on_localization_ended)
     
     def on_localization_ended(self):
         """Xử lý khi process localization kết thúc"""
         if self.is_localization_running:
-            self.log("⏹ Localization process đã dừng.")
+            self.log(self.translator.get('log.localization_process_stopped', '⏹ Localization process stopped'))
             self.root.after(0, self._handle_localization_stopped)
     
     def _handle_localization_stopped(self):
         """Xử lý UI khi localization dừng"""
         self.is_localization_running = False
         self.is_running = False
-        self.btn_start.config(text="▶ START MOVING", state=tk.NORMAL)
+        self.btn_start.config(text=self.translator.get('button.start_moving', '▶ START MOVING'), state=tk.NORMAL)
         self.btn_stop.config(state=tk.DISABLED)
-        self.status_text.config(text="System: Đã dừng")
+        self.status_text.config(text=self.translator.get('label.stopped', 'System: Stopped'))
     
     def stop_localization(self):
         """Dừng localization process và kill tất cả các node liên quan"""
@@ -269,7 +408,7 @@ class WorkerInterface:
                 self.loc_process = None
         
         # Kill tất cả các ROS2 node liên quan đến localization
-        self.log("🛑 Đang dừng tất cả các node localization...")
+        self.log(self.translator.get('log.stopping_all_localization_nodes', '🛑 Stopping all localization nodes...'))
         try:
             # Kill node fastlio_mapping
             subprocess.run(
@@ -314,27 +453,52 @@ class WorkerInterface:
             except:
                 pass  # Ignore nếu không có ROS2 environment
             
-            self.log("✅ Đã dừng tất cả các node localization")
+            self.log(self.translator.get('log.all_localization_nodes_stopped', '✅ All localization nodes stopped'))
             
         except Exception as e:
-            self.log(f"⚠️ Lỗi khi kill node: {e}")
+            self.log(self.translator.get('log.error_killing_nodes', '⚠️ Error killing nodes: {error}').replace('{error}', str(e)))
         
         self.is_localization_running = False
     
     def start_pose_publishing(self):
         """Khởi động ROS2 subscriber để publish pose lên backend"""
         if not ROS2_AVAILABLE:
-            self.log("⚠️ ROS2 không khả dụng, không thể publish pose")
+            self.log(self.translator.get('log.ros2_not_available_pose', '⚠️ ROS2 not available, cannot publish pose'))
             return
         
         if self.is_pose_publishing:
             return
         
         if not self.vehicle_id:
-            self.log("⚠️ Vehicle ID chưa có, không thể publish pose")
+            self.log(self.translator.get('log.vehicle_id_not_available', '⚠️ Vehicle ID not available, cannot publish pose'))
             return
         
         try:
+            # Kiểm tra topics có tồn tại không trước khi subscribe
+            self.log(self.translator.get('log.checking_pose_topics', '🔍 Checking pose topics...'))
+            time.sleep(2)  # Đợi một chút để localization node khởi động
+            
+            result = subprocess.run(
+                ['ros2', 'topic', 'list'],
+                capture_output=True,
+                text=True,
+                timeout=3
+            )
+            
+            topics_found = []
+            if result.returncode == 0:
+                topics = result.stdout
+                if '/localization' in topics or 'localization' in topics:
+                    topics_found.append('/localization')
+                    self.log(self.translator.get('log.topic_exists', '✓ Topic {topic} exists').replace('{topic}', '/localization'))
+                if '/Odometry' in topics or 'Odometry' in topics:
+                    topics_found.append('/Odometry')
+                    self.log(self.translator.get('log.topic_exists', '✓ Topic {topic} exists').replace('{topic}', '/Odometry'))
+                
+                if not topics_found:
+                    self.log(self.translator.get('log.topic_not_found_warning', '⚠️ Warning: Topics /localization or /Odometry not found'))
+                    self.log(self.translator.get('log.localization_may_not_ready', '   Localization may not be ready, will try to subscribe and wait...'))
+            
             # Khởi tạo ROS2 nếu chưa có
             if not rclpy.ok():
                 rclpy.init()
@@ -357,10 +521,16 @@ class WorkerInterface:
             )
             self.pose_thread.start()
             
-            self.log("✅ Đã khởi động pose publisher")
+            self.log(self.translator.get('log.pose_publisher_started', '✅ Pose publisher started'))
+            self.log(self.translator.get('log.waiting_for_pose', '📡 Waiting for pose from /localization or /Odometry...'))
+            
+            # Bắt đầu timer để kiểm tra xem có nhận được pose không
+            self.last_pose_received_time = None
+            self.pose_first_received_logged = False
+            self._start_pose_monitoring()
             
         except Exception as e:
-            self.log(f"❌ Lỗi khi khởi động pose publisher: {e}")
+            self.log(self.translator.get('log.error_starting_pose_publisher', '❌ Error starting pose publisher: {error}').replace('{error}', str(e)))
             self.is_pose_publishing = False
     
     def _run_pose_executor(self):
@@ -369,7 +539,7 @@ class WorkerInterface:
             while self.is_pose_publishing and rclpy.ok():
                 self.pose_executor.spin_once(timeout_sec=0.1)
         except Exception as e:
-            self.log(f"❌ Lỗi trong pose executor: {e}")
+            self.log(self.translator.get('log.error_pose_executor', '❌ Error in pose executor: {error}').replace('{error}', str(e)))
         finally:
             if self.pose_subscriber:
                 self.pose_subscriber.destroy_node()
@@ -395,12 +565,20 @@ class WorkerInterface:
             # Đợi thread kết thúc
             self.pose_thread.join(timeout=2)
         
-        self.log("🛑 Đã dừng pose publisher")
+        self.log(self.translator.get('log.pose_publisher_stopped', '🛑 Pose publisher stopped'))
     
     def pose_callback_handler(self, position, orientation, timestamp):
         """Xử lý pose callback và gửi lên backend"""
         if not self.vehicle_id:
             return
+        
+        # Cập nhật thời gian nhận pose cuối cùng
+        self.last_pose_received_time = time.time()
+        
+        # Log lần đầu nhận được pose (chỉ 1 lần)
+        if not self.pose_first_received_logged:
+            self.log(self.translator.get('log.pose_received', '✅ Pose received'))
+            self.pose_first_received_logged = True
         
         # Cập nhật UI (chạy trong main thread) - luôn cập nhật để hiển thị real-time
         self.root.after(0, lambda: self.update_pose_display(position, orientation, timestamp))
@@ -417,6 +595,31 @@ class WorkerInterface:
                 args=(position, orientation, timestamp),
                 daemon=True
             ).start()
+    
+    def _start_pose_monitoring(self):
+        """Bắt đầu monitoring để kiểm tra xem có nhận được pose không"""
+        def check_pose():
+            if not self.is_pose_publishing:
+                return
+            
+            if self.last_pose_received_time is None:
+                # Chưa nhận được pose, kiểm tra lại sau 5 giây
+                self.root.after(5000, check_pose)
+                return
+            
+            # Đã nhận được pose, không cần check nữa
+            elapsed = time.time() - self.last_pose_received_time
+            if elapsed > 10:
+                # Không nhận được pose trong 10 giây
+                self.log(self.translator.get('log.pose_not_received', '❌ No pose received in 10 seconds'))
+                # Check lại sau 10 giây nữa
+                self.root.after(10000, check_pose)
+            else:
+                # Vẫn nhận được pose, check lại sau 10 giây
+                self.root.after(10000, check_pose)
+        
+        # Bắt đầu check sau 5 giây
+        self.root.after(5000, check_pose)
     
     def send_pose_to_backend(self, position, orientation, timestamp):
         """Gửi pose lên backend API"""
@@ -447,7 +650,7 @@ class WorkerInterface:
                         error_detail = response.text[:200]
                     except:
                         error_detail = "Không thể đọc error detail"
-                    self.log(f"⚠️ Lỗi HTTP 405 (Method Not Allowed)")
+                    self.log(self.translator.get('log.error_http_405', '⚠️ HTTP 405 error (Method Not Allowed)'))
                     self.log(f"   URL: {url}")
                     self.log(f"   Method: POST")
                     self.log(f"   Response: {error_detail}")
@@ -459,18 +662,195 @@ class WorkerInterface:
                         error_detail = response.text[:200]
                     except:
                         error_detail = ""
-                    self.log(f"⚠️ Lỗi khi gửi pose: HTTP {response.status_code} - {error_detail}")
+                    self.log(self.translator.get('log.error_sending_pose_http', '⚠️ Error sending pose: HTTP {code} - {detail}').replace('{code}', str(response.status_code)).replace('{detail}', error_detail))
                     self._last_pose_error_code = response.status_code
                 
         except requests.exceptions.RequestException as e:
             # Chỉ log lỗi, không spam log
             if not hasattr(self, '_last_pose_error') or (datetime.now() - self._last_pose_error).seconds > 10:
-                self.log(f"⚠️ Lỗi kết nối khi gửi pose: {e}")
+                self.log(self.translator.get('log.error_connection_sending_pose', '⚠️ Connection error when sending pose: {error}').replace('{error}', str(e)))
                 self._last_pose_error = datetime.now()
         except Exception as e:
             if not hasattr(self, '_last_pose_error') or (datetime.now() - self._last_pose_error).seconds > 10:
-                self.log(f"⚠️ Lỗi khi gửi pose: {e}")
+                self.log(self.translator.get('log.error_sending_pose', '⚠️ Error sending pose: {error}').replace('{error}', str(e)))
                 self._last_pose_error = datetime.now()
+    
+    def check_livox_driver_running(self):
+        """Kiểm tra xem Livox driver có đang chạy không bằng cách kiểm tra topics"""
+        try:
+            # Kiểm tra topics /livox/lidar và livox/imu có tồn tại không
+            # Lưu ý: Driver publish livox/imu (không có / ở đầu), nhưng ROS2 có thể normalize
+            result = subprocess.run(
+                ['ros2', 'topic', 'list'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            
+            if result.returncode == 0:
+                topics = result.stdout
+                # Kiểm tra cả /livox/lidar và livox/lidar (ROS2 có thể normalize)
+                has_lidar = '/livox/lidar' in topics or 'livox/lidar' in topics
+                # Kiểm tra cả /livox/imu và livox/imu (driver publish livox/imu)
+                has_imu = '/livox/imu' in topics or 'livox/imu' in topics
+                
+                if has_lidar and has_imu:
+                    lidar_topic = '/livox/lidar' if '/livox/lidar' in topics else 'livox/lidar'
+                    imu_topic = '/livox/imu' if '/livox/imu' in topics else 'livox/imu'
+                    self.log(self.translator.get('log.topics_found', '✓ Found topics: lidar={lidar}, imu={imu}').replace('{lidar}', lidar_topic).replace('{imu}', imu_topic))
+                    return True
+                else:
+                    # Log chi tiết để debug (chỉ khi không tìm thấy)
+                    if not has_lidar:
+                        self.log(self.translator.get('log.topic_not_found', '⚠️ Topic {topic} not found').replace('{topic}', '/livox/lidar'))
+                    if not has_imu:
+                        self.log(self.translator.get('log.topic_not_found', '⚠️ Topic {topic} not found').replace('{topic}', '/livox/imu'))
+                    # Log tất cả topics có chứa 'livox' để debug
+                    livox_topics = [t.strip() for t in topics.split('\n') if 'livox' in t.lower()]
+                    if livox_topics:
+                        self.log(self.translator.get('log.livox_topics_found', '   Topics containing \'livox\': {topics}').replace('{topics}', ', '.join(livox_topics)))
+            
+            return False
+        except Exception as e:
+            self.log(self.translator.get('log.error_checking_driver', '⚠️ Error checking driver: {error}').replace('{error}', str(e)))
+            return False
+    
+    def start_livox_driver(self):
+        """Khởi động Livox driver"""
+        if self.is_livox_driver_running:
+            return True
+        
+        try:
+            # Paths
+            drive_ws_path = Path(project_root) / "dependencies" / "drive_ws"
+            drive_ws_setup = drive_ws_path / "install" / "setup.sh"
+            ros2_setup = "/opt/ros/jazzy/setup.bash"
+            
+            # Kiểm tra setup scripts
+            if not os.path.exists(ros2_setup):
+                self.log(self.translator.get('log.ros2_setup_not_found', '❌ ROS2 setup not found at: {path}').replace('{path}', ros2_setup))
+                return False
+            
+            if not drive_ws_setup.exists():
+                self.log(self.translator.get('log.drive_ws_not_built', '❌ Drive workspace not built: {path}').replace('{path}', str(drive_ws_setup)))
+                self.log(self.translator.get('log.please_build_drive_ws', 'Please build drive_ws before running driver'))
+                return False
+            
+            # Launch file path
+            launch_file = "msg_MID360_launch.py"
+            
+            # Build command
+            cmd = f"source {ros2_setup} && source {drive_ws_setup} && ros2 launch livox_ros_driver2 {launch_file}"
+            
+            self.log(self.translator.get('log.starting_livox_driver', '🚀 Đang khởi động Livox driver...'))
+            self.log(f"Command: {cmd}")
+            
+            # Start process
+            self.livox_driver_process = subprocess.Popen(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                preexec_fn=os.setsid if hasattr(os, 'setsid') else None
+            )
+            
+            self.is_livox_driver_running = True
+            threading.Thread(target=self.monitor_livox_driver_output, daemon=True).start()
+            
+            # Đợi một chút để driver khởi động
+            time.sleep(3)
+            
+            # Kiểm tra lại topics
+            if self.check_livox_driver_running():
+                self.log(self.translator.get('log.livox_driver_started', '✅ Livox driver đã khởi động thành công'))
+                return True
+            else:
+                self.log(self.translator.get('log.livox_driver_topics_not_found', '⚠️ Driver đã khởi động nhưng topics chưa xuất hiện, đợi thêm...'))
+                # Đợi thêm 2 giây
+                time.sleep(2)
+                if self.check_livox_driver_running():
+                    self.log(self.translator.get('log.livox_driver_started', '✅ Livox driver đã khởi động thành công'))
+                    return True
+                else:
+                    self.log(self.translator.get('log.livox_driver_topics_still_not_found', '⚠️ Topics vẫn chưa xuất hiện, có thể driver chưa sẵn sàng'))
+                    return False
+            
+        except Exception as e:
+            self.log(self.translator.get('log.error_starting_livox_driver', '❌ Error starting Livox driver: {error}').replace('{error}', str(e)))
+            self.is_livox_driver_running = False
+            self.livox_driver_process = None
+            return False
+    
+    def monitor_livox_driver_output(self):
+        """Monitor output của Livox driver process"""
+        proc = self.livox_driver_process
+        if not proc:
+            return
+        
+        try:
+            for line in iter(proc.stdout.readline, ''):
+                if not line:
+                    break
+                line = line.strip()
+                if line:
+                    # Chỉ log lỗi và cảnh báo để tránh spam
+                    if any(keyword in line.lower() for keyword in ['error', 'fatal', 'exception', 'failed', 'cannot', 'unable']):
+                        self.log(f"❌ Driver ERROR: {line}")
+                    elif any(keyword in line.lower() for keyword in ['warning', 'warn']):
+                        self.log(f"⚠️ Driver WARNING: {line}")
+        except Exception as e:
+            self.log(self.translator.get('log.error_reading_driver_output', 'Error reading driver output: {error}').replace('{error}', str(e)))
+        finally:
+            # Khi process kết thúc
+            if proc.poll() is not None:
+                self.root.after(0, self._handle_driver_stopped)
+    
+    def _handle_driver_stopped(self):
+        """Xử lý khi driver dừng"""
+        if self.is_livox_driver_running:
+            self.log(self.translator.get('log.livox_driver_stopped', '⏹ Livox driver đã dừng'))
+            self.is_livox_driver_running = False
+            self.livox_driver_process = None
+    
+    def stop_livox_driver(self):
+        """Dừng Livox driver"""
+        if not self.is_livox_driver_running:
+            return
+        
+        if self.livox_driver_process:
+            try:
+                self.log(self.translator.get('log.stopping_livox_driver', '🛑 Đang dừng Livox driver...'))
+                if hasattr(os, 'setsid'):
+                    os.killpg(os.getpgid(self.livox_driver_process.pid), signal.SIGTERM)
+                else:
+                    self.livox_driver_process.terminate()
+                self.livox_driver_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                if self.livox_driver_process:
+                    if hasattr(os, 'setsid'):
+                        os.killpg(os.getpgid(self.livox_driver_process.pid), signal.SIGKILL)
+                    else:
+                        self.livox_driver_process.kill()
+            except Exception as e:
+                self.log(self.translator.get('log.error_stopping_driver', '⚠️ Error stopping driver: {error}').replace('{error}', str(e)))
+            finally:
+                self.livox_driver_process = None
+        
+        # Kill tất cả các node liên quan đến livox driver
+        try:
+            subprocess.run(
+                ['pkill', '-f', 'livox_ros_driver2'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3
+            )
+        except:
+            pass
+        
+        self.is_livox_driver_running = False
+        self.log(self.translator.get('log.livox_driver_stopped', '⏹ Livox driver đã dừng'))
     
     def setup_vehicle_info(self):
         device_id = self.get_mac_address()
@@ -478,7 +858,7 @@ class WorkerInterface:
         vehicle_id = self.vehicle_id
         print("Vehicle ID:", vehicle_id)
 
-        self.vehicle_info_frame = tk.LabelFrame(self.sidebar, text="Vehicle Information", padx=10, pady=10)
+        self.vehicle_info_frame = tk.LabelFrame(self.sidebar, text=self.translator.get('label.vehicle_information', 'Vehicle Information'), padx=10, pady=10)
         self.vehicle_info_frame.pack(fill=tk.X, pady=5, padx=5)
         
         # Lưu reference đến các label để có thể cập nhật lại
@@ -486,11 +866,27 @@ class WorkerInterface:
         
         # Tạo các label ban đầu
         info_keys = ["device_id", "vehicle_id", "name", "type", "status"]
+        self.vehicle_info_label_widgets = {}  # Store label widgets for translation
         for key in info_keys:
             row = tk.Frame(self.vehicle_info_frame)
             row.pack(fill=tk.X, pady=2)
-            label_text = key.replace("_", " ").title() + ":"
-            tk.Label(row, text=label_text, fg="grey", font=("Arial", 8)).pack(side=tk.LEFT)
+            # Use translator for label text
+            label_key = f'label.vehicle_{key}' if key != 'name' and key != 'type' and key != 'status' else f'label.vehicle_{key}'
+            if key == 'device_id':
+                label_text = self.translator.get('label.device_id', 'Device Id') + ":"
+            elif key == 'vehicle_id':
+                label_text = self.translator.get('label.vehicle_id', 'Vehicle Id') + ":"
+            elif key == 'name':
+                label_text = self.translator.get('label.name', 'Name') + ":"
+            elif key == 'type':
+                label_text = self.translator.get('label.type', 'Type') + ":"
+            elif key == 'status':
+                label_text = self.translator.get('label.status', 'Status') + ":"
+            else:
+                label_text = key.replace("_", " ").title() + ":"
+            label_widget = tk.Label(row, text=label_text, fg="grey", font=("Arial", 8))
+            label_widget.pack(side=tk.LEFT)
+            self.vehicle_info_label_widgets[key] = label_widget
             value_label = tk.Label(row, text="--", font=("Arial", 9, "bold"))
             value_label.pack(side=tk.RIGHT)
             self.vehicle_info_labels[key] = value_label
@@ -516,21 +912,21 @@ class WorkerInterface:
                 # Nếu không tìm thấy, sử dụng giá trị mặc định
                 data = {}
         except Exception as e:
-            self.log(f"⚠️ Lỗi khi lấy thông tin vehicle: {e}")
+            self.log(self.translator.get('log.error_getting_vehicle_info', '⚠️ Error getting vehicle info: {error}').replace('{error}', str(e)))
             data = {}
 
         # Xử lý name: nếu null hoặc None thì hiển thị "not given"
         name = data.get("name")
         if name is None or name == "":
-            name = "not given"
+            name = self.translator.get('label.not_given', 'not given')
         
         # Xử lý type: nếu null hoặc None thì hiển thị "not given"
         vehicle_type = data.get("vehicle_type") or data.get("type")
         if vehicle_type is None or vehicle_type == "":
-            vehicle_type = "not given"
+            vehicle_type = self.translator.get('label.not_given', 'not given')
         
         # Xử lý status: lấy từ API, nếu không có thì dùng "N/A"
-        status = data.get("status") or "N/A"
+        status = data.get("status") or self.translator.get('label.not_available', 'N/A')
         
         # Lấy device_id
         device_id = self.get_mac_address()
@@ -549,12 +945,13 @@ class WorkerInterface:
     
     def setup_map_info(self):
         """Thiết lập phần hiển thị thông tin bản đồ"""
-        frame = tk.LabelFrame(self.sidebar, text="Map Information", padx=10, pady=10)
+        frame = tk.LabelFrame(self.sidebar, text=self.translator.get('label.map_information', 'Map Information'), padx=10, pady=10)
         frame.pack(fill=tk.X, pady=5, padx=5)
+        self.map_info_frame = frame  # Store reference for update_ui_texts
         
         self.map_info_label = tk.Label(
             frame,
-            text="Đang kiểm tra bản đồ...",
+            text=self.translator.get('label.checking_map', 'Checking map...'),
             foreground="gray",
             font=("Arial", 8),
             wraplength=280,
@@ -581,7 +978,7 @@ class WorkerInterface:
         map_path = self.default_map_root
         
         if not map_path.exists():
-            self.map_info_label.config(text="❌ Thư mục map không tồn tại", foreground="red")
+            self.map_info_label.config(text=self.translator.get('label.map_directory_not_exists', '❌ Map directory does not exist'), foreground="red")
             self.map_detail_label.config(text="")
             return
 
@@ -591,12 +988,12 @@ class WorkerInterface:
         
         issues = []
         if not pose_json.exists():
-            issues.append("thiếu pose.json")
+            issues.append(self.translator.get('label.missing_pose_json', 'missing pose.json'))
         if not pcd_dir.exists() or not any(pcd_dir.glob("*.pcd")):
-            issues.append("thiếu file pcd")
+            issues.append(self.translator.get('label.missing_pcd_files', 'missing pcd files'))
             
         if issues:
-            self.map_info_label.config(text=f"⚠️ Bản đồ không hợp lệ: {', '.join(issues)}", foreground="orange")
+            self.map_info_label.config(text=self.translator.get('label.map_invalid', '⚠️ Map invalid: {issues}').replace('{issues}', ', '.join(issues)), foreground="orange")
             self.map_detail_label.config(text="")
         else:
             # Đếm số tile từ PCD files
@@ -616,23 +1013,24 @@ class WorkerInterface:
                         tiles = index_data.get("tiles", [])
                         if tiles:
                             total_points = sum(tile.get("num_points", 0) for tile in tiles)
-                            detail_text = f"Tổng điểm: {total_points:,} | Tiles: {num_tiles}"
+                            detail_text = self.translator.get('label.total_points_tiles', 'Total points: {points:,} | Tiles: {tiles}').replace('{points:,}', f'{total_points:,}').replace('{tiles}', str(num_tiles))
                 except Exception as e:
-                    detail_text = f"Tiles: {num_tiles}"
+                    detail_text = self.translator.get('label.tiles_count', 'Tiles: {count}').replace('{count}', str(num_tiles))
             else:
-                detail_text = f"Tiles: {num_tiles}"
+                detail_text = self.translator.get('label.tiles_count', 'Tiles: {count}').replace('{count}', str(num_tiles))
             
-            self.map_info_label.config(text=f"✅ Bản đồ hợp lệ: {num_tiles} tiles", foreground="green")
+            self.map_info_label.config(text=self.translator.get('label.map_valid', '✅ Map valid: {count} tiles').replace('{count}', str(num_tiles)), foreground="green")
             self.map_detail_label.config(text=detail_text)
     
     def setup_pose_display(self):
         """Thiết lập phần hiển thị pose và orientation"""
-        frame = tk.LabelFrame(self.sidebar, text="Pose & Orientation", padx=10, pady=10)
+        frame = tk.LabelFrame(self.sidebar, text=self.translator.get('label.pose_orientation', 'Pose & Orientation'), padx=10, pady=10)
         frame.pack(fill=tk.X, pady=5, padx=5)
+        self.pose_display_frame = frame  # Store reference for update_ui_texts
         
         # Position section
-        pos_label = tk.Label(frame, text="Position:", font=("Arial", 8, "bold"), fg="gray")
-        pos_label.pack(anchor=tk.W, pady=(0, 2))
+        self.pos_label = tk.Label(frame, text=self.translator.get('label.position', 'Position:'), font=("Arial", 8, "bold"), fg="gray")
+        self.pos_label.pack(anchor=tk.W, pady=(0, 2))
         
         self.pos_x_label = tk.Label(frame, text="X: --", font=("Arial", 8), fg="black")
         self.pos_x_label.pack(anchor=tk.W, padx=10)
@@ -648,8 +1046,8 @@ class WorkerInterface:
         separator.pack(fill=tk.X, pady=5)
         
         # Orientation section
-        orient_label = tk.Label(frame, text="Orientation:", font=("Arial", 8, "bold"), fg="gray")
-        orient_label.pack(anchor=tk.W, pady=(5, 2))
+        self.orient_label = tk.Label(frame, text=self.translator.get('label.orientation', 'Orientation:'), font=("Arial", 8, "bold"), fg="gray")
+        self.orient_label.pack(anchor=tk.W, pady=(5, 2))
         
         self.orient_x_label = tk.Label(frame, text="X: --", font=("Arial", 8), fg="black")
         self.orient_x_label.pack(anchor=tk.W, padx=10)
@@ -666,7 +1064,7 @@ class WorkerInterface:
         # Status
         self.pose_status_label = tk.Label(
             frame,
-            text="Chưa có dữ liệu",
+            text=self.translator.get('label.no_data', 'No data'),
             font=("Arial", 7),
             fg="gray"
         )
@@ -721,7 +1119,7 @@ class WorkerInterface:
             
             # Reset status
             self.pose_status_label.config(
-                text="Chưa có dữ liệu",
+                text=self.translator.get('label.no_data', 'No data'),
                 fg="gray"
             )
         except Exception as e:
@@ -732,12 +1130,13 @@ class WorkerInterface:
         log_header = tk.Frame(self.log_container)
         log_header.pack(fill=tk.X, pady=(0, 5))
         
-        tk.Label(log_header, text="SYSTEM MONITORING LOGS", font=("Arial", 9, "bold")).pack(side=tk.LEFT)
+        self.log_title_label = tk.Label(log_header, text=self.translator.get('label.system_monitoring_logs', 'SYSTEM MONITORING LOGS'), font=("Arial", 9, "bold"))
+        self.log_title_label.pack(side=tk.LEFT)
         
-        btn_clear = tk.Button(log_header, text="Clear Log", 
+        self.btn_clear_log = tk.Button(log_header, text=self.translator.get('button.clear_log', 'Clear Log'), 
                               command=self.clear_log, 
                               font=("Arial", 7))
-        btn_clear.pack(side=tk.RIGHT)
+        self.btn_clear_log.pack(side=tk.RIGHT)
 
         # Log Panel chiếm toàn bộ không gian còn lại
         # Sử dụng scrolledtext để tự động có thanh cuộn nếu log quá dài
@@ -745,9 +1144,7 @@ class WorkerInterface:
                                                    font=("Consolas", 10), relief=tk.SUNKEN, bd=1)
         self.log_panel.pack(fill=tk.BOTH, expand=True)
         
-        self.log("INFO: Connection established with Device.")
-        self.log("INFO: LiDAR sensors calibrated.")
-        self.log("SUCCESS: System ready for movement.")
+        self.log(self.translator.get('log.system_ready', '✅ System ready'))
 
     def get_mac_address(self):
         try:
@@ -785,18 +1182,39 @@ class WorkerInterface:
         
         # Kiểm tra map có tồn tại không
         if not self.default_map_root.exists() or not (self.default_map_root / "pose.json").exists():
-            self.log("⚠️ Map chưa sẵn sàng. Vui lòng đợi tải map hoàn tất.")
+            self.log(self.translator.get('log.map_not_ready_wait', '⚠️ Map not ready. Please wait for map download to complete.'))
             return
+        
+        # Kiểm tra xem có thiết bị thật không (có topics /livox/lidar và /livox/imu)
+        # Nếu không có thiết bị thật, bỏ qua việc khởi động driver (giả định đang replay bag)
+        has_real_device = self.check_livox_driver_running()
+        
+        if has_real_device:
+            # Có thiết bị thật, kiểm tra và khởi động driver nếu cần
+            self.log("=" * 60)
+            self.log(self.translator.get('log.checking_livox_driver', '🔍 Kiểm tra Livox driver...'))
+            
+            if not self.is_livox_driver_running:
+                self.log(self.translator.get('log.livox_driver_not_running', '⚠️ Livox driver chưa chạy, đang khởi động...'))
+                if not self.start_livox_driver():
+                    self.log(self.translator.get('log.failed_to_start_driver', '❌ Không thể khởi động Livox driver. Vui lòng kiểm tra lại.'))
+                    return
+            else:
+                self.log(self.translator.get('log.livox_driver_already_running', '✅ Livox driver đã đang chạy'))
+        else:
+            # Không có thiết bị thật, bỏ qua việc khởi động driver (đang replay bag)
+            self.log("=" * 60)
+            self.log(self.translator.get('log.no_real_device_detected', '📦 No real device detected, skipping driver startup (assuming bag replay)'))
         
         # Script helper
         run_script = Path(project_root) / "scripts" / "run_localization.sh"
         if not run_script.exists():
-            self.log(f"❌ Không tìm thấy script chạy localization tại: {run_script}")
+            self.log(self.translator.get('log.localization_script_not_found', '❌ Localization script not found at: {path}').replace('{path}', str(run_script)))
             return
         
         self.log("=" * 60)
-        self.log("🚀 Đang khởi động Localization node...")
-        self.log(f"📁 Map: {self.default_map_root}")
+        self.log(self.translator.get('log.starting_localization_node', '🚀 Starting Localization node...'))
+        self.log(self.translator.get('log.map_path', '📁 Map: {path}').replace('{path}', str(self.default_map_root)))
         
         try:
             # Chạy localization script với RViz disabled (chỉ chạy node)
@@ -822,13 +1240,13 @@ class WorkerInterface:
             self.start_pose_publishing()
             
             # Cập nhật UI
-            self.btn_start.config(text="■ STOP MOVEMENT", state=tk.NORMAL)
+            self.btn_start.config(text=self.translator.get('button.stop_movement', '■ STOP MOVEMENT'), state=tk.NORMAL)
             self.btn_stop.config(state=tk.NORMAL)
-            self.status_text.config(text="System: Localization đang chạy...")
-            self.log("✅ Đã khởi động Localization node.")
+            self.status_text.config(text=self.translator.get('label.localization_running', 'System: Localization running...'))
+            self.log(self.translator.get('log.localization_node_started', '✅ Localization node started.'))
             
         except Exception as e:
-            self.log(f"❌ Lỗi khi khởi động localization: {e}")
+            self.log(self.translator.get('log.error_starting_localization', '❌ Error starting localization: {error}').replace('{error}', str(e)))
             self.is_localization_running = False
             self.is_running = False
 
@@ -836,20 +1254,23 @@ class WorkerInterface:
         """Dừng localization node"""
         self.stop_pose_publishing()
         self.stop_localization()
+        # Dừng Livox driver nếu đã khởi động tự động
+        if self.is_livox_driver_running:
+            self.stop_livox_driver()
         self.is_running = False
-        self.btn_start.config(text="▶ START MOVING", state=tk.NORMAL)
+        self.btn_start.config(text=self.translator.get('button.start_moving', '▶ START MOVING'), state=tk.NORMAL)
         self.btn_stop.config(state=tk.DISABLED)
-        self.status_text.config(text="System: Đã dừng")
+        self.status_text.config(text=self.translator.get('label.stopped', 'System: Stopped'))
         # Reset pose display
         self.reset_pose_display()
         # Cập nhật trạng thái vehicle thành offline
         if self.vehicle_id:
             self.update_vehicle_status("offline")
-        self.log("COMMAND: Stop localization requested.")
+        self.log(self.translator.get('log.stop_localization_requested', 'COMMAND: Stop localization requested.'))
     
     def download_map_and_qr(self):
         """Tự động tải fastloc_map và QR từ backend"""
-        self.log("🌐 Đang tải map và QR từ backend...")
+        self.log(self.translator.get('log.downloading_map_qr', '🌐 Loading map and QR from backend...'))
         threading.Thread(target=self._download_worker, daemon=True).start()
     
     def _download_worker(self):
@@ -859,7 +1280,7 @@ class WorkerInterface:
             
             # Tải fastloc_map
             fastloc_url = f"{base_url}/api/v1/maps/localization/fastloc/download"
-            self.log("⬇️ Đang tải fastloc_map từ backend...")
+            self.log(self.translator.get('log.downloading_fastloc_map', '⬇️ Downloading fastloc_map from backend...'))
             
             dest_root = self.log_path
             dest_root.mkdir(parents=True, exist_ok=True)
@@ -868,14 +1289,14 @@ class WorkerInterface:
             try:
                 with requests.get(fastloc_url, stream=True, timeout=120) as r:
                     if r.status_code != 200:
-                        self.log(f"❌ Tải fastloc_map thất bại (HTTP {r.status_code})")
+                        self.log(self.translator.get('log.fastloc_map_download_failed', '❌ Failed to download fastloc_map (HTTP {code})').replace('{code}', str(r.status_code)))
                         return
                     with open(dest_zip, "wb") as f:
                         for chunk in r.iter_content(chunk_size=8192):
                             if chunk:
                                 f.write(chunk)
                 
-                self.log("📦 Đang giải nén fastloc_map...")
+                self.log(self.translator.get('log.extracting_fastloc_map', '📦 Extracting fastloc_map...'))
                 # Xóa map cũ để tránh lẫn file
                 if self.default_map_root.exists():
                     shutil.rmtree(self.default_map_root, ignore_errors=True)
@@ -919,52 +1340,52 @@ class WorkerInterface:
                 # Xóa file zip tạm
                 try:
                     dest_zip.unlink()
-                    self.log(f"🧹 Đã xóa file zip tạm: {dest_zip.name}")
+                    self.log(self.translator.get('log.deleted_temp_zip', '🧹 Deleted temporary zip file: {filename}').replace('{filename}', dest_zip.name))
                 except Exception as e:
-                    self.log(f"⚠️ Không thể xóa file zip tạm: {e}")
+                    self.log(self.translator.get('log.cannot_delete_temp_zip', '⚠️ Cannot delete temporary zip file: {error}').replace('{error}', str(e)))
                 
                 # Kiểm tra lại folder fastloc_map
                 if self.default_map_root.exists():
-                    self.log("✅ Đã tải và giải nén fastloc_map thành công")
+                    self.log(self.translator.get('log.fastloc_map_downloaded', '✅ fastloc_map downloaded and extracted successfully'))
                     # Cập nhật thông tin map sau khi tải xong
                     self.root.after(0, self._on_map_downloaded)
                 else:
-                    self.log("⚠️ Folder fastloc_map không tồn tại sau khi giải nén")
+                    self.log(self.translator.get('log.fastloc_map_not_exists', '⚠️ fastloc_map folder does not exist after extraction'))
                 
             except requests.exceptions.RequestException as e:
-                self.log(f"❌ Lỗi khi tải fastloc_map: {e}")
+                self.log(self.translator.get('log.error_downloading_fastloc_map', '❌ Error downloading fastloc_map: {error}').replace('{error}', str(e)))
                 return
             except Exception as e:
-                self.log(f"❌ Lỗi giải nén fastloc_map: {e}")
+                self.log(self.translator.get('log.error_extracting_fastloc_map', '❌ Error extracting fastloc_map: {error}').replace('{error}', str(e)))
                 return
             
             # Tải QR_detect.json
             qr_url = f"{base_url}/api/v1/maps/localization/qr"
-            self.log("⬇️ Đang tải QR_detect.json từ backend...")
+            self.log(self.translator.get('log.downloading_qr_detect', '⬇️ Downloading QR_detect.json from backend...'))
             
             try:
                 resp = requests.get(qr_url, timeout=30)
                 if resp.status_code == 200:
                     with open(self.qr_detect_path, 'wb') as f:
                         f.write(resp.content)
-                    self.log("✅ Đã tải QR_detect.json thành công")
+                    self.log(self.translator.get('log.qr_detect_downloaded', '✅ QR_detect.json downloaded successfully'))
                 else:
-                    self.log(f"⚠️ Không tải được QR_detect.json (HTTP {resp.status_code})")
+                    self.log(self.translator.get('log.qr_detect_download_failed', '⚠️ Failed to download QR_detect.json (HTTP {code})').replace('{code}', str(resp.status_code)))
             except requests.exceptions.RequestException as e:
-                self.log(f"⚠️ Lỗi khi tải QR_detect.json: {e}")
+                self.log(self.translator.get('log.error_downloading_qr_detect', '⚠️ Error downloading QR_detect.json: {error}').replace('{error}', str(e)))
             
             # Map đã sẵn sàng, người dùng có thể bấm nút Preview để mở RViz
-            self.log("✅ Map và QR đã sẵn sàng. Bấm nút Preview để mở RViz.")
+            self.log(self.translator.get('log.map_qr_ready', '✅ Map and QR are ready. Click Preview button to open RViz.'))
             
         except Exception as e:
-            self.log(f"❌ Lỗi không mong đợi khi tải map/QR: {e}")
+            self.log(self.translator.get('log.unexpected_error_downloading', '❌ Unexpected error downloading map/QR: {error}').replace('{error}', str(e)))
     
     def _on_map_downloaded(self):
         """Xử lý sau khi tải map thành công"""
         self.update_map_info()
         # Enable nút START MOVING
         self.btn_start.config(state=tk.NORMAL)
-        self.status_text.config(text="System: Sẵn sàng khởi động")
+        self.status_text.config(text=self.translator.get('label.system_ready', 'System: Ready to start'))
     
     def update_vehicle_status(self, status, refresh_info=False):
         """Cập nhật trạng thái vehicle lên backend"""
@@ -985,17 +1406,17 @@ class WorkerInterface:
             )
             
             if response.status_code == 200:
-                self.log(f"✅ Đã cập nhật trạng thái vehicle: {status}")
+                self.log(self.translator.get('log.vehicle_status_updated', '✅ Vehicle status updated: {status}').replace('{status}', status))
                 # Chỉ refresh vehicle info khi status là "online" và refresh_info=True
                 if status == "online" and refresh_info:
                     self.root.after(0, self.refresh_vehicle_info)
             else:
-                self.log(f"⚠️ Không thể cập nhật trạng thái vehicle: HTTP {response.status_code}")
+                self.log(self.translator.get('log.cannot_update_vehicle_status', '⚠️ Cannot update vehicle status: HTTP {code}').replace('{code}', str(response.status_code)))
                 
         except requests.exceptions.RequestException as e:
-            self.log(f"⚠️ Lỗi kết nối khi cập nhật trạng thái: {e}")
+            self.log(self.translator.get('log.error_connection_updating_status', '⚠️ Connection error when updating status: {error}').replace('{error}', str(e)))
         except Exception as e:
-            self.log(f"⚠️ Lỗi khi cập nhật trạng thái: {e}")
+            self.log(self.translator.get('log.error_updating_status', '⚠️ Error updating status: {error}').replace('{error}', str(e)))
     
     def on_closing(self):
         """Xử lý khi đóng cửa sổ"""
@@ -1006,6 +1427,10 @@ class WorkerInterface:
         # Dừng tất cả các process đang chạy
         if self.is_running:
             self.stop_system()
+        
+        # Dừng Livox driver nếu đang chạy
+        if self.is_livox_driver_running:
+            self.stop_livox_driver()
         
         # Đóng cửa sổ
         self.root.destroy()

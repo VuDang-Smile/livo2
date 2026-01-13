@@ -6,6 +6,8 @@ Chứa LivoxTab và LivoxSubscriber cho Livox Driver 2
 
 import threading
 import subprocess
+import os
+import queue
 from pathlib import Path
 
 import rclpy
@@ -141,10 +143,18 @@ class LivoxTab(ttk.Frame):
         self.lidar_count = 0
         self.imu_count = 0
         self.points2_count = 0
-
+        # Thread safety locks
+        self._ros_lock = threading.Lock()
+        self._process_lock = threading.Lock()  # Lock để bảo vệ truy cập process objects
+        
+        # Queue để giao tiếp giữa threads và main thread (thread-safe)
+        self.ui_queue = queue.Queue()
         
         # Tạo UI
         self.create_widgets()
+        
+        # Start queue processor để xử lý UI updates từ threads
+        self._process_ui_queue()
     
     def create_widgets(self):
         """Tạo các widget cho tab Livox"""
@@ -264,40 +274,87 @@ class LivoxTab(ttk.Frame):
         self.log_text.pack(fill=tk.BOTH, expand=True)
     
     def log(self, message):
-        """Thêm message vào log"""
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, f"{message}\n")
-        self.log_text.see(tk.END)
-        self.log_text.config(state=tk.DISABLED)
+        """Thêm message vào log - thread-safe qua queue"""
+        # Kiểm tra xem đang ở main thread hay không
+        if threading.current_thread() is threading.main_thread():
+            # Nếu là main thread, gọi trực tiếp
+            self._log_impl(message)
+        else:
+            # Nếu là thread khác, đưa vào queue
+            self.ui_queue.put(('log', message))
+    
+    def _log_impl(self, message):
+        """Implementation của log - chỉ được gọi từ main thread"""
+        try:
+            self.log_text.config(state=tk.NORMAL)
+            self.log_text.insert(tk.END, f"{message}\n")
+            self.log_text.see(tk.END)
+            self.log_text.config(state=tk.DISABLED)
+        except Exception as e:
+            # Nếu có lỗi, in ra console
+            print(f"Error in log: {e}")
+    
+    def _process_ui_queue(self):
+        """Xử lý queue để update UI từ threads - chỉ chạy trong main thread"""
+        try:
+            while True:
+                try:
+                    action, *args = self.ui_queue.get_nowait()
+                    if action == 'log':
+                        self._log_impl(args[0])
+                    elif action == 'ui_update':
+                        callback = args[0]
+                        callback()
+                except queue.Empty:
+                    break
+        except Exception as e:
+            print(f"Error processing UI queue: {e}")
+        
+        # Schedule lại sau 50ms để tiếp tục xử lý queue
+        self.after(50, self._process_ui_queue)
+    
+    def _schedule_ui_update(self, callback):
+        """Schedule UI update từ thread - thread-safe, luôn dùng queue để đảm bảo an toàn"""
+        # Luôn dùng queue để đảm bảo thread-safe, không gọi trực tiếp
+        self.ui_queue.put(('ui_update', callback))
     
     def _validate_ros2_setup(self):
         """Kiểm tra ROS2 setup có tồn tại không"""
         ros2_setup = "/opt/ros/jazzy/setup.bash"
         if not Path(ros2_setup).exists():
-            messagebox.showerror(
+            # Schedule messagebox từ main thread
+            error_msg = translator.get("message.ros2_setup_not_found").replace("{path}", ros2_setup)
+            self._schedule_ui_update(lambda: messagebox.showerror(
                 translator.get("dialog.error"),
-                translator.get("message.ros2_setup_not_found").replace("{path}", ros2_setup)
-            )
+                error_msg
+            ))
             return None
         return ros2_setup
     
     def _start_ros2_process(self, workspace_path, launch_file, process_name, process_attr, monitor_func, status_text, package_name=None):
         """Helper function để start ROS2 process"""
+        import threading
+        thread_id = threading.get_ident()
+        self.log(f"[DEBUG] _start_ros2_process called for {process_name} from thread {thread_id}")
         try:
             setup_script = workspace_path / "install" / "setup.sh"
             if not setup_script.exists():
-                messagebox.showerror(
+                # Schedule messagebox từ main thread
+                error_msg = translator.get("message.workspace_setup_not_found").replace("{path}", str(setup_script))
+                self._schedule_ui_update(lambda: messagebox.showerror(
                     translator.get("dialog.error"),
-                    translator.get("message.workspace_setup_not_found").replace("{path}", str(setup_script))
-                )
+                    error_msg
+                ))
                 return False
             
             launch_path = workspace_path / launch_file
             if not launch_path.exists():
-                messagebox.showerror(
+                # Schedule messagebox từ main thread
+                error_msg = translator.get("message.launch_file_not_found").replace("{path}", str(launch_path))
+                self._schedule_ui_update(lambda: messagebox.showerror(
                     translator.get("dialog.error"),
-                    translator.get("message.launch_file_not_found").replace("{path}", str(launch_path))
-                )
+                    error_msg
+                ))
                 return False
             
             ros2_setup = self._validate_ros2_setup()
@@ -320,6 +377,19 @@ class LivoxTab(ttk.Frame):
             self.log(translator.get("log.starting_process").replace("{process_name}", process_name))
             self.log(translator.get("log.command").replace("{cmd}", cmd))
             
+            # Use subprocess with proper environment
+            env = os.environ.copy()
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
+            # Sử dụng preexec_fn để tạo process group mới, tránh conflict với ROS2 context
+            # Điều này giúp tránh segmentation fault khi launch ROS2 nodes
+            try:
+                preexec_fn = os.setsid if hasattr(os, 'setsid') else None
+            except:
+                preexec_fn = None
+            
+            self.log(f"[DEBUG] Creating subprocess for {process_name} (thread {thread_id})")
             process = subprocess.Popen(
                 cmd,
                 shell=True,
@@ -327,13 +397,48 @@ class LivoxTab(ttk.Frame):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
-                bufsize=1
+                bufsize=1,
+                env=env,
+                preexec_fn=preexec_fn
             )
             
+            self.log(f"[DEBUG] Process created with PID: {process.pid} (thread {thread_id})")
             setattr(self, process_attr, process)
-            threading.Thread(target=monitor_func, daemon=True).start()
             
-            self.status_label.config(text=translator.get("label.status") + ": " + status_text, foreground="orange")
+            # Kiểm tra process đã start thành công chưa (chờ một chút)
+            import time
+            time.sleep(0.5)
+            
+            # Kiểm tra process status với lock để tránh race condition với monitor thread
+            with self._process_lock:
+                process_status = process.poll()
+            
+            if process_status is not None:
+                # Process đã dừng ngay sau khi start
+                try:
+                    stdout, _ = process.communicate(timeout=1)
+                    error_msg = stdout if stdout else f"Process exited with code {process.returncode}"
+                except subprocess.TimeoutExpired:
+                    error_msg = "Process exited immediately (timeout reading output)"
+                
+                self.log(f"✗ {process_name} failed to start:")
+                self.log(f"  Output: {error_msg}")
+                # Schedule messagebox từ main thread
+                dialog_msg = f"{process_name} không thể khởi động: {error_msg[:200]}"
+                self._schedule_ui_update(lambda: messagebox.showerror(
+                    translator.get("dialog.error"),
+                    dialog_msg
+                ))
+                return False
+            
+            # Start monitor thread
+            monitor_thread = threading.Thread(target=monitor_func, daemon=True, name=f"{process_name}Monitor")
+            self.log(f"[DEBUG] Starting monitor thread for {process_name} (caller thread {thread_id})")
+            monitor_thread.start()
+            self.log(f"[DEBUG] Monitor thread started with ID: {monitor_thread.ident}")
+            
+            self._schedule_ui_update(lambda: self.status_label.config(text=translator.get("label.status") + ": " + status_text, foreground="orange"))
+            self.log(f"[DEBUG] _start_ros2_process completed successfully for {process_name}")
             return True
             
         except Exception as e:
@@ -341,17 +446,21 @@ class LivoxTab(ttk.Frame):
             error_msg = translator.get("log.error_start_process").replace("{process_name}", process_name).replace("{error}", str(e))
             print(error_msg)
             self.log(f"Lỗi: {error_msg}")
-            messagebox.showerror(translator.get("dialog.error"), error_msg)
+            # Schedule messagebox từ main thread
+            self._schedule_ui_update(lambda: messagebox.showerror(translator.get("dialog.error"), error_msg))
             return False
     
     def start_livox_driver(self):
         """Start Livox MID 360 driver"""
+        import threading
+        thread_id = threading.get_ident()
+        self.log(f"[DEBUG] start_livox_driver called from thread {thread_id}")
         self.log(translator.get("log.starting_livox_driver"))
-        print("Bắt đầu Livox MID 360 driver...")
+        print(f"[DEBUG] Bắt đầu Livox MID 360 driver... (thread {thread_id})")
         try:
             workspace_path = Path(__file__).parent.parent / "dependencies" / "drive_ws"
             launch_file = Path("src/livox_ros_driver2/launch_ROS2/msg_MID360_launch.py")
-            print("Bắt đầu Livox MID 360 driver line 2")
+            print(f"[DEBUG] Bắt đầu Livox MID 360 driver line 2 (thread {thread_id})")
             
             if self._start_ros2_process(
                 workspace_path,
@@ -361,16 +470,86 @@ class LivoxTab(ttk.Frame):
                 self.monitor_livox_driver_output,
                 "Livox Driver đang chạy"
             ):
-                print("Bắt đầu Livox MID 360 driver line 3")
+                print(f"[DEBUG] Bắt đầu Livox MID 360 driver line 3 (thread {thread_id})")
+                self.log(f"[DEBUG] Driver process started, PID: {self.livox_driver_process.pid if self.livox_driver_process else 'None'}")
                 
-                self.start_driver_btn.config(state=tk.DISABLED)
-                self.stop_driver_btn.config(state=tk.NORMAL)
-                self.start_subscriber_btn.config(state=tk.NORMAL)
-                self.start_converter()
-                self.update_label_livo_connected(True)
+                # UI updates phải được gọi từ main thread để tránh segmentation fault
+                # Sử dụng queue để schedule UI updates từ main thread
+                self.log(f"[DEBUG] Scheduling UI updates from thread {thread_id}")
+                self._schedule_ui_update(lambda: self.start_driver_btn.config(state=tk.DISABLED))
+                self._schedule_ui_update(lambda: self.stop_driver_btn.config(state=tk.NORMAL))
+                self._schedule_ui_update(lambda: self.start_subscriber_btn.config(state=tk.NORMAL))
+                self.log(f"[DEBUG] UI updates scheduled successfully")
+                
+                # Chờ một chút để driver process ổn định trước khi start converter
+                import time
+                self.log(f"[DEBUG] Waiting 2.0s for driver to stabilize (thread {thread_id})")
+                time.sleep(2.0)  # Tăng delay để đảm bảo driver ổn định hoàn toàn
+                
+                # Kiểm tra driver process vẫn còn chạy trước khi start converter
+                # Sử dụng lock để tránh race condition với monitor thread đang đọc stdout
+                self.log(f"[DEBUG] Checking driver process status (thread {thread_id})")
+                driver_running = False
+                with self._process_lock:
+                    if self.livox_driver_process:
+                        try:
+                            driver_running = (self.livox_driver_process.poll() is None)
+                            self.log(f"[DEBUG] Driver process status: {'running' if driver_running else 'stopped'}")
+                        except Exception as e:
+                            self.log(f"⚠️  Lỗi khi kiểm tra driver process status: {e}")
+                            driver_running = False
+                
+                if driver_running:
+                    self.log(f"[DEBUG] Starting converter thread (thread {thread_id})")
+                    # Gọi start_converter trong thread riêng với proper error handling
+                    def safe_start_converter():
+                        try:
+                            import time
+                            # Thêm delay nhỏ trong thread để đảm bảo mọi thứ ổn định
+                            time.sleep(1.0)
+                            
+                            # Kiểm tra lại driver process trước khi start converter với lock
+                            driver_still_running = False
+                            with self._process_lock:
+                                if self.livox_driver_process:
+                                    try:
+                                        driver_still_running = (self.livox_driver_process.poll() is None)
+                                    except Exception as e:
+                                        self.log(f"⚠️  Lỗi khi kiểm tra driver process trong thread: {e}")
+                                        driver_still_running = False
+                            
+                            if not driver_still_running:
+                                self.log("⚠️  Driver process đã dừng, không start converter")
+                                return
+                            
+                            # Gọi start_converter với protection
+                            try:
+                                self.start_converter()
+                            except Exception as e:
+                                error_msg = f"Lỗi khi start converter: {e}"
+                                self.log(f"✗ {error_msg}")
+                                import traceback
+                                self.log(traceback.format_exc())
+                        except Exception as e:
+                            error_msg = f"Lỗi trong safe_start_converter thread: {e}"
+                            self.log(f"✗ {error_msg}")
+                            import traceback
+                            self.log(traceback.format_exc())
+                    
+                    # Start thread với name để dễ debug
+                    converter_thread = threading.Thread(target=safe_start_converter, daemon=True, name="ConverterStarter")
+                    converter_thread.start()
+                else:
+                    self.log("⚠️  Driver process đã dừng, không start converter")
+                
+                # UI update callback cũng phải được gọi từ main thread
+                if self.update_label_livo_connected:
+                    self._schedule_ui_update(lambda: self.update_label_livo_connected(True))
             # Converter button đã enable từ đầu, không cần enable lại
         except Exception as e:
-            self.update_label_livo_connected(False)
+            # UI update callback cũng phải được gọi từ main thread
+            if self.update_label_livo_connected:
+                self._schedule_ui_update(lambda: self.update_label_livo_connected(False))
             print(f"Livox MID 360 driver... error {e}")
 
         # print("Bắt đầu Livox MID 360 driver...")
@@ -378,14 +557,40 @@ class LivoxTab(ttk.Frame):
         self.log("Ket thuc Livox MID 360 driver...")
     
     def _monitor_process_output(self, process, process_name, stopped_handler):
-        """Helper function để monitor output từ process"""
+        """Helper function để monitor output từ process với improved error handling"""
         if not process:
             return
         
         try:
-            for line in iter(process.stdout.readline, ''):
-                if not line:
+            # Sử dụng timeout để tránh blocking vô hạn
+            import select
+            import sys
+            
+            # Đọc stdout với improved error handling
+            while True:
+                # Kiểm tra process còn chạy không với lock (chỉ check, không block)
+                process_stopped = False
+                with self._process_lock:
+                    try:
+                        process_stopped = (process.poll() is not None)
+                    except:
+                        process_stopped = True
+                
+                if process_stopped:
+                    # Process đã dừng
                     break
+                
+                # Đọc stdout ngoài lock để tránh deadlock
+                try:
+                    line = process.stdout.readline()
+                    if not line:
+                        # EOF reached
+                        break
+                except Exception as e:
+                    # Lỗi khi đọc stdout, có thể process đã đóng stdout
+                    self.log(f"⚠️  Lỗi khi đọc stdout từ {process_name}: {e}")
+                    break
+                
                 line = line.strip()
                 if line:
                     # Log output với prefix
@@ -396,17 +601,21 @@ class LivoxTab(ttk.Frame):
                     else:
                         self.log(f"{process_name}: {line}")
         except Exception as e:
-            print(translator.get("log.error_reading_output_from").replace("{process_name}", process_name).replace("{error}", str(e)))
-            self.log(translator.get("log.error_reading_output_from").replace("{process_name}", process_name).replace("{error}", str(e)))
+            error_msg = translator.get("log.error_reading_output_from").replace("{process_name}", process_name).replace("{error}", str(e))
+            print(error_msg)
+            self.log(error_msg)
+            import traceback
+            self.log(traceback.format_exc())
         
-        # Kiểm tra exit code
-        if process.poll() is not None:
+        # Kiểm tra exit code với lock để tránh race condition
+        with self._process_lock:
             exit_code = process.poll()
-            if exit_code != 0:
-                self.log(translator.get("log.process_stopped_exit_code").replace("{process_name}", process_name).replace("{exit_code}", str(exit_code)))
-            else:
-                self.log(translator.get("log.process_stopped_normal").replace("{process_name}", process_name))
-            self.after(0, stopped_handler)
+            if exit_code is not None:
+                if exit_code != 0:
+                    self.log(translator.get("log.process_stopped_exit_code").replace("{process_name}", process_name).replace("{exit_code}", str(exit_code)))
+                else:
+                    self.log(translator.get("log.process_stopped_normal").replace("{process_name}", process_name))
+                self.after(0, stopped_handler)
     
     def monitor_livox_driver_output(self):
         """Monitor output từ livox driver process"""
@@ -417,14 +626,15 @@ class LivoxTab(ttk.Frame):
         )
     
     def _handle_driver_stopped(self):
-        """Xử lý khi driver dừng"""
-        self.status_label.config(
+        """Xử lý khi driver dừng - được gọi từ monitor thread, cần schedule UI updates"""
+        # UI updates phải được gọi từ main thread
+        self.after(0, lambda: self.status_label.config(
             text=translator.get("label.status_driver_stopped"),
             foreground="red"
-        )
-        self.start_driver_btn.config(state=tk.NORMAL)
-        self.stop_driver_btn.config(state=tk.DISABLED)
-        self.start_subscriber_btn.config(state=tk.DISABLED)
+        ))
+        self.after(0, lambda: self.start_driver_btn.config(state=tk.NORMAL))
+        self.after(0, lambda: self.stop_driver_btn.config(state=tk.DISABLED))
+        self.after(0, lambda: self.start_subscriber_btn.config(state=tk.DISABLED))
         # Converter có thể chạy độc lập, không tự động stop khi driver dừng
         # if self.converter_process:
         #     self.stop_converter()
@@ -432,42 +642,69 @@ class LivoxTab(ttk.Frame):
             self.stop_ros_subscriber()
     
     
-    def _stop_process(self, process, process_name, timeout=5):
-        """Helper function để stop process"""
+    def _stop_process(self, process, process_name, timeout=2):
+        """Helper function để stop process với timeout ngắn hơn để không block UI"""
         if not process:
             return
         
         try:
             self.log(translator.get("log.stopping_process").replace("{process_name}", process_name))
-            process.terminate()
-            process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
+            # Terminate process
+            with self._process_lock:
+                if process.poll() is None:  # Process vẫn đang chạy
+                    process.terminate()
+            
+            # Chờ với timeout ngắn hơn để không block UI quá lâu
             try:
-                process.kill()
-            except:
-                pass
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                # Nếu timeout, kill process ngay lập tức
+                try:
+                    with self._process_lock:
+                        if process.poll() is None:
+                            process.kill()
+                            process.wait(timeout=0.5)  # Chờ ngắn sau khi kill
+                except:
+                    pass
         except Exception as e:
             self.log(translator.get("log.error_stopping_process").replace("{process_name}", process_name).replace("{error}", str(e)))
     
     def stop_livox_driver(self):
-        """Stop Livox driver"""
-        self._stop_process(self.livox_driver_process, "Livox Driver")
-        self.livox_driver_process = None
-        
-        self.status_label.config(
+        """Stop Livox driver - chạy trong thread để không block UI"""
+        # Update UI ngay lập tức
+        self.after(0, lambda: self.status_label.config(
             text=translator.get("label.status_driver_stopped"),
             foreground="red"
-        )
-        self.start_driver_btn.config(state=tk.NORMAL)
-        self.stop_driver_btn.config(state=tk.DISABLED)
-        self.start_subscriber_btn.config(state=tk.DISABLED)
+        ))
+        self.after(0, lambda: self.start_driver_btn.config(state=tk.NORMAL))
+        self.after(0, lambda: self.stop_driver_btn.config(state=tk.DISABLED))
+        self.after(0, lambda: self.start_subscriber_btn.config(state=tk.DISABLED))
         
-        # Converter có thể chạy độc lập, không tự động stop khi driver dừng
-        # if self.converter_process:
-        #     self.stop_converter()
-        if self.is_ros_running:
-            self.stop_ros_subscriber()
-        self.update_label_livo_connected(False)
+        if self.update_label_livo_connected:
+            self.after(0, lambda: self.update_label_livo_connected(False))
+        
+        # Stop operations chạy trong thread riêng để không block UI
+        def stop_driver_thread():
+            try:
+                # Stop ROS subscriber trước nếu đang chạy
+                if self.is_ros_running:
+                    self.stop_ros_subscriber()
+                
+                # Stop driver process
+                self._stop_process(self.livox_driver_process, "Livox Driver")
+                
+                # Clear process reference với lock
+                with self._process_lock:
+                    self.livox_driver_process = None
+                
+                self.log("✓ Livox driver đã dừng")
+            except Exception as e:
+                self.log(f"⚠️  Lỗi khi stop driver: {e}")
+                import traceback
+                self.log(traceback.format_exc())
+        
+        # Chạy stop trong thread riêng
+        threading.Thread(target=stop_driver_thread, daemon=True, name="DriverStop").start()
     
     def start_ros_subscriber(self):
         """Bắt đầu ROS subscriber cho livox topics"""
@@ -477,10 +714,24 @@ class LivoxTab(ttk.Frame):
             return
         
         try:
-            # Khởi tạo ROS2 nếu chưa có
-            if not rclpy.ok():
-                self.log(translator.get("log.initializing_ros2"))
-                rclpy.init()
+            # Khởi tạo ROS2 một cách an toàn với proper error handling
+            try:
+                if not rclpy.ok():
+                    self.log(translator.get("log.initializing_ros2"))
+                    rclpy.init()
+                else:
+                    self.log("ROS2 đã được khởi tạo từ trước")
+            except RuntimeError as e:
+                # ROS2 có thể đã được khởi tạo từ nơi khác
+                if "already initialized" in str(e).lower() or "context already exists" in str(e).lower():
+                    self.log("ROS2 đã được khởi tạo từ trước (bỏ qua lỗi)")
+                else:
+                    # Lỗi khác, raise lại
+                    raise
+            except Exception as e:
+                error_msg = f"Lỗi khi khởi tạo ROS2: {e}"
+                self.log(f"✗ {error_msg}")
+                raise
             
             # Kiểm tra topic type trước khi subscribe
             self.log(translator.get("log.checking_topic_type"))
@@ -557,12 +808,13 @@ class LivoxTab(ttk.Frame):
             self.is_ros_running = True
             self.lidar_count = 0
             self.imu_count = 0
-            self.status_label.config(
+            # UI updates phải được gọi từ main thread
+            self._schedule_ui_update(lambda: self.status_label.config(
                 text=translator.get("log.status_subscribing"),
                 foreground="green"
-            )
-            self.start_subscriber_btn.config(state=tk.DISABLED)
-            self.stop_subscriber_btn.config(state=tk.NORMAL)
+            ))
+            self._schedule_ui_update(lambda: self.start_subscriber_btn.config(state=tk.DISABLED))
+            self._schedule_ui_update(lambda: self.stop_subscriber_btn.config(state=tk.NORMAL))
             
             self.log(translator.get("log.ros_subscriber_started"))
             
@@ -572,30 +824,35 @@ class LivoxTab(ttk.Frame):
             self.log(f"✗ Lỗi: {error_msg}")
             import traceback
             traceback.print_exc()
-            messagebox.showerror(translator.get("dialog.error"), error_msg)
+            # Schedule messagebox từ main thread
+            self._schedule_ui_update(lambda: messagebox.showerror(translator.get("dialog.error"), error_msg))
         self.log(translator.get("log.ending_ros_subscriber"))
     
     def ros_spin(self):
-        """Spin ROS node trong thread riêng"""
+        """Spin ROS node trong thread riêng với improved thread safety"""
         try:
             self.log(translator.get("log.ros_spin_thread_started"))
             while rclpy.ok() and self.is_ros_running:
-                # Kiểm tra executor và node trước khi sử dụng
-                if self.ros_executor is not None and self.ros_node is not None:
-                    try:
-                        self.ros_executor.spin_once(timeout_sec=0.1)
-                    except Exception:
-                        # Executor có thể đã bị shutdown, thoát khỏi vòng lặp
+                # Sử dụng lock để đảm bảo thread safety khi truy cập executor/node
+                with self._ros_lock:
+                    # Kiểm tra executor và node trước khi sử dụng
+                    if self.ros_executor is not None and self.ros_node is not None:
+                        try:
+                            self.ros_executor.spin_once(timeout_sec=0.1)
+                        except Exception as e:
+                            # Executor có thể đã bị shutdown, thoát khỏi vòng lặp
+                            self.log(f"⚠️  Executor error trong ros_spin: {e}")
+                            break
+                    elif self.ros_node is not None:
+                        try:
+                            rclpy.spin_once(self.ros_node, timeout_sec=0.1)
+                        except Exception as e:
+                            # Node có thể đã bị destroy, thoát khỏi vòng lặp
+                            self.log(f"⚠️  Node error trong ros_spin: {e}")
+                            break
+                    else:
+                        # Không có executor hoặc node, thoát
                         break
-                elif self.ros_node is not None:
-                    try:
-                        rclpy.spin_once(self.ros_node, timeout_sec=0.1)
-                    except Exception:
-                        # Node có thể đã bị destroy, thoát khỏi vòng lặp
-                        break
-                else:
-                    # Không có executor hoặc node, thoát
-                    break
         except Exception as e:
             error_msg = translator.get("log.error_ros_spin").replace("{error}", str(e))
             self.log(f"✗ {error_msg}")
@@ -609,7 +866,8 @@ class LivoxTab(ttk.Frame):
                 ))
         finally:
             # Đảm bảo flag được reset khi thread kết thúc
-            self.is_ros_running = False
+            with self._ros_lock:
+                self.is_ros_running = False
     
     def on_lidar_received(self, msg):
         """Callback khi nhận được lidar data"""
@@ -667,75 +925,80 @@ class LivoxTab(ttk.Frame):
             ))
     
     def stop_ros_subscriber(self):
-        """Dừng ROS subscriber với proper cleanup để tránh segmentation fault"""
-        # Set flag để spin thread biết dừng
-        self.is_ros_running = False
+        """Dừng ROS subscriber với proper cleanup - chạy trong thread để không block UI"""
+        # Set flag ngay lập tức để spin thread biết dừng
+        with self._ros_lock:
+            if not self.is_ros_running:
+                # Đã dừng rồi, không cần làm gì
+                return
+            self.is_ros_running = False
         
-        # Đợi một chút để spin thread thoát khỏi vòng lặp
-        import time
-        time.sleep(0.2)
-        
-        # Đợi thread kết thúc nếu có
-        if self.ros_thread and self.ros_thread.is_alive():
-            # Đợi tối đa 1 giây để thread kết thúc
-            self.ros_thread.join(timeout=1.0)
-        
-        # Sau đó mới shutdown executor và destroy node
-        if self.ros_executor:
-            try:
-                self.ros_executor.shutdown()
-            except Exception as e:
-                self.log(translator.get("log.error_shutdown_executor").replace("{error}", str(e)))
-            finally:
-                self.ros_executor = None
-        
-        if self.ros_node:
-            try:
-                self.ros_node.destroy_node()
-            except Exception as e:
-                self.log(translator.get("log.error_destroy_node").replace("{error}", str(e)))
-            finally:
-                self.ros_node = None
-        
-        self.ros_thread = None
-        
-        # Cập nhật UI
-        self.status_label.config(
+        # Update UI ngay lập tức để không block
+        self.after(0, lambda: self.status_label.config(
             text=translator.get("log.status_subscriber_stopped"),
             foreground="red"
-        )
-        self.start_subscriber_btn.config(state=tk.NORMAL)
-        self.stop_subscriber_btn.config(state=tk.DISABLED)
+        ))
+        self.after(0, lambda: self.start_subscriber_btn.config(state=tk.NORMAL))
+        self.after(0, lambda: self.stop_subscriber_btn.config(state=tk.DISABLED))
         
-        self.lidar_info_label.config(text=translator.get("label.no_data_received"))
-        self.imu_info_label.config(text=translator.get("label.no_data_received"))
-        self.points2_info_label.config(text=translator.get("label.no_data_received"))
-        self.log(translator.get("log.ros_subscriber_stopped"))
+        self.after(0, lambda: self.lidar_info_label.config(text=translator.get("label.no_data_received")))
+        self.after(0, lambda: self.imu_info_label.config(text=translator.get("label.no_data_received")))
+        self.after(0, lambda: self.points2_info_label.config(text=translator.get("label.no_data_received")))
+        
+        # Cleanup chạy trong thread riêng để không block UI
+        def cleanup_ros():
+            import time
+            # Đợi một chút để spin thread thoát khỏi vòng lặp
+            time.sleep(0.1)  # Giảm từ 0.3 xuống 0.1
+            
+            # Đợi thread kết thúc nếu có với timeout ngắn hơn
+            if self.ros_thread and self.ros_thread.is_alive():
+                self.ros_thread.join(timeout=1.0)  # Giảm từ 2.0 xuống 1.0
+                if self.ros_thread.is_alive():
+                    self.log("⚠️  ROS thread không kết thúc sau timeout, tiếp tục cleanup")
+            
+            # Sau đó mới shutdown executor và destroy node với lock
+            with self._ros_lock:
+                if self.ros_executor:
+                    try:
+                        self.ros_executor.shutdown()
+                    except Exception as e:
+                        self.log(translator.get("log.error_shutdown_executor").replace("{error}", str(e)))
+                    finally:
+                        self.ros_executor = None
+                
+                if self.ros_node:
+                    try:
+                        self.ros_node.destroy_node()
+                    except Exception as e:
+                        self.log(translator.get("log.error_destroy_node").replace("{error}", str(e)))
+                    finally:
+                        self.ros_node = None
+            
+            self.ros_thread = None
+            self.log(translator.get("log.ros_subscriber_stopped"))
+        
+        # Chạy cleanup trong thread riêng
+        threading.Thread(target=cleanup_ros, daemon=True, name="ROSCleanup").start()
     
     def start_converter(self):
         """Start Livox Message Converter node (độc lập, không phụ thuộc vào driver)"""
+        # Kiểm tra xem converter đã đang chạy chưa
+        if self.converter_process and self.converter_process.poll() is None:
+            self.log("⚠️  Converter đã đang chạy, không start lại")
+            return
+        
         try:
             self.log(translator.get("log.starting_converter"))
             workspace_path = Path(__file__).parent.parent / "ws"
             launch_file = Path("src/livox_msg_converter/launch/livox_msg_converter.launch.py")
             
-            # Kiểm tra xem topic /livox/lidar có tồn tại không (có thể từ driver khác hoặc nguồn khác)
-            self.log(translator.get("log.checking_topic_livox_lidar"))
-            result = subprocess.run(
-                ['ros2', 'topic', 'list'],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
+            # Bỏ qua việc check topic để tránh crash với subprocess.run()
+            # Converter sẽ tự động chờ topic xuất hiện
+            self.log(translator.get("log.converter_will_wait"))
             
-            topic_exists = '/livox/lidar' in result.stdout or 'livox/lidar' in result.stdout
-            if not topic_exists:
-                self.log(translator.get("log.warning_topic_not_exists_converter"))
-                self.log(translator.get("log.converter_will_wait"))
-                self.log(translator.get("log.converter_may_start_driver"))
-            else:
-                self.log(translator.get("log.topic_exists_converter"))
-            
+            # Gọi trực tiếp _start_ros2_process() trong thread hiện tại
+            # Không tạo nested thread để tránh crash
             if self._start_ros2_process(
                 workspace_path,
                 launch_file,
@@ -746,10 +1009,14 @@ class LivoxTab(ttk.Frame):
             ):
                 self.start_converter_btn.config(state=tk.DISABLED)
                 self.stop_converter_btn.config(state=tk.NORMAL)
-                # Không cần restart subscriber nữa vì luôn subscribe /livox/points2
+            
         except Exception as e:
-            self.log(f"[Error]: start_converter: {e}")
-        self.log(translator.get("log.ending_converter"))
+            error_msg = f"Lỗi khi start converter: {e}"
+            self.log(f"✗ {error_msg}")
+            import traceback
+            self.log(traceback.format_exc())
+        finally:
+            self.log(translator.get("log.ending_converter"))
     
     def monitor_converter_output(self):
         """Monitor output từ converter process"""
@@ -760,44 +1027,77 @@ class LivoxTab(ttk.Frame):
         )
     
     def _handle_converter_stopped(self):
-        """Xử lý khi converter dừng"""
-        # Cập nhật status dựa trên các process khác đang chạy
-        if self.livox_driver_process and self.livox_driver_process.poll() is None:
-            self.status_label.config(
-                text=translator.get("log.status_driver_running_converter_stopped"),
-                foreground="orange"
-            )
-        else:
-            self.status_label.config(
-                text=translator.get("log.status_converter_stopped"),
-                foreground="red"
-            )
-        self.start_converter_btn.config(state=tk.NORMAL)
-        self.stop_converter_btn.config(state=tk.DISABLED)
-        self.points2_info_label.config(text=translator.get("label.no_data_received"))
-        self.points2_count = 0
+        """Xử lý khi converter dừng - được gọi từ monitor thread, cần schedule UI updates"""
+        # Cập nhật status dựa trên các process khác đang chạy - phải được gọi từ main thread
+        def update_ui():
+            # Kiểm tra driver process với lock để tránh race condition
+            driver_running = False
+            with self._process_lock:
+                if self.livox_driver_process:
+                    try:
+                        driver_running = (self.livox_driver_process.poll() is None)
+                    except:
+                        driver_running = False
+            
+            if driver_running:
+                self.status_label.config(
+                    text=translator.get("log.status_driver_running_converter_stopped"),
+                    foreground="orange"
+                )
+            else:
+                self.status_label.config(
+                    text=translator.get("log.status_converter_stopped"),
+                    foreground="red"
+                )
+            self.start_converter_btn.config(state=tk.NORMAL)
+            self.stop_converter_btn.config(state=tk.DISABLED)
+            self.points2_info_label.config(text=translator.get("label.no_data_received"))
+            self.points2_count = 0
+        
+        self.after(0, update_ui)
     
     
     def stop_converter(self):
-        """Stop Converter node"""
-        self._stop_process(self.converter_process, "Converter")
-        self.converter_process = None
+        """Stop Converter node - chạy trong thread để không block UI"""
+        # Update UI ngay lập tức
+        def update_ui():
+            # Kiểm tra driver process với lock để tránh race condition
+            driver_running = False
+            with self._process_lock:
+                if self.livox_driver_process:
+                    try:
+                        driver_running = (self.livox_driver_process.poll() is None)
+                    except:
+                        driver_running = False
+            
+            if driver_running:
+                self.status_label.config(
+                    text=translator.get("log.status_driver_running_converter_stopped"),
+                    foreground="orange"
+                )
+            else:
+                self.status_label.config(
+                    text=translator.get("log.status_converter_stopped"),
+                    foreground="red"
+                )
+            self.start_converter_btn.config(state=tk.NORMAL)
+            self.stop_converter_btn.config(state=tk.DISABLED)
+            self.points2_info_label.config(text=translator.get("label.no_data_received"))
+            self.points2_count = 0
         
-        # Cập nhật status dựa trên các process khác đang chạy
-        if self.livox_driver_process and self.livox_driver_process.poll() is None:
-            self.status_label.config(
-                text=translator.get("log.status_driver_running_converter_stopped"),
-                foreground="orange"
-            )
-        else:
-            self.status_label.config(
-                text=translator.get("log.status_converter_stopped"),
-                foreground="red"
-            )
-        self.start_converter_btn.config(state=tk.NORMAL)
-        self.stop_converter_btn.config(state=tk.DISABLED)
-        self.points2_info_label.config(text=translator.get("label.no_data_received"))
-        self.points2_count = 0
+        self.after(0, update_ui)
+        
+        # Stop process chạy trong thread riêng
+        def stop_converter_thread():
+            try:
+                self._stop_process(self.converter_process, "Converter")
+                with self._process_lock:
+                    self.converter_process = None
+                self.log("✓ Converter đã dừng")
+            except Exception as e:
+                self.log(f"⚠️  Lỗi khi stop converter: {e}")
+        
+        threading.Thread(target=stop_converter_thread, daemon=True, name="ConverterStop").start()
     
     def on_points2_received(self, msg):
         """Callback khi nhận được PointCloud2 từ /livox/points2"""
