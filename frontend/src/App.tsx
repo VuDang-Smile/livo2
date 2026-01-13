@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { MQTTProvider } from './contexts/MQTTContext';
+import { getMQTTWebSocketUrl } from './constants/mapConfig';
 import MainLayout from './layouts/MainLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import About from './pages/About';
@@ -16,10 +17,13 @@ import QRGenerator from './pages/QRGenerator';
 import Health from './pages/Health';
 
 function App() {
+  // Get MQTT URL based on current environment
+  const mqttUrl = getMQTTWebSocketUrl();
+  
   return (
     <LanguageProvider>
       <AuthProvider>
-        <MQTTProvider>
+        <MQTTProvider brokerUrl={mqttUrl}>
           <Router>
             <Routes>
               <Route path="/login" element={<MainLayout><Login /></MainLayout>} />

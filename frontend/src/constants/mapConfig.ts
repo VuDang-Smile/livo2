@@ -32,6 +32,19 @@ export function getBackendUrl(): string {
 }
 
 /**
+ * Get MQTT WebSocket URL based on current hostname
+ */
+export function getMQTTWebSocketUrl(): string {
+  const hostname = window.location.hostname;
+  // If running on frontend.lidar.tm or lidar.tm, use mqtt.lidar.tm via nginx proxy
+  if (hostname === 'frontend.lidar.tm' || hostname === 'lidar.tm' || hostname.includes('lidar.tm')) {
+    return 'ws://mqtt.lidar.tm';
+  }
+  // For localhost or IP addresses, use same hostname with port 9001
+  return `ws://${hostname}:9001`;
+}
+
+/**
  * Build URL for map image based on upload_id and view
  */
 export function getMapImageUrl(uploadId: string, view: 'top' | 'side_x' | 'side_y'): string {

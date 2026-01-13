@@ -77,7 +77,8 @@ services:
     image: eclipse-mosquitto:latest
     container_name: livo-mqtt
     ports:
-      - "1883:1883"
+      - "1883:1883"  # MQTT TCP
+      - "9001:9001"  # MQTT WebSocket
     volumes:
       - ./backend/mosquitto.conf:/mosquitto/config/mosquitto.conf
     networks:
