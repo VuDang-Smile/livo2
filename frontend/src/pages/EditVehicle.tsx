@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useVehicleService } from '../hooks/api/useVehicleService';
-import { ApiVehicle } from '../types/vehicle';
 
 interface Vehicle {
   id: string;

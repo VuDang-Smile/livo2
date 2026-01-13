@@ -6,12 +6,13 @@ import { Edit, Trash2 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { VehiclePosition } from '../utils/vehicle2DHelper';
 import { getMockQRCodes } from '../mock/qrMockData';
-import { MapInfo, getMockMapInfo } from '../mock/mapInfoMockData';
+import { MapInfo } from '../mock/mapInfoMockData';
 import PCDMap from '../components/PCDMap';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { useMapImage } from '../hooks/useMapImage';
 import { MAP_2D_IMAGE_URL } from '../constants/mapConfig';
 import { getVehicle2DPosition } from '../utils/vehicle2DHelper';
+import { useMapInfo } from '../hooks/api/useMapInfo';
 
 interface QRCodeInfo {
   id: string;
@@ -93,16 +94,17 @@ const Vehicle: React.FC<{
     }
   });
 
-  const getVehicleColor = (status: string) => {
-    switch (status) {
+const getVehicleColor = (status?: string) => {
+  switch (status) {
       case 'online': return '#27ae60';
       case 'offline': return '#e74c3c';
       default: return '#95a5a6';
     }
   };
 
-  const getVehicleGeometry = (vehicleType: string) => {
-    switch (vehicleType) {
+const getVehicleGeometry = (vehicleType?: string) => {
+  const type = vehicleType || 'default';
+  switch (type) {
       case 'Xe đào hầm TBM':
         // Cylinder: bán kính 0.7m, chiều cao 1.4m (giảm 30% so với kích thước thực tế)
         return <cylinderGeometry args={[0.7, 0.7, 1.4, 8]} />;
@@ -323,7 +325,8 @@ const Image2DPreview: React.FC<{
       ctx.fillStyle = '#2c3e50';
       ctx.font = '12px Arial';
       ctx.textAlign = 'center';
-      ctx.fillText(vehicle.licensePlate, x, y - 15);
+      const label = vehicle.licensePlate || vehicle.id;
+      ctx.fillText(label, x, y - 15);
     });
     // Draw QR pins (existing + drafting)
     qrPins.forEach(pin => {
@@ -381,15 +384,11 @@ const Image2DPreview: React.FC<{
         <div className="space-y-1">
           <div className="flex items-center space-x-2">
             <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-            <span className="text-xs text-gray-600">{t('active_status')}</span>
-          </div>
-          <div className="flex items-center space-x-2">
-            <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-            <span className="text-xs text-gray-600">{t('maintenance_status')}</span>
+            <span className="text-xs text-gray-600">{t('online')}</span>
           </div>
           <div className="flex items-center space-x-2">
             <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-            <span className="text-xs text-gray-600">{t('inactive_status')}</span>
+            <span className="text-xs text-gray-600">{t('offline')}</span>
           </div>
         </div>
       </div>
@@ -417,9 +416,63 @@ const formatDateTime = (dateTimeStr: string): string => {
 };
 
 // Component hiển thị thông tin map (info card style)
-const MapInfoCard: React.FC<{ mapInfo: MapInfo }> = ({ mapInfo }) => {
+const MapInfoCard: React.FC<{ 
+  mapInfo: MapInfo | null; 
+  isLoading?: boolean; 
+  error?: string | null;
+}> = ({ mapInfo, isLoading = false, error = null }) => {
   const { t } = useLanguage();
 
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="bg-blue-50 border-l-4 border-blue-500 rounded-md p-4">
+        <div className="flex items-start">
+          <div className="flex-shrink-0">
+            <svg className="h-5 w-5 text-blue-500 mt-0.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </div>
+          <div className="ml-3 flex-1">
+            <h3 className="text-sm font-medium text-blue-800 mb-3">
+              {t('map_info_title')}
+            </h3>
+            <p className="text-xs text-blue-600">{t('loading') || 'Loading...'}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="bg-red-50 border-l-4 border-red-500 rounded-md p-4">
+        <div className="flex items-start">
+          <div className="flex-shrink-0">
+            <svg className="h-5 w-5 text-red-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div className="ml-3 flex-1">
+            <h3 className="text-sm font-medium text-red-800 mb-2">
+              {t('map_info_title')}
+            </h3>
+            <p className="text-xs text-red-700">
+              {t('error_loading_map_info') || 'Error loading map information'}: {error}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // No data state
+  if (!mapInfo) {
+    return null;
+  }
+
+  // Success state - display map info
   return (
     <div className="bg-blue-50 border-l-4 border-blue-500 rounded-md p-4">
       <div className="flex items-start">
@@ -477,7 +530,8 @@ const Upload: React.FC = () => {
   const mapCardRef = useRef<HTMLDivElement>(null);
   const [pcdUrl, setPcdUrl] = useState<string | null>(null);
   const pcdObjectUrlRef = useRef<string | null>(null);
-  const [mapInfo, setMapInfo] = useState<MapInfo | null>(null);
+  // Fetch map info from storage using hook
+  const { mapInfo, isLoading: isLoadingMapInfo, error: mapInfoError } = useMapInfo();
   // State quản lý các QR code đang được chỉnh sửa (từ previewQRCodes)
   const [editingExistingQRCodes, setEditingExistingQRCodes] = useState<Map<string, {
     id: string;
@@ -784,10 +838,8 @@ const Upload: React.FC = () => {
     }));
     setPreviewQRCodes(generatedQRCodes);
 
-    // Load map info
-    // Giữ nguyên mock map info vì chưa có API
-    const mapInfo = getMockMapInfo();
-    setMapInfo(mapInfo);
+    // Map info is now loaded automatically via useMapInfo hook
+    // No need to manually set it here
   }, []);
 
   const loadLastZip = useCallback(() => {
@@ -931,7 +983,11 @@ const Upload: React.FC = () => {
       </div>
 
       {/* Map Info Card */}
-      {mapInfo && <MapInfoCard mapInfo={mapInfo} />}
+      <MapInfoCard 
+        mapInfo={mapInfo} 
+        isLoading={isLoadingMapInfo} 
+        error={mapInfoError} 
+      />
 
       {/* Section 2 & 3: Preview PCD/Image + QR codes */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

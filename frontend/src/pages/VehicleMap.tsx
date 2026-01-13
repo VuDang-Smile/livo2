@@ -8,7 +8,6 @@ import MapView2D from '../components/vehicleMap/MapView2D';
 import { PCDClipControls } from '../components/PCDClipControls';
 import { PointCloudBounds } from '../components/PCDMap';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
-import { getMapMetadataUrl } from '../constants/mapConfig';
 import { MapMetadata } from '../types/mapMetadata';
 import { Vehicle } from '../types/vehicleMap2D';
 
@@ -20,8 +19,8 @@ const VehicleMap: React.FC = () => {
   const [showFilter, setShowFilter] = useState(false);
   const [viewMode, setViewMode] = useState<'2D' | '3D'>('3D');
   const [selectedView, setSelectedView] = useState<'top' | 'side_x' | 'side_y'>('top');
-  const [mapMetadata, setMapMetadata] = useState<MapMetadata | null>(null);
-  const [uploadId, setUploadId] = useState<string | null>(null);
+  const [mapMetadata] = useState<MapMetadata | null>(null);
+  const [uploadId] = useState<string | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
   const [filters, setFilters] = useState({
     status: 'all',
@@ -41,7 +40,7 @@ const VehicleMap: React.FC = () => {
   // Hooks for data
   const { vehicleMarkers: markers3D } = useVehicleMarkers3D();
   const { vehicleMarkers: markers2D, mapMetadata: poseMetadata } = useVehiclePose2D(selectedView);
-  const { filteredVehicles } = useVehicleMap2D();
+  useVehicleMap2D();
 
   // Map metadata is now loaded by useVehiclePose2D hook from local files
   // No need to load from API anymore
@@ -531,8 +530,8 @@ const VehicleMap: React.FC = () => {
                             <span className={`ml-1 ${
                               vehicle.status === 'online' ? 'text-green-600' : 'text-red-600'
                             }`}>
-                              {vehicle.status === 'online' ? (t('online') || t('active_status') || 'Online') :
-                               (t('offline') || t('inactive_status') || 'Offline')}
+                              {vehicle.status === 'online' ? (t('online') || 'Online') :
+                               (t('offline') || 'Offline')}
                             </span>
                           </p>
                           <p className="text-xs text-gray-500">
@@ -585,8 +584,8 @@ const VehicleMap: React.FC = () => {
                   <span className={`ml-1 ${
                     selectedVehicle.status === 'online' ? 'text-green-600' : 'text-red-600'
                   }`}>
-                    {selectedVehicle.status === 'online' ? (t('online') || t('active_status') || 'Online') :
-                     (t('offline') || t('inactive_status') || 'Offline')}
+                    {selectedVehicle.status === 'online' ? (t('online') || 'Online') :
+                     (t('offline') || 'Offline')}
                   </span>
                 </p>
               </div>
@@ -642,8 +641,8 @@ const VehicleMap: React.FC = () => {
                         />
                         <span className="ml-3 text-sm text-gray-700">
                           {status === 'all' ? t('all') :
-                           status === 'online' ? (t('online') || t('active_status') || 'Online') :
-                           (t('offline') || t('inactive_status') || 'Offline')}
+                           status === 'online' ? (t('online') || 'Online') :
+                           (t('offline') || 'Offline')}
                         </span>
                       </label>
                     ))}

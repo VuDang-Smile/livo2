@@ -16,6 +16,12 @@ export const MAP_FLOORPLAN_METADATA_URL =
   'http://storage.lidar.tm/floorplan_2d/merge_all_hba_metadata.json';
 
 /**
+ * URL metadata JSON cho thông tin bản đồ hiện tại (map info)
+ */
+export const MAP_INFO_URL =
+  'http://storage.lidar.tm/metadata_map.json';
+
+/**
  * URL ảnh floorplan 2D cho từng view
  */
 export const MAP_FLOORPLAN_IMAGE_URLS: Record<

@@ -3,7 +3,7 @@ import { useMQTT, PositionUpdateNotification } from '../../contexts/MQTTContext'
 import { transformPoseToPixel } from '../../utils/coordinateTransform';
 import { MapMetadata, Pose3D } from '../../types/mapMetadata';
 import { VehicleMarker2D } from '../../types/vehicle';
-import { UseVehicleMap2DResult } from '../../types/monitoring';
+import { UseVehiclePose2DResult } from '../../types/monitoring';
 import { MAP_FLOORPLAN_METADATA_URL } from '../../config/dataSources';
 
 /**
@@ -14,7 +14,7 @@ import { MAP_FLOORPLAN_METADATA_URL } from '../../config/dataSources';
  * 
  * @returns Vehicle markers, map metadata, loading state, and refresh function
  */
-export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): UseVehicleMap2DResult {
+export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): UseVehiclePose2DResult {
   const [mapMetadata, setMapMetadata] = useState<MapMetadata | null>(null);
   const [vehicleMarkers, setVehicleMarkers] = useState<VehicleMarker2D[]>([]);
   const [isLoading, setIsLoading] = useState(true);
