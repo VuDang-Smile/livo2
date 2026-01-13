@@ -5,7 +5,13 @@ import { ArrowHelper } from 'three';
 import * as THREE from 'three';
 import { VehicleMarker3D } from '../../types/vehicle';
 import PCDMap, { PointCloudBounds } from '../PCDMap';
-import { DEFAULT_PCD_URL } from '../../constants/pcdConfig';
+import {
+  DEFAULT_PCD_URL,
+  PCD_CAMERA_FOV,
+  PCD_CAMERA_POSITION,
+  PCD_ORBIT_MAX_DISTANCE,
+  PCD_ORBIT_MIN_DISTANCE,
+} from '../../constants/pcdConfig';
 
 interface MapView3DProps {
   vehicleMarkers: VehicleMarker3D[];
@@ -140,15 +146,15 @@ const MapView3D: React.FC<MapView3DProps> = ({
 
   return (
     <div className="w-full h-full relative">
-      <Canvas camera={{ position: [0, 50, 100], fov: 50 }}>
+      <Canvas camera={{ position: PCD_CAMERA_POSITION, fov: PCD_CAMERA_FOV }}>
         <OrbitControls 
           ref={controlsRef}
           enablePan={true}
           enableZoom={true}
           enableRotate={true}
           maxPolarAngle={Math.PI / 2}
-          minDistance={10}
-          maxDistance={200}
+          minDistance={PCD_ORBIT_MIN_DISTANCE}
+          maxDistance={PCD_ORBIT_MAX_DISTANCE}
         />
         
         <ambientLight intensity={0.4} />
