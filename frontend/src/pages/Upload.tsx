@@ -456,7 +456,7 @@ const MapInfoCard: React.FC<{
           </div>
           <div className="ml-3 flex-1">
             <h3 className="text-sm font-medium text-red-800 mb-2">
-              {t('map_info_title')}
+              {t('map_info_title')} 
             </h3>
             <p className="text-xs text-red-700">
               {t('error_loading_map_info') || 'Error loading map information'}: {error}
@@ -981,7 +981,6 @@ const Upload: React.FC = () => {
           )}
         </div>
       </div>
-
       {/* Map Info Card */}
       <MapInfoCard 
         mapInfo={mapInfo} 
@@ -998,7 +997,7 @@ const Upload: React.FC = () => {
             <h2 className="text-lg font-semibold text-gray-900 mb-3">
               {t('upload_image_preview_title')}
             </h2>
-            {previewVehicles.length > 0 ? (
+            {/* {previewVehicles.length > 0 ? ( */}
               <div
                 ref={mapCardRef}
                 className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative ${isPickingPosition ? 'ring-2 ring-blue-500 z-50' : ''}`}
@@ -1025,13 +1024,6 @@ const Upload: React.FC = () => {
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="h-96 border border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50">
-                <span className="text-gray-500 text-sm">
-                  {t('upload_image_preview_mock')}
-                </span>
-              </div>
-            )}
           </div>
 
           {/* PCD Preview 3D */}
@@ -1039,7 +1031,6 @@ const Upload: React.FC = () => {
             <h2 className="text-lg font-semibold text-gray-900 mb-3">
               {t('upload_pcd_preview_title')}
             </h2>
-            {previewVehicles.length > 0 ? (
               <div className="h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50">
                 <Canvas
                   camera={{ position: [0, 10, 20], fov: 60 }}
@@ -1048,13 +1039,7 @@ const Upload: React.FC = () => {
                   <PCDPreview3D vehicles={previewVehicles} pcdUrl={pcdUrl} />
                 </Canvas>
               </div>
-            ) : (
-              <div className="h-96 border border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50">
-                <span className="text-gray-500 text-sm">
-                  {t('upload_pcd_preview_mock')}
-                </span>
-              </div>
-            )}
+          
           </div>
         </div>
 
