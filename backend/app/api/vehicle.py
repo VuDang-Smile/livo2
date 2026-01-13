@@ -12,6 +12,8 @@ from app.models.vehicle import (
     VehicleRegisterRequest,
     VehicleRegisterResponse,
     VehicleStatusUpdateRequest,
+    VehicleUpdateRequest,
+    VehicleUpdateResponse,
     VehicleStatus,
     Pose,
     Position,
@@ -286,5 +288,66 @@ async def update_vehicle_status(
         raise
     except Exception as e:
         logger.error(f"Error updating vehicle status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{vehicle_id}", response_model=VehicleUpdateResponse)
+async def update_vehicle(
+    vehicle_id: str,
+    vehicle_request: VehicleUpdateRequest
+):
+    """
+    Cập nhật thông tin vehicle.
+    
+    Cho phép cập nhật: name, description, vehicle_type, status, metadata.
+    Không cho phép cập nhật vehicle_id (primary key).
+    """
+    try:
+        # Check if vehicle exists
+        vehicle = await database_service.get_vehicle(vehicle_id)
+        if not vehicle:
+            raise HTTPException(status_code=404, detail="Vehicle not found")
+        
+        # Prepare update data
+        update_data = {}
+        if vehicle_request.name is not None:
+            update_data["name"] = vehicle_request.name
+        if vehicle_request.description is not None:
+            update_data["description"] = vehicle_request.description
+        if vehicle_request.vehicle_type is not None:
+            update_data["vehicle_type"] = vehicle_request.vehicle_type
+        if vehicle_request.status is not None:
+            update_data["status"] = vehicle_request.status.value
+        if vehicle_request.metadata is not None:
+            update_data["metadata"] = vehicle_request.metadata
+        
+        # Check if there's anything to update
+        if not update_data:
+            return VehicleUpdateResponse(
+                success=True,
+                vehicle_id=vehicle_id,
+                message="No fields to update"
+            )
+        
+        # Update vehicle
+        success = await database_service.update_vehicle(vehicle_id, update_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update vehicle")
+        
+        # Publish MQTT event
+        mqtt_service.publish_map_event("vehicle.updated", {
+            "vehicle_id": vehicle_id,
+            "updated_fields": list(update_data.keys())
+        })
+        
+        return VehicleUpdateResponse(
+            success=True,
+            vehicle_id=vehicle_id,
+            message="Vehicle updated successfully"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating vehicle: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -98,3 +98,19 @@ class VehicleStatusUpdateRequest(BaseModel):
     """Request model for updating vehicle status."""
     status: VehicleStatus = Field(..., description="Vehicle status: online or offline")
 
+
+class VehicleUpdateRequest(BaseModel):
+    """Request model for updating vehicle information."""
+    name: Optional[str] = Field(None, description="Vehicle name")
+    description: Optional[str] = Field(None, description="Vehicle description")
+    vehicle_type: Optional[str] = Field(None, description="Vehicle type (e.g., robot, drone, car)")
+    status: Optional[VehicleStatus] = Field(None, description="Vehicle status: online or offline")
+    metadata: Optional[dict] = Field(None, description="Additional metadata")
+
+
+class VehicleUpdateResponse(BaseModel):
+    """Response model for vehicle update."""
+    success: bool
+    vehicle_id: str
+    message: str
+
