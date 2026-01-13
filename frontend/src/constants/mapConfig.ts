@@ -1,9 +1,14 @@
+import {
+  MAP_FLOORPLAN_IMAGE_URLS,
+  MAP_FLOORPLAN_METADATA_URL,
+} from '../config/dataSources';
 /**
  * Configuration for 2D map
  * Includes URL of map image and world bounds for coordinate mapping
  */
 
-export const MAP_2D_IMAGE_URL = '/2Dmap.png';
+// Ảnh 2D mặc định dùng view top từ floorplan thực tế
+export const MAP_2D_IMAGE_URL = MAP_FLOORPLAN_IMAGE_URLS.top;
 
 /**
  * World bounds for mapping coordinates from 3D world space to 2D canvas
@@ -46,30 +51,23 @@ export function getMQTTWebSocketUrl(): string {
 
 /**
  * Build URL for map image based on view
- * Uses local public folder for testing (uploadId parameter is ignored)
+ * Sử dụng URL thực tế từ storage (uploadId hiện tại không dùng)
  */
 export function getMapImageUrl(uploadId: string | undefined, view: 'top' | 'side_x' | 'side_y'): string {
-  // Use local public folder for testing - uploadId is not needed
-  const imageMap: Record<'top' | 'side_x' | 'side_y', string> = {
-    top: '/floorplan_2d/merge_all_hba_top.png',
-    side_x: '/floorplan_2d/merge_all_hba_side_x.png',
-    side_y: '/floorplan_2d/merge_all_hba_side_y.png'
-  };
-  return imageMap[view];
+  return MAP_FLOORPLAN_IMAGE_URLS[view];
 }
 
 /**
  * Build URL for map metadata JSON
- * Uses local public folder for testing
+ * Sử dụng URL thực tế từ storage
  */
 export function getMapMetadataUrl(uploadId: string): string {
-  // Use local public folder for testing
-  return '/floorplan_2d/merge_all_hba_metadata.json';
+  return MAP_FLOORPLAN_METADATA_URL;
 }
 
 /**
  * Get current map from backend
- * @deprecated API calls removed - using local files from /floorplan_2d/ instead
+ * @deprecated hiện tại sử dụng metadata/floorplan từ storage.lidar.tm
  */
 // export async function getCurrentMap(): Promise<any> {
 //   const backendUrl = getBackendUrl();

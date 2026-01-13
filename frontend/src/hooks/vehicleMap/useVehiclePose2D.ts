@@ -3,7 +3,8 @@ import { useMQTT, PositionUpdateNotification } from '../../contexts/MQTTContext'
 import { transformPoseToPixel } from '../../utils/coordinateTransform';
 import { MapMetadata, Pose3D } from '../../types/mapMetadata';
 import { VehicleMarker2D } from '../../types/vehicle';
-import { UseVehiclePose2DResult } from '../../types/monitoring';
+import { UseVehicleMap2DResult } from '../../types/monitoring';
+import { MAP_FLOORPLAN_METADATA_URL } from '../../config/dataSources';
 
 /**
  * Hook to track vehicle positions on 2D floorplan
@@ -13,7 +14,7 @@ import { UseVehiclePose2DResult } from '../../types/monitoring';
  * 
  * @returns Vehicle markers, map metadata, loading state, and refresh function
  */
-export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): UseVehiclePose2DResult {
+export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): UseVehicleMap2DResult {
   const [mapMetadata, setMapMetadata] = useState<MapMetadata | null>(null);
   const [vehicleMarkers, setVehicleMarkers] = useState<VehicleMarker2D[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -22,17 +23,15 @@ export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): Use
   
   const { lastPositionUpdate, lastVehicleStatus, isConnected } = useMQTT();
   
-  // Fetch map metadata from local public folder
+  // Fetch map metadata từ storage thực tế
   const fetchMetadata = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
       
-      console.log('🗺️ [useVehiclePose2D] Loading map metadata from public folder...');
+      console.log('🗺️ [useVehiclePose2D] Loading map metadata from storage:', MAP_FLOORPLAN_METADATA_URL);
       
-      // Load metadata from local public folder
-      const metadataUrl = '/floorplan_2d/merge_all_hba_metadata.json';
-      const response = await fetch(metadataUrl);
+      const response = await fetch(MAP_FLOORPLAN_METADATA_URL);
       
       if (!response.ok) {
         throw new Error(`Failed to load metadata: ${response.statusText}`);

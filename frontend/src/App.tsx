@@ -9,7 +9,6 @@ import ProtectedRoute from './components/ProtectedRoute';
 import About from './pages/About';
 import Login from './pages/Login';
 import Vehicles from './pages/Vehicles';
-import CreateVehicle from './pages/CreateVehicle';
 import EditVehicle from './pages/EditVehicle';
 import VehicleMap from './pages/VehicleMap';
 import Upload from './pages/Upload';
@@ -30,7 +29,6 @@ function App() {
               <Route path="/" element={<MainLayout><About /></MainLayout>} />
               <Route path="/about" element={<MainLayout><About /></MainLayout>} />
               <Route path="/vehicles" element={<MainLayout><ProtectedRoute><Vehicles /></ProtectedRoute></MainLayout>} />
-              <Route path="/vehicles/create" element={<MainLayout><ProtectedRoute><CreateVehicle /></ProtectedRoute></MainLayout>} />
               <Route path="/vehicles/edit/:id" element={<MainLayout><ProtectedRoute><EditVehicle /></ProtectedRoute></MainLayout>} />
               <Route path="/vehicle-map" element={<MainLayout><VehicleMap /></MainLayout>} />
               <Route path="/map-upload" element={<MainLayout><ProtectedRoute><Upload /></ProtectedRoute></MainLayout>} />

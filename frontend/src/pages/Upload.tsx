@@ -4,7 +4,7 @@ import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { Edit, Trash2 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { VehiclePosition, getMockVehiclePositions } from '../mock/vehicleMockData';
+import { VehiclePosition } from '../utils/vehicle2DHelper';
 import { getMockQRCodes } from '../mock/qrMockData';
 import { MapInfo, getMockMapInfo } from '../mock/mapInfoMockData';
 import PCDMap from '../components/PCDMap';
@@ -95,9 +95,8 @@ const Vehicle: React.FC<{
 
   const getVehicleColor = (status: string) => {
     switch (status) {
-      case 'active': return '#27ae60';
-      case 'maintenance': return '#f39c12';
-      case 'inactive': return '#e74c3c';
+      case 'online': return '#27ae60';
+      case 'offline': return '#e74c3c';
       default: return '#95a5a6';
     }
   };
@@ -135,7 +134,7 @@ const Vehicle: React.FC<{
       </mesh>
       
       {/* Đèn phát sáng cho phương tiện đang hoạt động */}
-      {vehicle.status === 'active' && (
+      {vehicle.status === 'online' && (
         <pointLight 
           position={[0, 2, 0]} 
           intensity={0.3} 
@@ -306,9 +305,8 @@ const Image2DPreview: React.FC<{
       // Vehicle color based on status
       let color = '#95a5a6';
       switch (vehicle.status) {
-        case 'active': color = '#27ae60'; break;
-        case 'maintenance': color = '#f39c12'; break;
-        case 'inactive': color = '#e74c3c'; break;
+        case 'online': color = '#27ae60'; break;
+        case 'offline': color = '#e74c3c'; break;
       }
 
       // Draw vehicle circle
@@ -768,15 +766,16 @@ const Upload: React.FC = () => {
   };
 
   const handleLastZipLoad = useCallback(() => {
-    // Sử dụng getMockVehiclePositions trực tiếp
-    const vehicles: VehiclePosition[] = getMockVehiclePositions(t);
-    setPreviewVehicles(vehicles);
+    // Loại bỏ mock vehicles - preview vehicles sẽ được load từ API nếu cần
+    // Hiện tại để empty array vì vehicles sẽ được hiển thị từ real-time MQTT data
+    setPreviewVehicles([]);
 
     // Tạm thời dùng file PCD tĩnh trong public cho demo
     // Sau này có thể thay bằng PCD lấy từ ZIP hoặc backend
     setPcdUrl(DEFAULT_PCD_URL);
 
     // Lấy mock QR code riêng (không phụ thuộc vị trí phương tiện)
+    // Giữ nguyên mock QR codes vì chưa có API
     const generatedQRCodes: QRCodeInfo[] = getMockQRCodes().map(qr => ({
       id: qr.id,
       code: qr.code,
@@ -786,9 +785,10 @@ const Upload: React.FC = () => {
     setPreviewQRCodes(generatedQRCodes);
 
     // Load map info
+    // Giữ nguyên mock map info vì chưa có API
     const mapInfo = getMockMapInfo();
     setMapInfo(mapInfo);
-  }, [t]);
+  }, []);
 
   const loadLastZip = useCallback(() => {
     if (isLoadingLastZip) return; // Tránh race/đúp click

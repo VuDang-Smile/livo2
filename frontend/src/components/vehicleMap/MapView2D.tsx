@@ -26,14 +26,15 @@ const MapView2D: React.FC<MapView2DProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hoveredVehicle, setHoveredVehicle] = useState<string | null>(null);
   
-  // Determine image URL - use floorplan_2d images when metadata is available
+  // Determine image URL - dùng floorplan từ storage khi đã có metadata
   const imageUrl = useMemo(() => {
     if (mapMetadata) {
-      // Use floorplan_2d images from public folder
-      return getMapImageUrl('', view); // uploadId not needed for local files
+      // Sử dụng URL thực tế, uploadId hiện tại chưa dùng
+      return getMapImageUrl(uploadId || undefined, view);
     }
-    return '/2Dmap.png'; // Fallback to default only if no metadata
-  }, [view, mapMetadata]);
+    // Fallback: dùng ảnh 2D mặc định (view top) khi chưa có metadata
+    return getMapImageUrl(undefined, 'top');
+  }, [view, mapMetadata, uploadId]);
   
   // Load map image
   const { image: mapImage, error: imageError } = useMapImage(imageUrl);

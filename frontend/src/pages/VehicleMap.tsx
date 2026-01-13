@@ -115,7 +115,7 @@ const VehicleMap: React.FC = () => {
       return markers2D.map(marker => ({
         id: marker.id,
         name: marker.label || marker.id,
-        status: 'active' as const, // Default status for MQTT vehicles
+        status: 'online' as const, // Default status for MQTT vehicles
         position: { 
           x: marker.position[0], 
           y: marker.position[1], 
@@ -128,7 +128,7 @@ const VehicleMap: React.FC = () => {
       return markers3D.map(marker => ({
         id: marker.id,
         name: marker.id,
-        status: marker.status || 'active' as const,
+        status: marker.status || 'online' as const,
         position: { x: marker.position[0], y: marker.position[1], z: marker.position[2] },
         timestamp: new Date().toISOString(),
       }));
@@ -294,7 +294,7 @@ const VehicleMap: React.FC = () => {
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">{t('active_vehicles_count')}</p>
               <p className="text-2xl font-bold text-gray-900">
-                {displayVehicles.filter(v => v.status === 'active').length}
+                {displayVehicles.filter(v => v.status === 'online').length}
               </p>
             </div>
           </div>
@@ -306,9 +306,9 @@ const VehicleMap: React.FC = () => {
               <div className="w-4 h-4 bg-yellow-500 rounded-full"></div>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">{t('maintenance_vehicles_count')}</p>
+              <p className="text-sm font-medium text-gray-600">{t('offline_vehicles_count') || t('offline')}</p>
               <p className="text-2xl font-bold text-gray-900">
-                {displayVehicles.filter(v => v.status === 'maintenance').length}
+                {displayVehicles.filter(v => v.status === 'offline').length}
               </p>
             </div>
           </div>
@@ -320,10 +320,8 @@ const VehicleMap: React.FC = () => {
               <div className="w-4 h-4 bg-red-500 rounded-full"></div>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">{t('inactive_vehicles_count')}</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {displayVehicles.filter(v => v.status === 'inactive').length}
-              </p>
+              <p className="text-sm font-medium text-gray-600">{t('total_vehicles_count')}</p>
+              <p className="text-2xl font-bold text-gray-900">{displayVehicles.length}</p>
             </div>
           </div>
         </div>
@@ -518,9 +516,7 @@ const VehicleMap: React.FC = () => {
                         <div className="flex items-center space-x-2 mb-2">
                           <div 
                             className={`w-3 h-3 rounded-full ${
-                              vehicle.status === 'active' ? 'bg-green-500' :
-                              vehicle.status === 'maintenance' ? 'bg-yellow-500' :
-                              'bg-red-500'
+                              vehicle.status === 'online' ? 'bg-green-500' : 'bg-red-500'
                             }`}
                           />
                           <h4 className="font-medium text-gray-900">{vehicle.name}</h4>
@@ -533,13 +529,10 @@ const VehicleMap: React.FC = () => {
                           </p>
                           <p><span className="font-medium">{t('status_label_short')}</span> 
                             <span className={`ml-1 ${
-                              vehicle.status === 'active' ? 'text-green-600' :
-                              vehicle.status === 'maintenance' ? 'text-yellow-600' :
-                              'text-red-600'
+                              vehicle.status === 'online' ? 'text-green-600' : 'text-red-600'
                             }`}>
-                              {vehicle.status === 'active' ? t('active_status') :
-                               vehicle.status === 'maintenance' ? t('maintenance_status') :
-                               t('inactive_status')}
+                              {vehicle.status === 'online' ? (t('online') || t('active_status') || 'Online') :
+                               (t('offline') || t('inactive_status') || 'Offline')}
                             </span>
                           </p>
                           <p className="text-xs text-gray-500">
@@ -590,13 +583,10 @@ const VehicleMap: React.FC = () => {
                 </p>
                 <p className="text-sm"><span className="font-medium">{t('status_label')}</span> 
                   <span className={`ml-1 ${
-                    selectedVehicle.status === 'active' ? 'text-green-600' :
-                    selectedVehicle.status === 'maintenance' ? 'text-yellow-600' :
-                    'text-red-600'
+                    selectedVehicle.status === 'online' ? 'text-green-600' : 'text-red-600'
                   }`}>
-                    {selectedVehicle.status === 'active' ? t('active_status') :
-                     selectedVehicle.status === 'maintenance' ? t('maintenance_status') :
-                     t('inactive_status')}
+                    {selectedVehicle.status === 'online' ? (t('online') || t('active_status') || 'Online') :
+                     (t('offline') || t('inactive_status') || 'Offline')}
                   </span>
                 </p>
               </div>
@@ -652,9 +642,8 @@ const VehicleMap: React.FC = () => {
                         />
                         <span className="ml-3 text-sm text-gray-700">
                           {status === 'all' ? t('all') :
-                           status === 'active' ? t('active_status') :
-                           status === 'maintenance' ? t('maintenance_status') :
-                           t('inactive_status')}
+                           status === 'online' ? (t('online') || t('active_status') || 'Online') :
+                           (t('offline') || t('inactive_status') || 'Offline')}
                         </span>
                       </label>
                     ))}

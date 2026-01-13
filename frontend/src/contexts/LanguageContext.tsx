@@ -15,7 +15,6 @@ const translations = {
   vi: {
     'language': 'Ngôn ngữ',
     'vehicles': 'Phương tiện',
-    'create_vehicle': 'Tạo xe mới',
     'about': 'Giới thiệu',
     'map': 'Theo dõi',
     'user': 'Người dùng',
@@ -24,7 +23,6 @@ const translations = {
     // Vehicles page translations
     'vehicle_list': 'Danh sách phương tiện',
     'vehicle_management': 'Quản lý các xe thi công đào hầm',
-    'create_new_vehicle': 'Tạo phương tiện mới',
     'total_vehicles': 'Tổng phương tiện',
     'active_vehicles': 'Đang hoạt động',
     'maintenance': 'Bảo trì',
@@ -36,10 +34,10 @@ const translations = {
     'status': 'Trạng thái',
     'actions': 'Thao tác',
     'active': 'Hoạt động',
-    'confirm_delete': 'Bạn có chắc chắn muốn xóa phương tiện này?',
-    // CreateVehicle page translations
-    'create_vehicle_title': 'Tạo phương tiện mới',
-    'add_new_vehicle': 'Thêm phương tiện thi công mới vào hệ thống',
+    'online': 'Trực tuyến',
+    'offline': 'Ngoại tuyến',
+    'offline_vehicles': 'Phương tiện ngoại tuyến',
+    'offline_vehicles_count': 'Ngoại tuyến',
     'license_plate_required': 'Biển số máy là bắt buộc',
     'driver_required': 'Tên tài xế là bắt buộc',
     'vehicle_type_required': 'Loại xe là bắt buộc',
@@ -47,8 +45,6 @@ const translations = {
     'select_vehicle_type': 'Chọn loại xe',
     'select_mission': 'Chọn nhiệm vụ',
     'cancel': 'Hủy',
-    'create_vehicle_button': 'Tạo phương tiện',
-    'create_success': 'Tạo phương tiện thành công!',
     'inactive': 'Không hoạt động',
     'driver_placeholder': 'Họ và tên tài xế',
     // Vehicle types
@@ -269,7 +265,6 @@ const translations = {
   ja: {
     'language': '言語',
     'vehicles': '車両',
-    'create_vehicle': '新規車両作成',
     'about': '概要',
     'map': '追跡',
     'user': 'ユーザー',
@@ -278,7 +273,6 @@ const translations = {
     // Vehicles page translations
     'vehicle_list': '車両一覧',
     'vehicle_management': 'トンネル掘削工事車両の管理',
-    'create_new_vehicle': '新規車両作成',
     'total_vehicles': '総車両数',
     'active_vehicles': '稼働中',
     'maintenance': 'メンテナンス',
@@ -291,9 +285,6 @@ const translations = {
     'actions': '操作',
     'active': '稼働中',
     'confirm_delete': 'この車両を削除してもよろしいですか？',
-    // CreateVehicle page translations
-    'create_vehicle_title': '新規車両作成',
-    'add_new_vehicle': '新しい建設車両をシステムに追加',
     'license_plate_required': 'ナンバープレートは必須です',
     'driver_required': '運転手名は必須です',
     'vehicle_type_required': '車両タイプは必須です',
@@ -301,8 +292,6 @@ const translations = {
     'select_vehicle_type': '車両タイプを選択',
     'select_mission': '任務を選択',
     'cancel': 'キャンセル',
-    'create_vehicle_button': '車両作成',
-    'create_success': '車両の作成が完了しました！',
     'inactive': '非稼働',
     'driver_placeholder': '運転手名',
     // Vehicle types
@@ -337,6 +326,10 @@ const translations = {
     'total_vehicles_count': '総車両数',
     'legend': '凡例',
     'active_status': '稼働中',
+    'online': 'オンライン',
+    'offline': 'オフライン',
+    'offline_vehicles': 'オフライン車両',
+    'offline_vehicles_count': 'オフライン',
     'maintenance_status': 'メンテナンス',
     'inactive_status': '非稼働',
     'vehicle_info': '車両情報',
