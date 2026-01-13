@@ -104,6 +104,8 @@
         "bag_missing_topics": "Bag file is missing required topics: {topics}\n\nThis may cause the mapping process to crash."
     },
     "button": {
+        "cancel": "Cancel",
+        "regiter": "Regiter",
         "start_mapping": "🚀 START MAPPING",
         "stop_process": "■ STOP",
         "upload_to_server": "☁ UPLOAD TO SERVER",
@@ -113,12 +115,11 @@
         "stop": "Stop",
         "clear_log": "Clear Log",
         "launch_rviz2": "Launch RViz2",
-        "start_mapping": "🚀 START MAPPING",
-        "stop_process": "■ STOP",
-        "upload_to_server": "☁ UPLOAD TO SERVER",
-        "clear_qr_codes": "Clear QR Codes",
         "start_moving": "▶ START MOVING",
-        "stop_movement": "■ STOP MOVEMENT"
+        "stop_movement": "■ STOP MOVEMENT",
+        "stop_recording": "Stop recording",
+        "start_recording": "Start recording"
+        
     },
     "status": {
         "ready": "Ready",
