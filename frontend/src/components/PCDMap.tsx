@@ -3,6 +3,7 @@ import { useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { PCDLoader } from 'three/examples/jsm/loaders/PCDLoader';
 import { PCDClippingMaterial } from './PCDClippingMaterial';
+import { PCD_POINT_SIZE, PCD_POINT_SIZE_ATTENUATION } from '../constants/pcdConfig';
 
 type Vec3 = [number, number, number];
 
@@ -149,8 +150,8 @@ export const PCDMap: React.FC<PCDMapProps> = ({
           clipYMax={clipYMax}
           clipZMin={clipZMin}
           clipZMax={clipZMax}
-          pointSize={0.05}
-          sizeAttenuation={true}
+          pointSize={PCD_POINT_SIZE}
+          sizeAttenuation={PCD_POINT_SIZE_ATTENUATION}
         />
       </points>
     </group>
