@@ -24,7 +24,6 @@ def is_registered(mac):
         # Thực hiện gọi GET request tương đương với lệnh curl của bạn
         response = requests.get(url, headers=headers, timeout=5)
         data = response.json()
-        
 
         # Kiểm tra phản hồi từ server
         if response.text and data.get("vehicle_id"):

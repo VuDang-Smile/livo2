@@ -29,6 +29,8 @@ fi
 echo "------------------------------------------------"
 echo "Đang khởi động giao diện tại: $GUI_DIR"
 cd "$GUI_DIR"
+export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
+
 
 # Kiểm tra file python có tồn tại không trước khi chạy
 if [ -f "main_registration.py" ]; then
