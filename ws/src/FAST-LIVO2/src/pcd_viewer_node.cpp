@@ -51,6 +51,13 @@ public:
         RCLCPP_ERROR(this->get_logger(), "Tried: %s and %s", raw_file.c_str(), downsampled_file.c_str());
         return;
       }
+    } else {
+      // Check if the provided file exists
+      if (!file_exists(pcd_file)) {
+        RCLCPP_ERROR(this->get_logger(), "PCD file does not exist: %s", pcd_file.c_str());
+        return;
+      }
+      RCLCPP_INFO(this->get_logger(), "Using provided PCD file: %s", pcd_file.c_str());
     }
 
     // Load PCD file
@@ -98,6 +105,7 @@ public:
 
     if (!loaded) {
       RCLCPP_ERROR(this->get_logger(), "Failed to load PCD file: %s", pcd_file.c_str());
+      RCLCPP_ERROR(this->get_logger(), "Tried loading as PointXYZRGB, PointXYZI, and PointXYZ - all failed");
       return;
     }
 
@@ -153,9 +161,15 @@ private:
     msg.header.frame_id = frame_id_;
     publisher_->publish(msg);
     
+    RCLCPP_DEBUG(this->get_logger(), "Published point cloud to %s (frame: %s, points: %zu)", 
+                 publisher_->get_topic_name(), frame_id_.c_str(), 
+                 cloud_rgb_ ? cloud_rgb_->points.size() : cloud_intensity_->points.size());
+    
     if (!loop_ && publish_count_++ > 0) {
       RCLCPP_INFO(this->get_logger(), "Published point cloud once. Set loop=true to publish continuously.");
-      timer_->cancel();
+      if (timer_) {
+        timer_->cancel();
+      }
     }
   }
 
