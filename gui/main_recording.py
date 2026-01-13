@@ -74,6 +74,7 @@ class LivoxApp:
         self.ui_queue = queue.Queue()
         
         self._setup_layout()
+        
         # Start queue processor để xử lý UI updates từ threads
         self._process_ui_queue()
         
@@ -81,21 +82,6 @@ class LivoxApp:
         self.theta_driver = ThetaDriver(log_callback=self.log, update_ui_theta_connected = self.update_ui_theta_connected, canvas = self.canvas)
         self.livox_tab = LivoxTab(log_callback=self.log, update_label_livo_connected=self.update_label_livo_connected)
         self.mid360_ip_var = tk.StringVar(value="192.168.1.109")
-        self.check_devices()
-    
-    def check_devices(self):
-        self.log(translator.get("log.starting_livox_theta_drivers"))
-        # Kiểm tra kết nối MID360
-        try:
-            self.check_mid360_connection()
-        except Exception as e:
-            self.log(f"⚠️  Lỗi khi kiểm tra MID360: {e}")
-        
-        # Khởi chạy các driver theo thứ tự với error handling riêng
-        try:
-            self.theta_driver.check_theta_usb_connection(self.check_theta_usb_callback)
-        except Exception as e:
-            self.log(f"⚠️  Lỗi khi kiểm tra Theta USB: {e}")
 
     def update_label_livo_connected(self, is_running):
         if is_running:
@@ -827,7 +813,19 @@ class LivoxApp:
                 # Chờ đủ lâu để các process cũ giải phóng port và resources
                 time.sleep(1.5)
                 
+                self.log(translator.get("log.starting_livox_theta_drivers"))
                 
+                # Kiểm tra kết nối MID360
+                try:
+                    self.check_mid360_connection()
+                except Exception as e:
+                    self.log(f"⚠️  Lỗi khi kiểm tra MID360: {e}")
+                
+                # Khởi chạy các driver theo thứ tự với error handling riêng
+                try:
+                    self.theta_driver.check_theta_usb_connection(self.check_theta_usb_callback)
+                except Exception as e:
+                    self.log(f"⚠️  Lỗi khi kiểm tra Theta USB: {e}")
                 
                 try:
                     self.theta_driver.launch_theta_driver()
