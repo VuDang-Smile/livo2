@@ -6,10 +6,12 @@ from pathlib import Path
 import sys
 import subprocess
 import os
+import io
 import threading
 import signal
 import zipfile
 import json
+import uuid
 # Import numpy trước (an toàn hơn)
 import numpy as np
 
@@ -631,6 +633,34 @@ class BagMappingInterface:
         self.browse_btn = tk.Button(path_frame, text=self.translator.get('button.browse', 'Browse'), command=self.browse_file)
         self.browse_btn.pack(side=tk.LEFT, padx=5)
 
+        # Map metadata inputs (Map Name & Vehicle Info)
+        meta_frame = tk.Frame(self.control_card)
+        meta_frame.pack(fill=tk.X, pady=(5, 5))
+
+        # Map Name
+        map_name_label = tk.Label(meta_frame, text=self.translator.get('label.map_name', 'Map Name:'))
+        map_name_label.grid(row=0, column=0, sticky="w", padx=(0, 5), pady=2)
+        self.map_name_var = tk.StringVar()
+        map_name_entry = tk.Entry(meta_frame, textvariable=self.map_name_var)
+        map_name_entry.grid(row=0, column=1, sticky="we", padx=(0, 5), pady=2)
+
+        # Vehicle info (Name - ID)
+        vehicle_label = tk.Label(meta_frame, text=self.translator.get('label.vehicle_info', 'Vehicle (Name - ID):'))
+        vehicle_label.grid(row=1, column=0, sticky="w", padx=(0, 5), pady=2)
+        self.vehicle_info_var = tk.StringVar()
+        vehicle_entry = tk.Entry(meta_frame, textvariable=self.vehicle_info_var)
+        vehicle_entry.grid(row=1, column=1, sticky="we", padx=(0, 5), pady=2)
+
+        # Auto-fill vehicle_id từ MAC local và đặt read-only nếu có
+        self.local_vehicle_id = self._get_local_mac_no_colon()
+        if self.local_vehicle_id:
+            self.vehicle_info_var.set(self.local_vehicle_id)
+            vehicle_entry.config(state="readonly")
+        else:
+            self.vehicle_info_var.set(self.translator.get('label.vehicle_mac_not_found', 'MAC not found'))
+
+        meta_frame.columnconfigure(1, weight=1)
+
         # Control Buttons
         btn_row = tk.Frame(self.control_card)
         btn_row.pack(fill=tk.X, pady=5)
@@ -1079,6 +1109,17 @@ class BagMappingInterface:
         # Tìm các file PCD (bỏ qua file merged nếu có)
         pcd_files = [f for f in pcd_dir.glob("*.pcd") if f.name not in ["merged_all.pcd", "merge_all_hba.pcd"]]
         return len(pcd_files) > 0
+
+    def _get_local_mac_no_colon(self) -> str:
+        """Lấy địa chỉ MAC (không dấu :) từ máy cục bộ."""
+        try:
+            mac_int = uuid.getnode()
+            if mac_int == 0:
+                return ""
+            return f"{mac_int:012x}"
+        except Exception as e:
+            self.add_log(f"⚠️ Cannot read local MAC: {e}")
+            return ""
     
     def start_upload(self):
         """Chạy full pipeline: Merge -> HBA -> SC -> Floorplan -> Upload"""
@@ -1092,12 +1133,41 @@ class BagMappingInterface:
                     .replace('{path}', str(pcd_dir))
             )
             return
-        
+
+        map_name = (self.map_name_var.get() or "").strip()
+        vehicle_id = self._get_local_mac_no_colon()
+        if vehicle_id:
+            # Cập nhật UI hiển thị để người dùng biết ID được tự lấy
+            self.vehicle_info_var.set(vehicle_id)
+
+        if not map_name:
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                self.translator.get('dialog.map_name_required', 'Please enter Map Name before uploading.')
+            )
+            return
+
+        if not vehicle_id:
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                self.translator.get('dialog.vehicle_id_required', 'Cannot detect local MAC for Vehicle ID. Please check network interfaces.')
+            )
+            return
+
+        # Lưu lại để truyền vào thread upload
+        self.current_map_name = map_name
+        self.current_vehicle_id = vehicle_id
+        self.current_vehicle_input = vehicle_id
+
         self.btn_upload.config(state=tk.DISABLED)
         self.add_log(self.translator.get('log.pipeline_start', '🚀 Starting map processing and upload pipeline...'))
-        threading.Thread(target=self._run_upload_pipeline_thread, daemon=True).start()
+        threading.Thread(
+            target=self._run_upload_pipeline_thread,
+            args=(map_name, vehicle_id),
+            daemon=True
+        ).start()
     
-    def _run_upload_pipeline_thread(self):
+    def _run_upload_pipeline_thread(self, map_name: str, vehicle_id: str):
         """Thread thực hiện full pipeline và upload"""
         start_time = time.time()
         
@@ -1160,7 +1230,7 @@ class BagMappingInterface:
             
             # 7. Upload to backend
             self.add_log(self.translator.get('log.step_upload', 'Step 7/7: Uploading to backend...'))
-            upload_success, upload_info = self._upload_map_to_backend(zip_path)
+            upload_success, upload_info = self._upload_map_to_backend(zip_path, map_name, vehicle_id)
             if upload_success:
                 if upload_info:
                     upload_msg = self.translator.get('log.upload_backend_success', '✅ Backend upload successful (upload_id: {upload_id})').replace('{upload_id}', str(upload_info))
@@ -2803,7 +2873,7 @@ class BagMappingInterface:
             self.add_log(f"   Details: {traceback.format_exc()}")
             return None
     
-    def _upload_map_to_backend(self, zip_path: Path):
+    def _upload_map_to_backend(self, zip_path: Path, map_name: str, vehicle_id: str):
         """Upload file zip map lên backend với retry mechanism và error handling tốt hơn."""
         if not REQUESTS_AVAILABLE:
             msg = self.translator.get('log.upload_backend_requests_missing', 'Missing requests library. Install with: pip install requests')
@@ -2843,6 +2913,7 @@ class BagMappingInterface:
         
         upload_url = f"{self.backend_base_url.rstrip('/')}/api/v1/maps/upload"
         self.add_log(self.translator.get('log.upload_endpoint', '🌐 Endpoint: {url}').replace('{url}', upload_url))
+        self.add_log(f"📝 Metadata: map_name='{map_name}', vehicle_id='{vehicle_id}'")
         
         # Tính toán timeout động: ít nhất 60s, thêm 30s cho mỗi 10MB
         base_timeout = 60
@@ -2894,6 +2965,10 @@ class BagMappingInterface:
                         # Upload với timeout và streaming
                         response = session.post(
                             upload_url,
+                            data={
+                                "map_name": map_name,
+                                "vehicle_id": vehicle_id
+                            },
                             files=files,
                             timeout=(10, upload_timeout),  # (connect timeout, read timeout)
                             stream=False  # False để đảm bảo upload hoàn tất

@@ -200,6 +200,34 @@ class DatabaseService:
             logger.error(f"Error updating vehicle status: {e}")
             return False
     
+    async def update_vehicle(self, vehicle_id: str, updates: Dict[str, Any]) -> bool:
+        """Update vehicle information."""
+        try:
+            # Prepare update data, excluding vehicle_id and created_at
+            update_data = {}
+            if "name" in updates:
+                update_data["name"] = updates["name"]
+            if "description" in updates:
+                update_data["description"] = updates["description"]
+            if "vehicle_type" in updates:
+                update_data["vehicle_type"] = updates["vehicle_type"]
+            if "status" in updates:
+                update_data["status"] = updates["status"]
+            if "metadata" in updates:
+                update_data["metadata"] = updates["metadata"]
+            
+            # Always update updated_at
+            update_data["updated_at"] = datetime.utcnow()
+            
+            result = await self.vehicles_collection.update_one(
+                {"vehicle_id": vehicle_id},
+                {"$set": update_data}
+            )
+            return result.modified_count > 0 or result.matched_count > 0
+        except Exception as e:
+            logger.error(f"Error updating vehicle: {e}")
+            return False
+    
     async def save_pose_history(self, vehicle_id: str, pose_data: Dict[str, Any]) -> Optional[str]:
         """Save pose to history collection."""
         try:
