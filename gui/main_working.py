@@ -759,23 +759,29 @@ class WorkerInterface:
             self.is_livox_driver_running = True
             threading.Thread(target=self.monitor_livox_driver_output, daemon=True).start()
             
-            # Đợi một chút để driver khởi động
-            time.sleep(3)
+            # Đợi một chút để driver khởi động (giống như recorder)
+            time.sleep(2.0)
             
-            # Kiểm tra lại topics
-            if self.check_livox_driver_running():
-                self.log(self.translator.get('log.livox_driver_started', '✅ Livox driver đã khởi động thành công'))
-                return True
-            else:
-                self.log(self.translator.get('log.livox_driver_topics_not_found', '⚠️ Driver đã khởi động nhưng topics chưa xuất hiện, đợi thêm...'))
-                # Đợi thêm 2 giây
-                time.sleep(2)
+            # Kiểm tra process có còn chạy không (quan trọng hơn là check topics)
+            if self.livox_driver_process and self.livox_driver_process.poll() is None:
+                # Process đang chạy, đợi thêm một chút để topics xuất hiện
+                time.sleep(2.0)
+                
+                # Kiểm tra lại topics (nhưng không bắt buộc phải có)
                 if self.check_livox_driver_running():
                     self.log(self.translator.get('log.livox_driver_started', '✅ Livox driver đã khởi động thành công'))
                     return True
                 else:
-                    self.log(self.translator.get('log.livox_driver_topics_still_not_found', '⚠️ Topics vẫn chưa xuất hiện, có thể driver chưa sẵn sàng'))
-                    return False
+                    # Process đang chạy nhưng topics chưa xuất hiện - có thể thiết bị chưa kết nối
+                    # Nhưng vẫn return True để tiếp tục với localization (có thể đang replay bag)
+                    self.log(self.translator.get('log.livox_driver_running_no_topics', '⚠️ Driver process đang chạy nhưng topics chưa xuất hiện. Tiếp tục với localization...'))
+                    return True
+            else:
+                # Process đã dừng ngay sau khi start - có thể không có thiết bị
+                self.log(self.translator.get('log.livox_driver_exited_immediately', '⚠️ Driver process đã dừng ngay sau khi start. Có thể không có thiết bị hoặc đang replay bag.'))
+                self.is_livox_driver_running = False
+                self.livox_driver_process = None
+                return False
             
         except Exception as e:
             self.log(self.translator.get('log.error_starting_livox_driver', '❌ Error starting Livox driver: {error}').replace('{error}', str(e)))
@@ -1185,26 +1191,23 @@ class WorkerInterface:
             self.log(self.translator.get('log.map_not_ready_wait', '⚠️ Map not ready. Please wait for map download to complete.'))
             return
         
-        # Kiểm tra xem có thiết bị thật không (có topics /livox/lidar và /livox/imu)
-        # Nếu không có thiết bị thật, bỏ qua việc khởi động driver (giả định đang replay bag)
-        has_real_device = self.check_livox_driver_running()
+        # Luôn luôn thử start driver khi người dùng bấm START MOVING (giống như recorder)
+        # Không check topics trước vì khi thiết bị chưa start thì không có topics
+        self.log("=" * 60)
+        self.log(self.translator.get('log.checking_livox_driver', '🔍 Kiểm tra Livox driver...'))
         
-        if has_real_device:
-            # Có thiết bị thật, kiểm tra và khởi động driver nếu cần
-            self.log("=" * 60)
-            self.log(self.translator.get('log.checking_livox_driver', '🔍 Kiểm tra Livox driver...'))
-            
-            if not self.is_livox_driver_running:
-                self.log(self.translator.get('log.livox_driver_not_running', '⚠️ Livox driver chưa chạy, đang khởi động...'))
-                if not self.start_livox_driver():
-                    self.log(self.translator.get('log.failed_to_start_driver', '❌ Không thể khởi động Livox driver. Vui lòng kiểm tra lại.'))
-                    return
+        if not self.is_livox_driver_running:
+            self.log(self.translator.get('log.livox_driver_not_running', '⚠️ Livox driver chưa chạy, đang khởi động...'))
+            # Thử start driver (sẽ tự động detect nếu có thiết bị)
+            driver_started = self.start_livox_driver()
+            if driver_started:
+                self.log(self.translator.get('log.livox_driver_started', '✅ Livox driver đã khởi động thành công'))
             else:
-                self.log(self.translator.get('log.livox_driver_already_running', '✅ Livox driver đã đang chạy'))
+                # Driver không start được, có thể không có thiết bị hoặc đang replay bag
+                # Vẫn tiếp tục với localization (có thể đang replay bag)
+                self.log(self.translator.get('log.livox_driver_start_failed_continue', '⚠️ Không thể khởi động Livox driver. Tiếp tục với localization (có thể đang replay bag)...'))
         else:
-            # Không có thiết bị thật, bỏ qua việc khởi động driver (đang replay bag)
-            self.log("=" * 60)
-            self.log(self.translator.get('log.no_real_device_detected', '📦 No real device detected, skipping driver startup (assuming bag replay)'))
+            self.log(self.translator.get('log.livox_driver_already_running', '✅ Livox driver đã đang chạy'))
         
         # Script helper
         run_script = Path(project_root) / "scripts" / "run_localization.sh"
