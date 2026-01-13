@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Info, Map, Car, Upload, QrCode, Heart } from 'lucide-react';
+import LanguageSwitcher from './LanguageSwitcher';
 
 const SideMenu: React.FC = () => {
   const location = useLocation();
@@ -23,6 +24,11 @@ const SideMenu: React.FC = () => {
         <Link to="/" className="flex items-center space-x-2">
           <img src="/logo.png" alt="Tunnel & Mining Logo" className="w-full h-full object-contain" />
         </Link>
+      </div>
+
+      {/* Language Switcher */}
+      <div className="p-4 border-b border-gray-200">
+        <LanguageSwitcher />
       </div>
 
       {/* Navigation Menu */}

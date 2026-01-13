@@ -10,6 +10,7 @@ import { PointCloudBounds } from '../components/PCDMap';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { MapMetadata } from '../types/mapMetadata';
 import { Vehicle } from '../types/vehicleMap2D';
+import VehicleStatusCard from '../components/vehicleMap/VehicleStatusCard';
 
 // Component chính cho trang
 const VehicleMap: React.FC = () => {
@@ -17,7 +18,7 @@ const VehicleMap: React.FC = () => {
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
-  const [viewMode, setViewMode] = useState<'2D' | '3D'>('3D');
+  const [viewMode, setViewMode] = useState<'2D' | '3D'>('2D');
   const [selectedView, setSelectedView] = useState<'top' | 'side_x' | 'side_y'>('top');
   const [mapMetadata] = useState<MapMetadata | null>(null);
   const [uploadId] = useState<string | null>(null);
@@ -284,60 +285,19 @@ const VehicleMap: React.FC = () => {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-          <div className="flex items-center">
-            <div className="p-2 bg-green-100 rounded-lg">
-              <div className="w-4 h-4 bg-green-500 rounded-full"></div>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">{t('active_vehicles_count')}</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {displayVehicles.filter(v => v.status === 'online').length}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-          <div className="flex items-center">
-            <div className="p-2 bg-yellow-100 rounded-lg">
-              <div className="w-4 h-4 bg-yellow-500 rounded-full"></div>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">{t('offline_vehicles_count') || t('offline')}</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {displayVehicles.filter(v => v.status === 'offline').length}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-          <div className="flex items-center">
-            <div className="p-2 bg-red-100 rounded-lg">
-              <div className="w-4 h-4 bg-red-500 rounded-full"></div>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">{t('total_vehicles_count')}</p>
-              <p className="text-2xl font-bold text-gray-900">{displayVehicles.length}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-          <div className="flex items-center">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m-6 3l6-3" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">{t('total_vehicles_count')}</p>
-              <p className="text-2xl font-bold text-gray-900">{displayVehicles.length}</p>
-            </div>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <VehicleStatusCard
+          statusKey="total"
+          value={displayVehicles.length}
+        />
+        <VehicleStatusCard
+          statusKey="online"
+          value={displayVehicles.filter(v => v.status === 'online').length}
+        />
+        <VehicleStatusCard
+          statusKey="offline"
+          value={displayVehicles.filter(v => v.status === 'offline').length}
+        />
       </div>
 
       {/* Map Container with Vehicle List */}
