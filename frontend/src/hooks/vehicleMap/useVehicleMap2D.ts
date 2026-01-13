@@ -37,13 +37,12 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
   }, [lastPositionUpdate]);
 
   /**
-   * Load map data - API calls removed, using local files instead
-   * This function is kept for backward compatibility but does nothing
+   * Load map data - API calls removed, hiện dùng metadata/floorplan từ storage.lidar.tm
+   * Hàm giữ lại cho compatibility nhưng không thực hiện gọi API.
    */
   const loadMapData = useCallback(async () => {
-    // API calls removed - using local files from /floorplan_2d/ instead
     if (DEBUG) {
-      console.log('ℹ️ [useVehicleMap2D] loadMapData called but API calls are disabled - using local files');
+      console.log('ℹ️ [useVehicleMap2D] loadMapData called but API calls are disabled - using storage.lidar.tm metadata');
     }
     setMapData(null); // Clear mapData as we're not using API
     setError('');
@@ -107,7 +106,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
         const newVehicle = {
           id: lastPositionUpdate.vehicle_id,
           name: `Vehicle ${lastPositionUpdate.vehicle_id}`,
-          status: 'active' as const,
+          status: 'online' as const,
           position: newPosition,
           timestamp: timestamp as string,
           source: 'mqtt' as const
@@ -161,11 +160,11 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
             if (DEBUG) {
               console.log('✅ Updated vehicle status:', vehicleId, vehicle.status, '->', newStatus);
             }
-            // Cast status to valid Vehicle status type
-            const validStatus: "active" | "inactive" | "offline" | "maintenance" = 
-              (newStatus === 'active' || newStatus === 'inactive' || newStatus === 'offline' || newStatus === 'maintenance') 
-                ? newStatus 
-                : vehicle.status;
+            // Only two states are supported: online/offline
+            const validStatus: 'online' | 'offline' =
+              newStatus === 'online' ? 'online'
+              : newStatus === 'offline' ? 'offline'
+              : vehicle.status;
             return {
               ...vehicle,
               status: validStatus
@@ -227,7 +226,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
 
   /**
    * Filter vehicles: excluding excluded vehicles
-   * Include all types & statuses (active, inactive, offline) để hiển thị đầy đủ
+   * Include all types & statuses (online, offline) để hiển thị đầy đủ
    */
   const filteredVehicles = useMemo(() => {
     return mapVehicles.filter(vehicle => !isExcludedVehicle(vehicle.id));

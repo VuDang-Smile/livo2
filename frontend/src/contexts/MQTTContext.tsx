@@ -83,11 +83,11 @@ export const MQTTProvider: React.FC<MQTTProviderProps> = ({
 }) => {
   const [client, setClient] = useState<MqttClient | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [lastPCDNotification, setLastPCDNotification] = useState<PCDNotification | null>(null);
-  const [lastMapUpdate, setLastMapUpdate] = useState<MapUpdateNotification | null>(null);
+  const [lastPCDNotification] = useState<PCDNotification | null>(null);
+  const [lastMapUpdate] = useState<MapUpdateNotification | null>(null);
   const [lastPositionUpdate, setLastPositionUpdate] = useState<PositionUpdateNotification | null>(null);
   const [lastVehicleStatus, setLastVehicleStatus] = useState<LastVehicleStatus | null>(null);
-  const [lastLidarStatus, setLastLidarStatus] = useState<LidarStatusUpdate | null>(null);
+  const [lastLidarStatus] = useState<LidarStatusUpdate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected');
   

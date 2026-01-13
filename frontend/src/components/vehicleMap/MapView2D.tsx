@@ -26,14 +26,15 @@ const MapView2D: React.FC<MapView2DProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hoveredVehicle, setHoveredVehicle] = useState<string | null>(null);
   
-  // Determine image URL - use floorplan_2d images when metadata is available
+  // Determine image URL - dùng floorplan từ storage khi đã có metadata
   const imageUrl = useMemo(() => {
     if (mapMetadata) {
-      // Use floorplan_2d images from public folder
-      return getMapImageUrl('', view); // uploadId not needed for local files
+      // Sử dụng URL thực tế, uploadId hiện tại chưa dùng
+      return getMapImageUrl(uploadId || undefined, view);
     }
-    return '/2Dmap.png'; // Fallback to default only if no metadata
-  }, [view, mapMetadata]);
+    // Fallback: dùng ảnh 2D mặc định (view top) khi chưa có metadata
+    return getMapImageUrl(undefined, 'top');
+  }, [view, mapMetadata, uploadId]);
   
   // Load map image
   const { image: mapImage, error: imageError } = useMapImage(imageUrl);
@@ -247,15 +248,11 @@ const MapView2D: React.FC<MapView2DProps> = ({
         <div className="space-y-1">
           <div className="flex items-center space-x-2">
             <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-            <span className="text-xs text-gray-600">{t('active_status')}</span>
-          </div>
-          <div className="flex items-center space-x-2">
-            <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-            <span className="text-xs text-gray-600">{t('maintenance_status')}</span>
+            <span className="text-xs text-gray-600">{t('online')}</span>
           </div>
           <div className="flex items-center space-x-2">
             <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-            <span className="text-xs text-gray-600">{t('inactive_status')}</span>
+            <span className="text-xs text-gray-600">{t('offline')}</span>
           </div>
         </div>
       </div>

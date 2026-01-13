@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useVehicleService } from '../hooks/api/useVehicleService';
+import { ApiVehicle } from '../types/vehicle';
 
 interface Vehicle {
   id: string;
@@ -9,43 +11,59 @@ interface Vehicle {
   driver: string;
   vehicleType: string;
   mission: string;
+  status: 'online' | 'offline';
 }
 
 const Vehicles: React.FC = () => {
   const { t } = useLanguage();
   const { logout } = useAuth();
   const navigate = useNavigate();
-  const getMockVehicles = (): Vehicle[] => [
-    {
-      id: '1',
-      licensePlate: '30A-12345',
-      driver: t('driver_name_1'),
-      vehicleType: t('tbm_tunnel'),
-      mission: t('tunnel_line_1')
-    },
-    {
-      id: '2',
-      licensePlate: '30B-67890',
-      driver: t('driver_name_2'),
-      vehicleType: t('transport_vehicle'),
-      mission: t('material_transport')
-    },
-    {
-      id: '3',
-      licensePlate: '30C-11111',
-      driver: t('driver_name_3'),
-      vehicleType: t('concrete_pump'),
-      mission: t('concrete_wall_pump')
-    }
-  ];
+  const vehicleService = useVehicleService();
+  
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [vehicles, setVehicles] = useState<Vehicle[]>(getMockVehicles());
+  // Fetch vehicles from API
+  useEffect(() => {
+    const fetchVehicles = async () => {
+      if (!vehicleService) {
+        setError('Vehicle service not available');
+        setLoading(false);
+        return;
+      }
 
-  const handleDelete = (id: string) => {
-    if (window.confirm(t('confirm_delete'))) {
-      setVehicles(vehicles.filter(vehicle => vehicle.id !== id));
-    }
-  };
+      try {
+        setLoading(true);
+        setError(null);
+        const apiVehicles = await vehicleService.getVehicles();
+        
+        // Map ApiVehicle to Vehicle UI format
+        const mappedVehicles: Vehicle[] = apiVehicles.map((apiVehicle: ApiVehicle) => {
+          const metadata = apiVehicle.metadata || {};
+          return {
+            id: apiVehicle.vehicle_id,
+            licensePlate: metadata.licensePlate || apiVehicle.vehicle_id,
+            driver: metadata.driver || apiVehicle.name || t('not_given') || 'N/A',
+            vehicleType: apiVehicle.vehicle_type || apiVehicle.type || t('not_given') || 'N/A',
+            mission: metadata.mission || apiVehicle.description || t('not_given') || 'N/A',
+            status: apiVehicle.status || 'offline'
+          };
+        });
+        
+        setVehicles(mappedVehicles);
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to fetch vehicles';
+        setError(errorMessage);
+        console.error('Error fetching vehicles:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchVehicles();
+  }, [vehicleService, t]);
+
 
   const handleLogout = () => {
     logout();
@@ -70,15 +88,6 @@ const Vehicles: React.FC = () => {
             </svg>
             <span>{t('logout')}</span>
           </button>
-          <Link
-            to="/vehicles/create"
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors duration-200 flex items-center space-x-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-            </svg>
-            <span>{t('create_new_vehicle')}</span>
-          </Link>
         </div>
       </div>
 
@@ -93,7 +102,7 @@ const Vehicles: React.FC = () => {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">{t('total_vehicles')}</p>
-              <p className="text-2xl font-bold text-gray-900">{vehicles.length}</p>
+              <p className="text-2xl font-bold text-gray-900">{loading ? '...' : vehicles.length}</p>
             </div>
           </div>
         </div>
@@ -107,7 +116,9 @@ const Vehicles: React.FC = () => {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">{t('active_vehicles')}</p>
-              <p className="text-2xl font-bold text-gray-900">{vehicles.length}</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {loading ? '...' : vehicles.filter(v => v.status === 'online').length}
+              </p>
             </div>
           </div>
         </div>
@@ -120,8 +131,10 @@ const Vehicles: React.FC = () => {
               </svg>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">{t('maintenance')}</p>
-              <p className="text-2xl font-bold text-gray-900">0</p>
+              <p className="text-sm font-medium text-gray-600">{t('offline_vehicles') || t('offline')}</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {loading ? '...' : vehicles.filter(v => v.status === 'offline').length}
+              </p>
             </div>
           </div>
         </div>
@@ -140,6 +153,21 @@ const Vehicles: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          <p className="font-medium">Error loading vehicles</p>
+          <p className="text-sm">{error}</p>
+        </div>
+      )}
+
+      {/* Loading State */}
+      {loading && !error && (
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        </div>
+      )}
 
       {/* Vehicles Table */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
@@ -172,27 +200,57 @@ const Vehicles: React.FC = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {vehicles.map((vehicle) => (
-                <tr key={vehicle.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{vehicle.licensePlate}</div>
+              {!loading && vehicles.length === 0 && !error && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                    <p className="text-lg font-medium">{t('no_vehicles_found') || 'No vehicles found'}</p>
+                    <p className="text-sm mt-2">{t('no_vehicles_description') || 'Get started by adding your first vehicle.'}</p>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{vehicle.driver}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{vehicle.vehicleType}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{vehicle.mission}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                      {t('active')}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex items-center justify-end space-x-2">
+                </tr>
+              )}
+              {vehicles.map((vehicle) => {
+                const getStatusBadge = (status: string) => {
+                  switch (status) {
+                    case 'online':
+                      return 'bg-green-100 text-green-800';
+                    case 'offline':
+                      return 'bg-red-100 text-red-800';
+                    default:
+                      return 'bg-gray-100 text-gray-800';
+                  }
+                };
+
+                const getStatusText = (status: string) => {
+                  switch (status) {
+                    case 'online':
+                      return t('online') || t('active') || 'Online';
+                    case 'offline':
+                      return t('offline') || 'Offline';
+                    default:
+                      return status;
+                  }
+                };
+
+                return (
+                  <tr key={vehicle.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">{vehicle.licensePlate}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{vehicle.driver}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{vehicle.vehicleType}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{vehicle.mission}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadge(vehicle.status)}`}>
+                        {getStatusText(vehicle.status)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <Link
                         to={`/vehicles/edit/${vehicle.id}`}
                         className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50"
@@ -201,18 +259,10 @@ const Vehicles: React.FC = () => {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                         </svg>
                       </Link>
-                      <button
-                        onClick={() => handleDelete(vehicle.id)}
-                        className="text-red-600 hover:text-red-900 p-1 rounded hover:bg-red-50"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    </div>
-                  </td>
+                    </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

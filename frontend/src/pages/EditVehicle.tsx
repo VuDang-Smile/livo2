@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useVehicleService } from '../hooks/api/useVehicleService';
 
 interface Vehicle {
   id: string;
@@ -15,6 +16,7 @@ const EditVehicle: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { t } = useLanguage();
+  const vehicleService = useVehicleService();
   
   const [formData, setFormData] = useState<Vehicle>({
     id: '',
@@ -22,11 +24,13 @@ const EditVehicle: React.FC = () => {
     driver: '',
     vehicleType: '',
     mission: '',
-    status: 'active'
+    status: 'online'
   });
 
   const [errors, setErrors] = useState<{[key: string]: string}>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const vehicleTypes = [
     t('tbm_tunnel'),
@@ -50,49 +54,54 @@ const EditVehicle: React.FC = () => {
     t('other_mission')
   ];
 
-  // Mock data - in real app, you would fetch from API
-  const getMockVehicles = useCallback((): Vehicle[] => [
-    {
-      id: '1',
-      licensePlate: '30A-12345',
-      driver: t('driver_name_1'),
-      vehicleType: t('tbm_tunnel'),
-      mission: t('tunnel_line_1'),
-      status: 'active'
-    },
-    {
-      id: '2',
-      licensePlate: '30B-67890',
-      driver: t('driver_name_2'),
-      vehicleType: t('transport_vehicle'),
-      mission: t('material_transport'),
-      status: 'active'
-    },
-    {
-      id: '3',
-      licensePlate: '30C-11111',
-      driver: t('driver_name_3'),
-      vehicleType: t('concrete_pump'),
-      mission: t('concrete_wall_pump'),
-      status: 'active'
-    }
-  ], [t]);
-
+  // Fetch vehicle from API
   useEffect(() => {
-    // Simulate API call
-    const fetchVehicle = () => {
-      const vehicle = getMockVehicles().find(v => v.id === id);
-      if (vehicle) {
-        setFormData(vehicle);
-      } else {
-        alert(t('vehicle_not_found'));
-        navigate('/vehicles');
+    const fetchVehicle = async () => {
+      if (!id) {
+        setError('Vehicle ID is required');
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      if (!vehicleService) {
+        setError('Vehicle service not available');
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError(null);
+        const apiVehicle = await vehicleService.getVehicleById(id);
+        
+        // Map ApiVehicle to Vehicle form format
+        const metadata = apiVehicle.metadata || {};
+        setFormData({
+          id: apiVehicle.vehicle_id,
+          licensePlate: metadata.licensePlate || apiVehicle.vehicle_id,
+          driver: metadata.driver || apiVehicle.name || '',
+          vehicleType: apiVehicle.vehicle_type || apiVehicle.type || '',
+          mission: metadata.mission || apiVehicle.description || '',
+          status: apiVehicle.status || 'online'
+        });
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to fetch vehicle';
+        setError(errorMessage);
+        console.error('Error fetching vehicle:', err);
+        // Navigate back if vehicle not found
+        if (err instanceof Error && err.message.includes('404')) {
+          setTimeout(() => {
+            alert(t('vehicle_not_found') || 'Vehicle not found');
+            navigate('/vehicles');
+          }, 1000);
+        }
+      } finally {
+        setLoading(false);
+      }
     };
 
     fetchVehicle();
-  }, [id, navigate, t, getMockVehicles]);
+  }, [id, navigate, t, vehicleService]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -133,16 +142,49 @@ const EditVehicle: React.FC = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (validateForm()) {
-      // Here you would typically update to backend
+    if (!validateForm()) return;
+    
+    if (!vehicleService) {
+      alert('Vehicle service not available');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      // Backend chưa có UPDATE endpoint cho vehicle info
+      // Hiện tại chỉ có thể update status qua PATCH /vehicles/{id}/status
+      // Các field khác (licensePlate, driver, mission) sẽ được lưu trong metadata
+      // Tạm thời log và hiển thị thông báo
+      
+      // Update status - frontend và backend đều dùng online/offline
+      await vehicleService.updateVehicleStatus(formData.id, formData.status as 'online' | 'offline');
+      
+      // TODO: Khi backend có endpoint UPDATE vehicle info, gọi API ở đây
+      // await vehicleService.updateVehicle(formData.id, {
+      //   name: formData.driver,
+      //   description: formData.mission,
+      //   vehicle_type: formData.vehicleType,
+      //   metadata: {
+      //     licensePlate: formData.licensePlate,
+      //     driver: formData.driver,
+      //     mission: formData.mission
+      //   }
+      // });
+      
       console.log('Updated vehicle data:', formData);
       
       // Show success message and redirect
-      alert(t('update_success'));
+      alert(t('update_success') || 'Vehicle updated successfully');
       navigate('/vehicles');
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to update vehicle';
+      alert(errorMessage);
+      console.error('Error updating vehicle:', err);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -154,6 +196,23 @@ const EditVehicle: React.FC = () => {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  if (error && !formData.id) {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mt-6">
+          <p className="font-medium">Error loading vehicle</p>
+          <p className="text-sm">{error}</p>
+          <button
+            onClick={() => navigate('/vehicles')}
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+          >
+            Back to Vehicles
+          </button>
+        </div>
       </div>
     );
   }
@@ -174,6 +233,12 @@ const EditVehicle: React.FC = () => {
           <h1 className="text-3xl font-bold text-gray-900">{t('edit_vehicle_title')}</h1>
         </div>
         <p className="text-gray-600">{t('update_vehicle_info')}</p>
+        {error && (
+          <div className="mt-4 bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded-lg">
+            <p className="text-sm">{error}</p>
+            <p className="text-xs mt-1">Note: Backend currently only supports status updates. Other fields will be saved when backend API is available.</p>
+          </div>
+        )}
       </div>
 
       {/* Form */}
@@ -285,9 +350,8 @@ const EditVehicle: React.FC = () => {
               onChange={handleChange}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="active">{t('active')}</option>
-              <option value="maintenance">{t('maintenance')}</option>
-              <option value="inactive">{t('inactive')}</option>
+              <option value="online">{t('online') || t('active') || 'Online'}</option>
+              <option value="offline">{t('offline') || 'Offline'}</option>
             </select>
           </div>
 
@@ -302,9 +366,12 @@ const EditVehicle: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={submitting}
+              className={`px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                submitting ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             >
-              {t('update_button')}
+              {submitting ? t('updating') || 'Updating...' : t('update_button')}
             </button>
           </div>
         </form>

@@ -13,7 +13,7 @@ export interface Vehicle {
    * Backend có thể trả nhiều loại hơn 'scanner' | 'worker', nên dùng string rộng.
    */
   type?: string;
-  status: 'active' | 'inactive' | 'offline' | 'maintenance';
+  status: 'online' | 'offline';
   position: { x: number; y: number; z: number };
   timestamp: string;
   source?: 'api' | 'mqtt';

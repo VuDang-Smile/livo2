@@ -21,12 +21,12 @@ export class MapMetadataService {
 
   /**
    * Get latest map metadata from current map
-   * @deprecated API calls removed - use local files from /floorplan_2d/ instead
+   * @deprecated API calls removed - hiện đang dùng metadata từ storage.lidar.tm
    */
   async getLatestMapMetadata(): Promise<MapMetadata> {
     // API calls removed - using local files instead
     // This method is kept for backward compatibility but should not be used
-    throw new Error('getLatestMapMetadata is deprecated - use local files from /floorplan_2d/ instead');
+    throw new Error('getLatestMapMetadata is deprecated - use metadata from storage.lidar.tm instead');
   }
 
   /**

@@ -11,7 +11,7 @@ export interface VehicleMarker3D {
   orientation?: [number, number, number, number]; // Quaternion [w, x, y, z]
   color: string;
   showOrientation: boolean;
-  status?: 'active' | 'inactive' | 'offline' | 'maintenance';
+  status?: 'online' | 'offline';
 }
 
 /**
@@ -28,14 +28,27 @@ export interface VehicleMarker2D {
 }
 
 /**
+ * Vehicle metadata structure
+ * Các field bổ sung có thể được lưu trong metadata
+ */
+export interface VehicleMetadata {
+  licensePlate?: string;
+  driver?: string;
+  mission?: string;
+  [key: string]: any; // Allow additional metadata fields
+}
+
+/**
  * Vehicle data from API
  */
 export interface ApiVehicle {
   vehicle_id: string;
   name?: string;
+  description?: string;
   type?: 'scanner' | 'worker';
   type_category?: 'scanner' | 'worker';
-  status?: 'active' | 'inactive' | 'offline' | 'maintenance';
+  vehicle_type?: string;
+  status?: 'online' | 'offline';
   current_pose?: {
     frame_id: string;
     position: { x: number; y: number; z: number };
@@ -48,6 +61,7 @@ export interface ApiVehicle {
     z: number;
     timestamp?: string;
   };
+  metadata?: VehicleMetadata;
   created_at?: string;
   updated_at?: string;
   [key: string]: any; // Allow additional fields
