@@ -41,7 +41,7 @@ const VehicleMap: React.FC = () => {
   // Hooks for data
   const { vehicleMarkers: markers3D } = useVehicleMarkers3D();
   const { vehicleMarkers: markers2D, mapMetadata: poseMetadata } = useVehiclePose2D(selectedView);
-  useVehicleMap2D();
+  const { mapVehicles } = useVehicleMap2D();
 
   // Map metadata is now loaded by useVehiclePose2D hook from local files
   // No need to load from API anymore
@@ -111,11 +111,13 @@ const VehicleMap: React.FC = () => {
   // Get vehicles for display based on view mode
   const displayVehicles: Vehicle[] = useMemo(() => {
     if (viewMode === '2D') {
-      // Convert 2D markers from useVehiclePose2D to Vehicle format for list display
-      return markers2D.map(marker => ({
+      // Merge vehicles from useVehiclePose2D (markers2D) and useVehicleMap2D (mapVehicles)
+      // This ensures we show all vehicles from API even if markers2D is empty
+      const vehiclesFromMarkers = markers2D.map(marker => ({
         id: marker.id,
-        name: marker.label || marker.id,
-        status: 'online' as const, // Default status for MQTT vehicles
+        name: marker.name || marker.label || marker.id,
+        type: marker.type,
+        status: marker.status || 'online' as const,
         position: { 
           x: marker.position[0], 
           y: marker.position[1], 
@@ -123,17 +125,33 @@ const VehicleMap: React.FC = () => {
         },
         timestamp: marker.lastUpdate.toISOString(),
       }));
+      
+      // Merge with vehicles from useVehicleMap2D (from API)
+      const vehiclesMap = new Map<string, Vehicle>();
+      
+      // Add vehicles from mapVehicles first (from API)
+      mapVehicles.forEach(vehicle => {
+        vehiclesMap.set(vehicle.id, vehicle);
+      });
+      
+      // Then add/update with vehicles from markers2D (may have updated positions from MQTT)
+      vehiclesFromMarkers.forEach(vehicle => {
+        vehiclesMap.set(vehicle.id, vehicle);
+      });
+      
+      return Array.from(vehiclesMap.values());
     } else {
       // Convert 3D markers to display format
       return markers3D.map(marker => ({
         id: marker.id,
-        name: marker.id,
+        name: marker.name || marker.id,
+        type: marker.type,
         status: marker.status || 'online' as const,
         position: { x: marker.position[0], y: marker.position[1], z: marker.position[2] },
         timestamp: new Date().toISOString(),
       }));
     }
-  }, [viewMode, markers2D, markers3D]);
+  }, [viewMode, markers2D, markers3D, mapVehicles]);
 
   const selectedVehicle = displayVehicles.find(v => v.id === selectedVehicleId);
 

@@ -8,6 +8,8 @@ import {
   extractTimestampStringFromMQTT,
   extractTimestampMsFromMQTT
 } from '../../utils/timestampHelpers';
+import { useVehicleService } from '../api/useVehicleService';
+import { ApiVehicle } from '../../types/vehicle';
 
 const DEBUG = process.env.REACT_APP_DEBUG_LOGS === '1';
 
@@ -25,6 +27,9 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
 
   const { lastPositionUpdate, lastVehicleStatus } = useMQTT();
   const { extractPosition, isExcludedVehicle } = useMQTTPositionHandler();
+  const vehicleService = useVehicleService();
+  // Store vehicles from API for merging with MQTT updates
+  const [apiVehicles, setApiVehicles] = useState<Map<string, ApiVehicle>>(new Map());
 
   // Track last position update timestamp for timeout check
   const lastAnyPositionUpdate = useMemo(() => {
@@ -48,6 +53,88 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
     setError('');
     setLoading(false);
   }, []);
+  
+  /**
+   * Fetch vehicles from API and transform to Vehicle format
+   */
+  const fetchVehiclesFromAPI = useCallback(async () => {
+    if (!vehicleService) return;
+    
+    try {
+      setLoading(true);
+      const vehicles = await vehicleService.getVehicles();
+      const vehiclesMap = new Map<string, ApiVehicle>();
+      const transformedVehicles: Vehicle[] = [];
+      
+      (Array.isArray(vehicles) ? vehicles : []).forEach((v: ApiVehicle) => {
+        const vehicleId = v.vehicle_id;
+        
+        // Skip excluded vehicles
+        if (isExcludedVehicle(vehicleId)) {
+          return;
+        }
+        
+        // Store vehicle info for merging
+        vehiclesMap.set(vehicleId, v);
+        
+        // Transform to Vehicle format
+        const position = v.current_pose?.position || v.current_position || { x: 0, y: 0, z: 0 };
+        const timestamp = v.current_pose?.timestamp || v.updated_at || v.created_at || new Date().toISOString();
+        
+        transformedVehicles.push({
+          id: vehicleId,
+          name: v.name || vehicleId,
+          type: v.vehicle_type || v.type,
+          status: v.status || 'offline',
+          position,
+          timestamp,
+          source: 'api' as const
+        });
+      });
+      
+      setApiVehicles(vehiclesMap);
+      setMapVehicles(prev => {
+        // Merge with existing vehicles from MQTT
+        const existingMap = new Map(prev.map(v => [v.id, v]));
+        transformedVehicles.forEach(vehicle => {
+          existingMap.set(vehicle.id, vehicle);
+        });
+        return Array.from(existingMap.values());
+      });
+      
+      // Update vehicleLastSeen for vehicles from API
+      const now = Date.now();
+      setVehicleLastSeen(prev => {
+        const updated = new Map(prev);
+        transformedVehicles.forEach(vehicle => {
+          const timestampMs = new Date(vehicle.timestamp).getTime();
+          if (!isNaN(timestampMs)) {
+            updated.set(vehicle.id, timestampMs);
+          } else {
+            updated.set(vehicle.id, now);
+          }
+        });
+        return updated;
+      });
+      
+      if (DEBUG) {
+        console.log(`✅ [useVehicleMap2D] Fetched ${transformedVehicles.length} vehicles from API`);
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch vehicles';
+      setError(errorMessage);
+      console.error('❌ [useVehicleMap2D] Failed to fetch vehicles from API:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [vehicleService, isExcludedVehicle]);
+  
+  // Fetch vehicles from API when component mounts
+  useEffect(() => {
+    if (vehicleService) {
+      fetchVehiclesFromAPI();
+    }
+  }, [vehicleService, fetchVehiclesFromAPI]);
 
   /**
    * Handle MQTT position updates for 2D map
@@ -82,15 +169,24 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
         v => v.id === lastPositionUpdate.vehicle_id
       );
 
+      // Get vehicle info from API if available
+      const apiVehicle = apiVehicles.get(lastPositionUpdate.vehicle_id);
+      
       if (existingIndex >= 0) {
-        // Update existing vehicle - sử dụng timestamp từ MQTT
+        // Update existing vehicle - merge API info with MQTT position
         const timestamp = extractTimestampStringFromMQTT(lastPositionUpdate, true);
         const updatedVehicles = [...prevVehicles];
+        const existingVehicle = updatedVehicles[existingIndex];
+        
         updatedVehicles[existingIndex] = {
-          ...updatedVehicles[existingIndex],
+          ...existingVehicle,
           position: newPosition,
           timestamp: timestamp as string,
-          source: 'mqtt' as const
+          source: 'mqtt' as const,
+          // Keep API info if available
+          name: apiVehicle?.name || existingVehicle.name,
+          type: apiVehicle?.vehicle_type || apiVehicle?.type || existingVehicle.type,
+          status: apiVehicle?.status || existingVehicle.status || 'online'
         } as Vehicle & { source: 'mqtt' };
 
         if (DEBUG) {
@@ -101,12 +197,13 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
         }
         return updatedVehicles;
       } else {
-        // Create new vehicle - sử dụng timestamp từ MQTT
+        // Create new vehicle - merge API info with MQTT data
         const timestamp = extractTimestampStringFromMQTT(lastPositionUpdate, true);
         const newVehicle = {
           id: lastPositionUpdate.vehicle_id,
-          name: `Vehicle ${lastPositionUpdate.vehicle_id}`,
-          status: 'online' as const,
+          name: apiVehicle?.name || `Vehicle ${lastPositionUpdate.vehicle_id}`,
+          type: apiVehicle?.vehicle_type || apiVehicle?.type,
+          status: apiVehicle?.status || 'online' as const,
           position: newPosition,
           timestamp: timestamp as string,
           source: 'mqtt' as const
@@ -121,7 +218,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
         return [...prevVehicles, newVehicle];
       }
     });
-  }, [lastPositionUpdate, extractPosition, isExcludedVehicle]);
+  }, [lastPositionUpdate, extractPosition, isExcludedVehicle, apiVehicles]);
 
   /**
    * Handle vehicle status updates - remove from list and canvas when status = offline
@@ -184,45 +281,6 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
       });
     }
   }, [lastVehicleStatus]);
-
-  /**
-   * Timeout check - remove vehicles that haven't updated in timeout period
-   */
-  useVehicleTimeout(
-    vehicleLastSeen,
-    lastAnyPositionUpdate,
-    useCallback((vehicleId: string) => {
-      setMapVehicles(current => {
-        const filtered = current.filter(vehicle => vehicle.id !== vehicleId);
-        if (filtered.length !== current.length && DEBUG) {
-          console.log('✅ Cleared timeout 2D map vehicles for:', vehicleId);
-        }
-        return filtered;
-      });
-
-      setVehicleLastSeen(prev => {
-        const updated = new Map(prev);
-        updated.delete(vehicleId);
-
-        // Clear all if no active vehicles
-        if (updated.size === 0 && prev.size > 0) {
-          if (DEBUG) {
-            console.log('🗑️ No active vehicles, clearing all map data');
-          }
-          setMapVehicles([]);
-        }
-
-        return updated;
-      });
-    }, []),
-    useCallback(() => {
-      if (DEBUG) {
-        console.log('⏰ No position updates, clearing all map data');
-      }
-      setMapVehicles([]);
-      setVehicleLastSeen(new Map());
-    }, [])
-  );
 
   /**
    * Filter vehicles: excluding excluded vehicles

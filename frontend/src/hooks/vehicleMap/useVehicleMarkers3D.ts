@@ -16,6 +16,8 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
   const [vehicleMarkers, setVehicleMarkers] = useState<VehicleMarker3D[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Store vehicles from API for merging with MQTT updates
+  const [apiVehicles, setApiVehicles] = useState<Map<string, any>>(new Map());
   
   const { lastPositionUpdate, lastVehicleStatus } = useMQTT();
   const { extractPose, isExcludedVehicle } = useMQTTPositionHandler();
@@ -29,43 +31,63 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
     setError(null);
     try {
       const vehicles = await vehicleService.getVehicles();
-      const markers = (Array.isArray(vehicles) ? vehicles : [])
-        .filter((v: any) => v && (v.current_pose || v.current_position))
-        .filter((v: any) => {
-          const vehicleId = v.vehicle_id || String(v._id || v.id);
-          return !isExcludedVehicle(vehicleId);
-        })
-        .map((v: any): VehicleMarker3D => {
-          let position: [number, number, number];
-          let orientation: [number, number, number, number] | undefined;
-          let showOrientation = false;
-
-          if (v.current_pose?.position) {
-            const pos = v.current_pose.position;
-            position = [pos.x, pos.y, pos.z];
-            if (v.current_pose.orientation) {
-              const orient = v.current_pose.orientation;
-              orientation = [orient.w, orient.x, orient.y, orient.z];
-              showOrientation = true;
-            }
-          } else if (v.current_position) {
-            const pos = v.current_position;
-            position = [pos.x, pos.y, pos.z];
-          } else {
-            position = [0, 0, 0];
-          }
-
-          const color = v.type === 'scanner' ? '#4f46e5' : '#ef4444';
-          return {
-            id: v.vehicle_id || String(v._id || v.id),
-            position,
-            orientation,
-            color,
-            showOrientation
-          };
-        });
       
+      // Store all vehicles from API for merging
+      const vehiclesMap = new Map<string, any>();
+      const markers: VehicleMarker3D[] = [];
+      
+      (Array.isArray(vehicles) ? vehicles : []).forEach((v: any) => {
+        const vehicleId = v.vehicle_id || String(v._id || v.id);
+        
+        // Skip excluded vehicles
+        if (isExcludedVehicle(vehicleId)) {
+          return;
+        }
+        
+        // Store vehicle info for merging
+        vehiclesMap.set(vehicleId, v);
+        
+        // Create marker for all vehicles (even without position) to show in sidebar
+        let position: [number, number, number];
+        let orientation: [number, number, number, number] | undefined;
+        let showOrientation = false;
+
+        if (v.current_pose?.position) {
+          const pos = v.current_pose.position;
+          position = [pos.x, pos.y, pos.z];
+          if (v.current_pose.orientation) {
+            const orient = v.current_pose.orientation;
+            orientation = [orient.w, orient.x, orient.y, orient.z];
+            showOrientation = true;
+          }
+        } else if (v.current_position) {
+          const pos = v.current_position;
+          position = [pos.x, pos.y, pos.z];
+        } else {
+          // Vehicle exists in DB but has no position - use default position
+          // This ensures all vehicles from API are visible in sidebar
+          position = [0, 0, 0];
+        }
+
+        const color = v.type === 'scanner' || v.vehicle_type === 'scanner' ? '#4f46e5' : '#ef4444';
+        markers.push({
+          id: vehicleId,
+          position,
+          orientation,
+          color,
+          showOrientation,
+          status: v.status || 'offline',
+          name: v.name || vehicleId,
+          type: v.vehicle_type || v.type || 'worker'
+        });
+      });
+      
+      setApiVehicles(vehiclesMap);
       setVehicleMarkers(markers);
+      
+      if (DEBUG) {
+        console.log(`✅ [useVehicleMarkers3D] Fetched ${markers.length} vehicles from API`);
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch vehicles';
       setError(errorMessage);
@@ -74,9 +96,16 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
       setLoading(false);
     }
   }, [isExcludedVehicle, vehicleService]);
+  
+  // Auto-fetch vehicles when component mounts
+  useEffect(() => {
+    if (vehicleService) {
+      fetchVehicles();
+    }
+  }, [vehicleService, fetchVehicles]);
 
   /**
-   * Handle MQTT position updates
+   * Handle MQTT position updates - merge with API vehicles
    */
   useEffect(() => {
     if (!lastPositionUpdate?.vehicle_id) return;
@@ -98,15 +127,30 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
 
     setVehicleMarkers((prev) => {
       const next = new Map(prev.map((m) => [m.id, m] as const));
+      const vehicleId = lastPositionUpdate.vehicle_id;
+      
+      // Get vehicle info from API if available
+      const apiVehicle = apiVehicles.get(vehicleId);
+      
+      // Determine color based on vehicle type from API or default
+      const color = apiVehicle?.type === 'scanner' || apiVehicle?.vehicle_type === 'scanner' 
+        ? '#4f46e5' 
+        : '#ef4444';
+      
+      // Merge: use API info (name, type, status) and update position from MQTT
+      const existingMarker = next.get(vehicleId);
       const newMarker: VehicleMarker3D = {
-        id: lastPositionUpdate.vehicle_id,
+        id: vehicleId,
         position: positionData.position,
         orientation: positionData.orientation,
-        color: '#ef4444',
-        showOrientation: positionData.showOrientation
+        color: existingMarker?.color || color,
+        showOrientation: positionData.showOrientation,
+        status: apiVehicle?.status || existingMarker?.status || 'online',
+        name: apiVehicle?.name || existingMarker?.name || vehicleId,
+        type: apiVehicle?.vehicle_type || apiVehicle?.type || existingMarker?.type || 'worker'
       };
       
-      next.set(lastPositionUpdate.vehicle_id, newMarker);
+      next.set(vehicleId, newMarker);
       const result = Array.from(next.values());
       
       if (DEBUG) {
@@ -114,7 +158,7 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
       }
       return result;
     });
-  }, [lastPositionUpdate, extractPose, isExcludedVehicle]);
+  }, [lastPositionUpdate, extractPose, isExcludedVehicle, apiVehicles]);
 
   /**
    * Handle vehicle status updates - remove markers when status = offline
@@ -147,12 +191,8 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
               console.log('✅ Updated marker status:', vehicleId, marker.status || 'unknown', '->', newStatus);
             }
             // Only two states are supported: online/offline
-            const validStatus: 'online' | 'offline' | undefined =
-              newStatus === 'online'
-                ? 'online'
-                : marker.status === 'online' || marker.status === 'offline'
-                  ? marker.status
-                  : undefined;
+            const validStatus: 'online' | 'offline' =
+              newStatus === 'online' ? 'online' : 'offline';
             return {
               ...marker,
               status: validStatus
