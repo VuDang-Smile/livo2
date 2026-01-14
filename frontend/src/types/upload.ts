@@ -20,7 +20,19 @@ export interface EditingRow {
  */
 export interface ManualPin {
   id: string;
+  /**
+   * World position theo 2 trục của view (ví dụ top: X/Y hoặc X/Z tuỳ metadata)
+   */
   position: [number, number];
+  /**
+   * Pixel position trong ảnh gốc (theo metadata) - dùng khi render scale ảnh
+   */
+  pixelPosition?: [number, number];
+  /**
+   * Trạng thái cảnh báo từ transform
+   */
+  isOutOfBounds?: boolean;
+  isClamped?: boolean;
   isActive?: boolean;
   isDraft?: boolean;
   label?: string;

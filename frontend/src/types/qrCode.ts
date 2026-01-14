@@ -8,7 +8,14 @@
 export interface QRCodeInfo {
   id: string;
   code: string;
-  position: [number, number]; // [x, z] for 2D map
+  /**
+   * Vị trí 2D hiển thị (legacy: [x, z] khi chưa dùng metadata)
+   */
+  position: [number, number];
+  /**
+   * Vị trí 3D gốc từ data source (x, y, z) để transform chính xác bằng metadata
+   */
+  position3D?: [number, number, number];
   isManual?: boolean; // Đánh dấu QR code được thêm thủ công
 }
 

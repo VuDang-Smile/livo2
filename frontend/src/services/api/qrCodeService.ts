@@ -100,11 +100,12 @@ export class QRCodeService {
         continue;
       }
 
-      // Transform: use [x, z] for 2D map (ignore y)
+      // Transform: keep 3D gốc để về sau transform theo metadata; position 2D legacy [x, z]
       qrCodes.push({
         id: this.generateId(code),
         code: code,
         position: [x, z],
+        position3D: [x, y, z],
         isManual: false, // All QR codes from API are not manual
       });
     }
