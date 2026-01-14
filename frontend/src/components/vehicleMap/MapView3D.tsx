@@ -44,19 +44,18 @@ const VehicleMarker: React.FC<{
     marker.position[2],  // Z becomes Y
     -marker.position[1]  // -Y becomes Z
   ];
-  
-  // Animation cho phương tiện - animate on Z axis (vertical after rotation)
-  useFrame((state) => {
-    if (groupRef.current) {
-      // Update all position components to ensure sync with basePosition changes
-      groupRef.current.position.x = basePosition[0];
-      groupRef.current.position.y = basePosition[1];
-      groupRef.current.position.z = basePosition[2] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
-    }
-  });
 
   const color = marker.color || '#ef4444';
+  const isGreenMarker = color === '#22c55e';
   const size = isSelected ? 1.5 : hovered ? 1.2 : 1.0;
+
+  // Chỉ animate cho marker màu xanh (online), marker màu đỏ đứng im
+  useFrame((state) => {
+    if (!isGreenMarker || !groupRef.current) return;
+    groupRef.current.position.x = basePosition[0];
+    groupRef.current.position.y = basePosition[1];
+    groupRef.current.position.z = basePosition[2] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
+  });
 
   return (
     <group
