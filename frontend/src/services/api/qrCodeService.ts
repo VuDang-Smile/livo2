@@ -17,12 +17,15 @@ export class QRCodeService {
 
   /**
    * Get QR codes from storage
+   * @param signal - Optional AbortSignal to cancel the request
    * @returns Array of QRCodeInfo objects with transformed data
    * @throws Error if fetch fails or data is invalid
    */
-  async getQRCodes(): Promise<QRCodeInfo[]> {
+  async getQRCodes(signal?: AbortSignal): Promise<QRCodeInfo[]> {
     try {
-      const response = await fetch(this.qrDetectUrl);
+      const response = await fetch(this.qrDetectUrl, {
+        signal, // Pass abort signal to fetch
+      });
       
       if (!response.ok) {
         const text = await response.text();
@@ -34,6 +37,10 @@ export class QRCodeService {
       const data: QRCodeApiResponse = await response.json();
       return this.transformToQRCodeInfoArray(data);
     } catch (error) {
+      // Handle abort errors gracefully
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error; // Re-throw abort errors as-is
+      }
       if (error instanceof Error) {
         throw error;
       }
@@ -80,8 +87,15 @@ export class QRCodeService {
 
       const [x, y, z] = position;
 
-      // Validate coordinates are numbers
-      if (typeof x !== 'number' || typeof z !== 'number' || !isFinite(x) || !isFinite(z)) {
+      // Validate all coordinates are numbers (even though y is not used in output)
+      if (
+        typeof x !== 'number' ||
+        typeof y !== 'number' ||
+        typeof z !== 'number' ||
+        !isFinite(x) ||
+        !isFinite(y) ||
+        !isFinite(z)
+      ) {
         console.warn(`[QRCodeService] Invalid coordinates for QR code ${code}:`, position);
         continue;
       }

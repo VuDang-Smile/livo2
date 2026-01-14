@@ -2,7 +2,10 @@
  * @deprecated Use types from '../../types/mapInfo' instead
  * This file is kept for backward compatibility only
  */
-export { MapInfo } from '../types/mapInfo';
+import type { MapInfo } from '../types/mapInfo';
+
+// Re-export type for backward compatibility under isolatedModules.
+export type { MapInfo } from '../types/mapInfo';
 
 /**
  * Mock data generator for MapInfo

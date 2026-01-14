@@ -79,7 +79,8 @@ export function useQRCodes(): UseQRCodesResult {
     }
     
     try {
-      const codes = await service.current.getQRCodes();
+      // Pass abort signal to service for proper request cancellation
+      const codes = await service.current.getQRCodes(abortController.signal);
       
       // Guard: only update state if component is still mounted and not aborted
       if (isMountedRef.current && !abortController.signal.aborted) {
@@ -88,6 +89,11 @@ export function useQRCodes(): UseQRCodesResult {
         setError(null);
       }
     } catch (err: any) {
+      // Don't update state if request was aborted (component unmounted or new request started)
+      if (err?.name === 'AbortError') {
+        return; // Silently ignore abort errors
+      }
+      
       // Guard: only update state if component is still mounted and not aborted
       if (isMountedRef.current && !abortController.signal.aborted) {
         const errorMessage = err?.message || 'Failed to fetch QR codes';
