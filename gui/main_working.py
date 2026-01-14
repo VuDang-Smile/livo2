@@ -141,6 +141,7 @@ class WorkerInterface:
         
         # Heartbeat
         self.heartbeat_timer_id = None
+        self.heartbeat_logged = False  # Đã log heartbeat thành công chưa
         
         # Translator for multi-language support
         self.translator = Translator('en')
@@ -1553,6 +1554,9 @@ class WorkerInterface:
             
             if response.status_code == 200:
                 self.log(self.translator.get('log.vehicle_status_updated', '✅ Vehicle status updated: {status}').replace('{status}', status))
+                # Reset heartbeat log flag khi status thay đổi (không phải online)
+                if status != "online":
+                    self.heartbeat_logged = False
                 # Chỉ refresh vehicle info khi status là "online" và refresh_info=True
                 if status == "online" and refresh_info:
                     self.root.after(0, self.refresh_vehicle_info)
@@ -1612,9 +1616,12 @@ class WorkerInterface:
             
             # Update UI trong main thread (thread-safe)
             if response.status_code == 200:
-                self.root.after(0, lambda: self.log(
-                    self.translator.get('log.vehicle_status_updated', '✅ Vehicle status updated: {status}').replace('{status}', 'online')
-                ))
+                # Chỉ log lần đầu tiên khi heartbeat thành công
+                if not self.heartbeat_logged:
+                    self.root.after(0, lambda: self.log(
+                        self.translator.get('log.vehicle_status_updated', '✅ Vehicle status updated: {status}').replace('{status}', 'online')
+                    ))
+                    self.heartbeat_logged = True
             else:
                 self.root.after(0, lambda: self.log(
                     self.translator.get('log.cannot_update_vehicle_status', '⚠️ Cannot update vehicle status: HTTP {code}').replace('{code}', str(response.status_code))
