@@ -15,8 +15,9 @@ import { MAP_2D_IMAGE_URL } from '../constants/mapConfig';
 import { getVehicle2DPosition } from '../utils/vehicle2DHelper';
 import { useMapInfo } from '../hooks/api/useMapInfo';
 import { useQRCodes } from '../hooks/api/useQRCodes';
-import { MapMetadata } from '../types/mapMetadata';
+import { MapMetadata, CoordinateSystemConfig } from '../types/mapMetadata';
 import { transformPoseToPixel, pixelToWorld } from '../utils/coordinateTransform';
+import { getPCDRotation, transformWorldToScene } from '../utils/coordinateTransformer';
 import { MAP_FLOORPLAN_METADATA_URL } from '../config/dataSources';
 
 // Component cho đường hầm (copy từ VehicleMap)
@@ -61,16 +62,23 @@ const Tunnel: React.FC = () => {
   );
 };
 
-// Component cho phương tiện (copy từ VehicleMap)
+// Component cho phương tiện (copy từ VehicleMap) - đã chuẩn hóa theo hệ trục
 const Vehicle: React.FC<{ 
   vehicle: VehiclePosition; 
-}> = ({ vehicle }) => {
+  coordinateConfig?: CoordinateSystemConfig;
+}> = ({ vehicle, coordinateConfig }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+  // Chuẩn hóa vị trí world [x, y, z] sang scene Three.js
+  const basePosition: [number, number, number] = transformWorldToScene(
+    vehicle.position,
+    coordinateConfig
+  );
   
   // Animation cho phương tiện
   useFrame((state) => {
     if (meshRef.current) {
-      meshRef.current.position.y = vehicle.position[1] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
+      // Nhún nhẹ theo trục Y của scene (đã chuẩn hoá)
+      meshRef.current.position.y = basePosition[1] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
     }
   });
 
@@ -104,7 +112,7 @@ const getVehicleGeometry = (vehicleType?: string) => {
   };
 
   return (
-    <group position={vehicle.position}>
+    <group position={basePosition}>
       {/* Phương tiện */}
       <mesh ref={meshRef}>
         {getVehicleGeometry(vehicle.vehicleType)}
@@ -132,7 +140,9 @@ const getVehicleGeometry = (vehicleType?: string) => {
 const PCDPreview3D: React.FC<{ 
   vehicles: VehiclePosition[];
   pcdUrl?: string | null;
-}> = ({ vehicles, pcdUrl }) => {
+  mapMetadata?: MapMetadata | null;
+}> = ({ vehicles, pcdUrl, mapMetadata }) => {
+  const coordinateConfig = mapMetadata?.coordinate_system;
   return (
     <>
       {/* Camera controls */}
@@ -159,7 +169,7 @@ const PCDPreview3D: React.FC<{
             url={pcdUrl}
             // Đơn vị: mét (scale = 1)
             scale={1}
-            rotation={[-Math.PI / 2, 0, 0]}
+            rotation={getPCDRotation(coordinateConfig)}
             position={[0, 0, 0]}
           />
         </Suspense>
@@ -171,7 +181,8 @@ const PCDPreview3D: React.FC<{
       {vehicles.map((vehicle) => (
         <Vehicle 
           key={vehicle.id} 
-          vehicle={vehicle} 
+          vehicle={vehicle}
+          coordinateConfig={coordinateConfig}
         />
       ))}
       
@@ -1218,7 +1229,11 @@ const Upload: React.FC = () => {
                   camera={{ position: [0, 10, 20], fov: 60 }}
                   style={{ height: '100%' }}
                 >
-                  <PCDPreview3D vehicles={previewVehicles} pcdUrl={pcdUrl} />
+                  <PCDPreview3D
+                    vehicles={previewVehicles}
+                    pcdUrl={pcdUrl}
+                    mapMetadata={mapMetadata}
+                  />
                 </Canvas>
               </div>
           

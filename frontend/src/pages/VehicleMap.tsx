@@ -352,6 +352,7 @@ const VehicleMap: React.FC = () => {
                 <MapView3D
                   vehicleMarkers={markers3D}
                   pcdUrl={DEFAULT_PCD_URL}
+                  mapMetadata={poseMetadata || mapMetadata}
                   clipXMin={realXRange ? realXRange[0] : undefined}
                   clipXMax={realXRange ? realXRange[1] : undefined}
                   clipYMin={realYRange ? realYRange[0] : undefined}

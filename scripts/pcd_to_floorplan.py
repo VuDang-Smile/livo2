@@ -303,6 +303,10 @@ def pcd_to_3_views(
     metadata: Dict[str, Any] = {
         "input_file": str(input_pcd_path.name),
         "resolution_m_per_pixel": float(resolution),
+        # Hệ trục mặc định của dữ liệu PCD/floorplan là ROS (X forward, Y left, Z up)
+        "coordinate_system": {
+            "convention": "ros"
+        },
         "views": {
             "top": {
                 "id": "top",
