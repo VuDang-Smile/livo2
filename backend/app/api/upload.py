@@ -5,7 +5,7 @@ import re
 import zipfile
 import tempfile
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Form
@@ -16,6 +16,7 @@ from app.services.database_service import database_service
 from app.services.storage_service import storage_service
 from app.services.mqtt_service import mqtt_service
 from app.config import settings
+from app.utils.time import ensure_utc, isoformat_utc, now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +31,12 @@ def _sanitize_filename_component(value: str) -> str:
 
 
 def _format_iso_with_tz(dt: datetime) -> str:
-    """Return ISO8601 string with timezone info."""
-    return dt.astimezone().isoformat()
+    """
+    Return ISO8601 string with timezone info in UTC.
+
+    Contract: all timestamps written to metadata are stored as UTC.
+    """
+    return isoformat_utc(ensure_utc(dt))
 
 
 def _write_metadata_file(
@@ -161,12 +166,15 @@ async def upload_map(
         # Create metadata txt file and persist extended metadata
         try:
             file_stat = Path(result["file_path"]).stat()
-            created_at_local = datetime.fromtimestamp(file_stat.st_mtime).astimezone()
+            # Interpret mtime as an absolute instant and convert to UTC-aware datetime.
+            # Using tz=UTC ensures we don't accidentally treat a local naive datetime as UTC.
+            created_at_local = datetime.fromtimestamp(file_stat.st_mtime, tz=timezone.utc)
         except Exception as stat_error:
             logger.warning(f"Could not read file timestamps: {stat_error}")
-            created_at_local = datetime.now().astimezone()
+            created_at_local = now_utc()
 
-        uploaded_at_local = datetime.now().astimezone()
+        # Use canonical UTC for upload time
+        uploaded_at_local = now_utc()
         metadata_json_path = _write_metadata_file(
             map_name=map_name,
             vehicle_name=vehicle_name,

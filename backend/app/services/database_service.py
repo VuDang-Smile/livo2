@@ -2,10 +2,13 @@
 import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
 from bson import ObjectId
+
 from app.config import settings
 from app.models.database import MapDocument, VehicleDocument, VehiclePoseDocument
+from app.utils.time import now_utc, ensure_utc
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +111,8 @@ class DatabaseService:
     async def update_map(self, upload_id: str, updates: Dict[str, Any]) -> bool:
         """Update map."""
         try:
-            updates["updated_at"] = datetime.utcnow()
+            # Always store timestamps as UTC
+            updates["updated_at"] = now_utc()
             result = await self.maps_collection.update_one(
                 {"upload_id": upload_id},
                 {"$set": updates}
@@ -162,7 +166,8 @@ class DatabaseService:
             latest_pose = {
                 "position": pose_data["position"],
                 "orientation": pose_data["orientation"],
-                "timestamp": pose_data["timestamp"]
+                # Assume pose_data["timestamp"] is already UTC-aware datetime
+                "timestamp": ensure_utc(pose_data["timestamp"])
             }
             
             result = await self.vehicles_collection.update_one(
@@ -170,10 +175,10 @@ class DatabaseService:
                 {
                     "$set": {
                         "latest_pose": latest_pose,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": now_utc()
                     },
                     "$setOnInsert": {
-                        "created_at": datetime.utcnow()
+                        "created_at": now_utc()
                     }
                 },
                 upsert=True
@@ -191,7 +196,7 @@ class DatabaseService:
                 {
                     "$set": {
                         "status": status,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": now_utc()
                     }
                 }
             )
@@ -216,8 +221,8 @@ class DatabaseService:
             if "metadata" in updates:
                 update_data["metadata"] = updates["metadata"]
             
-            # Always update updated_at
-            update_data["updated_at"] = datetime.utcnow()
+            # Always update updated_at in UTC
+            update_data["updated_at"] = now_utc()
             
             result = await self.vehicles_collection.update_one(
                 {"vehicle_id": vehicle_id},
@@ -235,8 +240,9 @@ class DatabaseService:
                 "vehicle_id": vehicle_id,
                 "position": pose_data["position"],
                 "orientation": pose_data["orientation"],
-                "timestamp": pose_data["timestamp"],
-                "created_at": datetime.utcnow()
+                # Store pose timestamp in UTC
+                "timestamp": ensure_utc(pose_data["timestamp"]),
+                "created_at": now_utc()
             }
             result = await self.vehicle_poses_collection.insert_one(doc)
             return str(result.inserted_id)

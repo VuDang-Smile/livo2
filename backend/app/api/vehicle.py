@@ -2,7 +2,9 @@
 import logging
 from datetime import datetime
 from typing import Optional, List
+
 from fastapi import APIRouter, HTTPException, Query
+
 from app.models.vehicle import (
     PoseUpdateRequest,
     PoseUpdateResponse,
@@ -21,6 +23,7 @@ from app.models.vehicle import (
 )
 from app.services.database_service import database_service
 from app.services.mqtt_service import mqtt_service
+from app.utils.time import now_utc, ensure_utc, isoformat_utc
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +54,7 @@ async def register_vehicle(vehicle_request: VehicleRegisterRequest):
         initial_pose = {
             "position": {"x": 0.0, "y": 0.0, "z": 0.0},
             "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-            "timestamp": datetime.utcnow()
+            "timestamp": now_utc(),
         }
         
         # Create vehicle document
@@ -63,8 +66,8 @@ async def register_vehicle(vehicle_request: VehicleRegisterRequest):
             "vehicle_type": vehicle_request.vehicle_type,
             "status": (vehicle_request.status or VehicleStatus.OFFLINE).value,
             "metadata": vehicle_request.metadata or {},
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
+            "created_at": now_utc(),
+            "updated_at": now_utc()
         }
         
         # Insert vehicle
@@ -104,10 +107,11 @@ async def update_vehicle_pose(
     """
     try:
         # Prepare pose data for database
+        # Contract: pose_request.timestamp must be timezone-aware; normalize to UTC
         pose_data = {
             "position": pose_request.position.dict(),
             "orientation": pose_request.orientation.dict(),
-            "timestamp": pose_request.timestamp
+            "timestamp": ensure_utc(pose_request.timestamp),
         }
         
         # Update vehicle in database
@@ -122,7 +126,8 @@ async def update_vehicle_pose(
         mqtt_pose = {
             "position": pose_data["position"],
             "orientation": pose_data["orientation"],
-            "timestamp": pose_request.timestamp.isoformat()
+            # Ensure outbound timestamp follows ISO8601 UTC with timezone
+            "timestamp": isoformat_utc(pose_data["timestamp"]),
         }
         mqtt_service.publish_vehicle_pose(vehicle_id, mqtt_pose)
         
@@ -148,13 +153,13 @@ async def get_vehicle(vehicle_id: str):
         
         latest_pose = vehicle.get("latest_pose", {})
         # Handle case where vehicle exists but has no pose yet
-        if not latest_pose:
-            # Return default pose
-            latest_pose = {
-                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
-                "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-                "timestamp": datetime.utcnow()
-            }
+            if not latest_pose:
+                # Return default pose with current UTC timestamp
+                latest_pose = {
+                    "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                    "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+                    "timestamp": now_utc(),
+                }
         
         # Convert status string to enum
         status_str = vehicle.get("status", "offline")
@@ -163,7 +168,7 @@ async def get_vehicle(vehicle_id: str):
         except ValueError:
             status = VehicleStatus.OFFLINE
         
-        return VehicleResponse(
+            return VehicleResponse(
             vehicle_id=vehicle["vehicle_id"],
             name=vehicle.get("name", ""),
             description=vehicle.get("description", ""),
@@ -175,8 +180,8 @@ async def get_vehicle(vehicle_id: str):
                 timestamp=latest_pose["timestamp"]
             ),
             status=status,
-            created_at=vehicle.get("created_at", datetime.utcnow()),
-            updated_at=vehicle.get("updated_at", datetime.utcnow())
+            created_at=vehicle.get("created_at", now_utc()),
+            updated_at=vehicle.get("updated_at", now_utc()),
         )
     except HTTPException:
         raise
@@ -199,7 +204,7 @@ async def get_all_vehicles():
                 latest_pose = {
                     "position": {"x": 0.0, "y": 0.0, "z": 0.0},
                     "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-                    "timestamp": datetime.utcnow()
+                    "timestamp": now_utc(),
                 }
             
             # Convert status string to enum

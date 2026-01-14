@@ -1,48 +1,93 @@
 import { PositionUpdateNotification } from '../contexts/MQTTContext';
 
 /**
- * Normalize timestamp from various formats to ISO string
- * @param timestamp - Timestamp in various formats (number, string, Date)
- * @param asString - If true, return as ISO string; if false, return as number (ms)
- * @returns Normalized timestamp
+ * Timestamp normalization helpers for MQTT and API data.
+ *
+ * Contract:
+ * - Upstream services should send ISO8601 strings WITH timezone (UTC canonical, e.g. `...Z`).
+ * - These helpers are defensive: chúng cố gắng normalize nhiều format, nhưng sẽ cảnh báo
+ *   khi gặp timestamp thiếu timezone hoặc không parse được.
  */
-export function normalizeTimestamp(timestamp: number | string | Date | undefined | null, asString: boolean = true): string | number {
+
+type NormalizedResult = {
+  isoString: string;
+  epochMs: number;
+  /** true nếu timestamp thiếu tz hoặc phải suy đoán/convert đặc biệt */
+  inferred?: boolean;
+};
+
+/**
+ * Internal: normalize any supported input to Date.
+ */
+function normalizeToDate(value: number | string | Date): NormalizedResult | null {
+  let date: Date | null = null;
+  let inferred = false;
+
+  if (value instanceof Date) {
+    date = value;
+  } else if (typeof value === 'number') {
+    // If timestamp is in seconds (likely < year 2000 ms), convert to milliseconds
+    if (value < 946684800000) {
+      inferred = true;
+      date = new Date(value * 1000);
+    } else {
+      date = new Date(value);
+    }
+  } else if (typeof value === 'string') {
+    // First, try as ISO string
+    const parsed = Date.parse(value);
+    if (!isNaN(parsed)) {
+      date = new Date(parsed);
+      // Nếu string không chứa 'Z' hoặc offset, rất có thể thiếu tz
+      if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(value)) {
+        console.warn('[timestampHelpers] Timestamp string missing timezone:', value);
+        inferred = true;
+      }
+    } else {
+      // Try as numeric string
+      const num = parseFloat(value);
+      if (!isNaN(num)) {
+        if (num < 946684800000) {
+          inferred = true;
+          date = new Date(num * 1000);
+        } else {
+          date = new Date(num);
+        }
+      }
+    }
+  }
+
+  if (!date || isNaN(date.getTime())) {
+    return null;
+  }
+
+  const epochMs = date.getTime();
+  const isoString = new Date(epochMs).toISOString(); // always UTC ISO string
+  return { isoString, epochMs, inferred };
+}
+
+/**
+ * Normalize timestamp from various formats to ISO string or epoch ms.
+ * @param timestamp - Timestamp in various formats (number, string, Date)
+ * @param asString - If true, return ISO string; if false, return number (ms)
+ */
+export function normalizeTimestamp(
+  timestamp: number | string | Date | undefined | null,
+  asString: boolean = true
+): string | number {
   if (!timestamp) {
     const now = Date.now();
     return asString ? new Date(now).toISOString() : now;
   }
 
-  if (timestamp instanceof Date) {
-    return asString ? timestamp.toISOString() : timestamp.getTime();
+  const normalized = normalizeToDate(timestamp as any);
+  if (!normalized) {
+    console.warn('[timestampHelpers] Failed to normalize timestamp, falling back to now():', timestamp);
+    const now = Date.now();
+    return asString ? new Date(now).toISOString() : now;
   }
 
-  if (typeof timestamp === 'number') {
-    // If timestamp is in seconds (less than year 2000), convert to milliseconds
-    if (timestamp < 946684800000) {
-      timestamp = timestamp * 1000;
-    }
-    return asString ? new Date(timestamp).toISOString() : timestamp;
-  }
-
-  if (typeof timestamp === 'string') {
-    // Try to parse as ISO string or number
-    const parsed = Date.parse(timestamp);
-    if (!isNaN(parsed)) {
-      return asString ? new Date(parsed).toISOString() : parsed;
-    }
-    // If it's a number string, parse it
-    const num = parseFloat(timestamp);
-    if (!isNaN(num)) {
-      if (num < 946684800000) {
-        return asString ? new Date(num * 1000).toISOString() : num * 1000;
-      }
-      return asString ? new Date(num).toISOString() : num;
-    }
-  }
-
-  // Fallback to current time
-  const now = Date.now();
-  return asString ? new Date(now).toISOString() : now;
+  return asString ? normalized.isoString : normalized.epochMs;
 }
 
 /**

@@ -1,11 +1,13 @@
 """Vehicle status monitoring service with background task for timeout detection."""
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List, Dict, Any
+
 from app.config import settings
 from app.services.database_service import database_service
 from app.services.mqtt_service import mqtt_service
+from app.utils.time import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +54,7 @@ class VehicleStatusService:
         """Check for timed out vehicles and update their status to offline."""
         try:
             # Calculate cutoff time: now - timeout threshold
-            cutoff_time = datetime.utcnow() - timedelta(seconds=settings.VEHICLE_HEARTBEAT_TIMEOUT_SECONDS)
+            cutoff_time = now_utc() - timedelta(seconds=settings.VEHICLE_HEARTBEAT_TIMEOUT_SECONDS)
             
             # Query vehicles with status="online" and updated_at < cutoff_time
             query = {
