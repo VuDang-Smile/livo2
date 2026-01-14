@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     MQTT_TOPIC_PREFIX: str = "livo/maps"
     MQTT_TOPIC_VEHICLES: str = "livo/vehicles"
     
+    # Vehicle status sync
+    VEHICLE_HEARTBEAT_TIMEOUT_SECONDS: int = 30
+    VEHICLE_STATUS_CHECK_INTERVAL_SECONDS: int = 10
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

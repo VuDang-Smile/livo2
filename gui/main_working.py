@@ -23,6 +23,9 @@ if project_root not in sys.path:
 from languages.translate_engine import Translator
 from contants.API import VEHICLE_ENDPOINT, API_TIMEOUT, HEADERS, BACKEND_HOST
 
+# Heartbeat configuration
+HEARTBEAT_INTERVAL_SECONDS = 10
+
 # ROS2 imports (optional)
 try:
     import rclpy
@@ -136,6 +139,10 @@ class WorkerInterface:
         self.last_pose_received_time = None  # Thời gian nhận pose cuối cùng
         self.pose_first_received_logged = False  # Đã log lần đầu nhận pose chưa
         
+        # Heartbeat
+        self.heartbeat_timer_id = None
+        self.heartbeat_logged = False  # Đã log heartbeat thành công chưa
+        
         # Translator for multi-language support
         self.translator = Translator('en')
         self.current_lang = 'en'
@@ -178,6 +185,8 @@ class WorkerInterface:
         # Gọi sau khi setup_vehicle_info để có vehicle_id
         if self.vehicle_id:
             self.update_vehicle_status("online", refresh_info=True)
+            # Bắt đầu heartbeat tự động
+            self.start_heartbeat()
         
         # Tự động tải map và QR khi khởi động
         self.download_map_and_qr()
@@ -1545,6 +1554,9 @@ class WorkerInterface:
             
             if response.status_code == 200:
                 self.log(self.translator.get('log.vehicle_status_updated', '✅ Vehicle status updated: {status}').replace('{status}', status))
+                # Reset heartbeat log flag khi status thay đổi (không phải online)
+                if status != "online":
+                    self.heartbeat_logged = False
                 # Chỉ refresh vehicle info khi status là "online" và refresh_info=True
                 if status == "online" and refresh_info:
                     self.root.after(0, self.refresh_vehicle_info)
@@ -1556,10 +1568,83 @@ class WorkerInterface:
         except Exception as e:
             self.log(self.translator.get('log.error_updating_status', '⚠️ Error updating status: {error}').replace('{error}', str(e)))
     
+    def start_heartbeat(self):
+        """Bắt đầu heartbeat loop để gửi status online định kỳ"""
+        if not self.vehicle_id:
+            return
+        
+        # Dừng heartbeat cũ nếu có
+        self.stop_heartbeat()
+        
+        # Bắt đầu heartbeat loop
+        self._heartbeat_loop()
+    
+    def stop_heartbeat(self):
+        """Dừng heartbeat loop"""
+        if self.heartbeat_timer_id is not None:
+            self.root.after_cancel(self.heartbeat_timer_id)
+            self.heartbeat_timer_id = None
+    
+    def _heartbeat_loop(self):
+        """Gửi heartbeat và schedule lần tiếp theo"""
+        if not self.vehicle_id:
+            return
+        
+        # Gửi heartbeat trong background thread để không block UI
+        threading.Thread(target=self._send_heartbeat_async, daemon=True).start()
+        
+        # Schedule lần tiếp theo
+        self.heartbeat_timer_id = self.root.after(HEARTBEAT_INTERVAL_SECONDS * 1000, self._heartbeat_loop)
+    
+    def _send_heartbeat_async(self):
+        """Gửi heartbeat trong background thread để không block UI"""
+        if not self.vehicle_id:
+            return
+        
+        try:
+            url = f"{self.backend_base_url}/api/v1/vehicles/{self.vehicle_id}/status"
+            payload = {
+                "status": "online"
+            }
+            
+            response = requests.patch(
+                url,
+                json=payload,
+                headers=HEADERS,
+                timeout=API_TIMEOUT
+            )
+            
+            # Update UI trong main thread (thread-safe)
+            if response.status_code == 200:
+                # Chỉ log lần đầu tiên khi heartbeat thành công
+                if not self.heartbeat_logged:
+                    self.root.after(0, lambda: self.log(
+                        self.translator.get('log.vehicle_status_updated', '✅ Vehicle status updated: {status}').replace('{status}', 'online')
+                    ))
+                    self.heartbeat_logged = True
+            else:
+                self.root.after(0, lambda: self.log(
+                    self.translator.get('log.cannot_update_vehicle_status', '⚠️ Cannot update vehicle status: HTTP {code}').replace('{code}', str(response.status_code))
+                ))
+                
+        except requests.exceptions.RequestException as e:
+            # Log lỗi trong main thread (thread-safe)
+            self.root.after(0, lambda: self.log(
+                self.translator.get('log.error_connection_updating_status', '⚠️ Connection error when updating status: {error}').replace('{error}', str(e))
+            ))
+        except Exception as e:
+            # Log lỗi trong main thread (thread-safe)
+            self.root.after(0, lambda: self.log(
+                self.translator.get('log.error_heartbeat', '⚠️ Heartbeat error: {error}').replace('{error}', str(e))
+            ))
+    
     def on_closing(self):
         """Xử lý khi đóng cửa sổ"""
         # Dừng monitoring kết nối thiết bị
         self.stop_device_connection_monitoring()
+        
+        # Dừng heartbeat
+        self.stop_heartbeat()
         
         # Cập nhật trạng thái vehicle thành offline
         if self.vehicle_id:

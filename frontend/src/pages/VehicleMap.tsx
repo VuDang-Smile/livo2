@@ -55,7 +55,7 @@ const VehicleMap: React.FC = () => {
   };
 
   const handleVehicleSelect = (id: string) => {
-    setSelectedVehicleId(id);
+    setSelectedVehicleId(prev => (prev === id ? null : id));
   };
 
   // PCD Bounds callback handler
@@ -533,55 +533,6 @@ const VehicleMap: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* Vehicle Details */}
-      {selectedVehicle && (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-medium text-gray-900">{t('vehicle_info')}</h3>
-            <button
-              onClick={() => setSelectedVehicleId(null)}
-              className="text-gray-500 hover:text-gray-700 p-1 rounded hover:bg-gray-100"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="space-y-2">
-              <h4 className="font-medium text-gray-700 text-sm uppercase tracking-wide">{t('vehicle_details')}</h4>
-              <div className="space-y-1">
-                <p className="text-sm"><span className="font-medium">{t('id_label')}</span> {selectedVehicle.id}</p>
-                <p className="text-sm">
-                  <span className="font-medium">{t('vehicle_type_label')}</span>{' '}
-                  {selectedVehicle.type || t('vehicle_type_unknown')}
-                </p>
-                <p className="text-sm"><span className="font-medium">{t('status_label')}</span> 
-                  <span className={`ml-1 ${
-                    selectedVehicle.status === 'online' ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {selectedVehicle.status === 'online' ? (t('online') || 'Online') :
-                     (t('offline') || 'Offline')}
-                  </span>
-                </p>
-              </div>
-            </div>
-            
-            <div className="space-y-2">
-              <h4 className="font-medium text-gray-700 text-sm uppercase tracking-wide">{t('position_time')}</h4>
-              <div className="space-y-1">
-                <p className="text-sm"><span className="font-medium">{t('coordinates')}</span></p>
-                <p className="text-xs text-gray-600">X: {selectedVehicle.position.x.toFixed(2)}</p>
-                <p className="text-xs text-gray-600">Y: {selectedVehicle.position.y.toFixed(2)}</p>
-                <p className="text-xs text-gray-600">Z: {selectedVehicle.position.z.toFixed(2)}</p>
-                <p className="text-sm mt-2"><span className="font-medium">{t('update_time')}</span> {new Date(selectedVehicle.timestamp).toLocaleString()}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Filter Popup */}
       {showFilter && (

@@ -112,7 +112,7 @@ def _make_occupancy_image(
     content_height = int(np.ceil(height_m / resolution))
 
     # Lưới occupancy (0 = nền, 1 = có điểm)
-    grid = np.zeros((content_height, content_width), dtype=np.uint8)
+    grid_mask = np.zeros((content_height, content_width), dtype=np.uint8)
 
     # Chuyển (u, v) → chỉ số grid
     u_norm = (u - u_min_c) / resolution
@@ -123,27 +123,33 @@ def _make_occupancy_image(
 
     # Lưu ý: ảnh gốc coi (0,0) ở góc dưới trái ⇒ ta cần flip theo trục v
     # Ở đây grid[y, x] với y=0 là hàng trên cùng, nên dùng (content_height - 1 - iv)
-    grid[content_height - 1 - iv, iu] = 255
+    grid_mask[content_height - 1 - iv, iu] = 255
 
-    # Áp dụng invert_colors: nếu invert thì nền trắng, điểm đen
-    if invert_colors:
-        grid = 255 - grid
+    # Tạo ảnh RGB với màu xanh biển cho các điểm có dữ liệu
+    # Màu xanh biển: RGB(30, 144, 255) - Dodger Blue
+    blue_color = np.array([30, 144, 255], dtype=np.uint8)
+    
+    # Tạo grid RGB với nền trắng
+    grid_rgb = np.ones((content_height, content_width, 3), dtype=np.uint8) * 255
+    # Áp dụng màu xanh biển cho các điểm có dữ liệu
+    mask = grid_mask > 0
+    grid_rgb[mask] = blue_color
 
     # Thêm border_margin
     h_with_border = content_height + 2 * border_margin
     w_with_border = content_width + 2 * border_margin
-    canvas = np.zeros((h_with_border, w_with_border), dtype=np.uint8)
+    canvas = np.zeros((h_with_border, w_with_border, 3), dtype=np.uint8)
 
-    # Nền đen/trắng tùy invert (giữ nguyên theo grid hiện tại)
-    canvas[:, :] = 0 if not invert_colors else 255
+    # Luôn dùng nền trắng
+    canvas[:, :] = [255, 255, 255]  # Nền trắng
 
     # Dán content vào giữa
     canvas[
         border_margin:border_margin + content_height,
         border_margin:border_margin + content_width,
-    ] = grid
+    ] = grid_rgb
 
-    image = Image.fromarray(canvas, mode="L")  # grayscale
+    image = Image.fromarray(canvas, mode="RGB")  # RGB với màu xanh biển
 
     processing = {
         "border_margin": int(border_margin),
