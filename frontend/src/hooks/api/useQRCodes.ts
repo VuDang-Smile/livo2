@@ -1,20 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { MapInfoService } from '../../services/api/mapInfoService';
-import { MapInfo } from '../../types/mapInfo';
-import { MAP_INFO_URL } from '../../config/dataSources';
+import { QRCodeService } from '../../services/api/qrCodeService';
+import { QRCodeInfo } from '../../types/qrCode';
+import { QR_DETECT_URL } from '../../config/dataSources';
 
 /**
  * Hook result interface
  */
-export interface UseMapInfoResult {
-  mapInfo: MapInfo | null;
+export interface UseQRCodesResult {
+  qrCodes: QRCodeInfo[];
   isLoading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
 }
 
 /**
- * Hook to fetch and manage map information from storage
+ * Hook to fetch and manage QR codes from storage
  * 
  * Features:
  * - Automatic fetch on mount
@@ -22,10 +22,10 @@ export interface UseMapInfoResult {
  * - Proper cleanup on unmount
  * - Manual refetch capability
  * 
- * @returns UseMapInfoResult with mapInfo, isLoading, error, and refetch function
+ * @returns UseQRCodesResult with qrCodes, isLoading, error, and refetch function
  */
-export function useMapInfo(): UseMapInfoResult {
-  const [mapInfo, setMapInfo] = useState<MapInfo | null>(null);
+export function useQRCodes(): UseQRCodesResult {
+  const [qrCodes, setQrCodes] = useState<QRCodeInfo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -34,11 +34,11 @@ export function useMapInfo(): UseMapInfoResult {
   const abortControllerRef = useRef<AbortController | null>(null);
   
   // Create service instance
-  const service = useRef<MapInfoService | null>(null);
+  const service = useRef<QRCodeService | null>(null);
   
   useEffect(() => {
     // Initialize service
-    service.current = new MapInfoService(MAP_INFO_URL);
+    service.current = new QRCodeService(QR_DETECT_URL);
     
     // Reset mounted flag
     isMountedRef.current = true;
@@ -55,11 +55,11 @@ export function useMapInfo(): UseMapInfoResult {
   }, []);
   
   /**
-   * Fetch map info from storage
+   * Fetch QR codes from storage
    */
-  const fetchMapInfo = useCallback(async () => {
+  const fetchQRCodes = useCallback(async () => {
     if (!service.current) {
-      console.warn('[useMapInfo] Service not initialized');
+      console.warn('[useQRCodes] Service not initialized');
       return;
     }
     
@@ -79,22 +79,22 @@ export function useMapInfo(): UseMapInfoResult {
     }
     
     try {
-      const info = await service.current.getCurrentMapInfo();
+      const codes = await service.current.getQRCodes();
       
       // Guard: only update state if component is still mounted and not aborted
       if (isMountedRef.current && !abortController.signal.aborted) {
-        setMapInfo(info);
+        setQrCodes(codes);
         setIsLoading(false);
         setError(null);
       }
     } catch (err: any) {
       // Guard: only update state if component is still mounted and not aborted
       if (isMountedRef.current && !abortController.signal.aborted) {
-        const errorMessage = err?.message || 'Failed to fetch map information';
+        const errorMessage = err?.message || 'Failed to fetch QR codes';
         setError(errorMessage);
         setIsLoading(false);
-        setMapInfo(null);
-        console.error('[useMapInfo] Failed to fetch map info:', err);
+        setQrCodes([]);
+        console.error('[useQRCodes] Failed to fetch QR codes:', err);
       }
     } finally {
       // Clear abort controller reference
@@ -106,13 +106,13 @@ export function useMapInfo(): UseMapInfoResult {
   
   // Fetch on mount
   useEffect(() => {
-    fetchMapInfo();
-  }, [fetchMapInfo]);
+    fetchQRCodes();
+  }, [fetchQRCodes]);
   
   return {
-    mapInfo,
+    qrCodes,
     isLoading,
     error,
-    refetch: fetchMapInfo,
+    refetch: fetchQRCodes,
   };
 }

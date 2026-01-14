@@ -5,39 +5,16 @@ import * as THREE from 'three';
 import { Edit, Trash2 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { VehiclePosition } from '../utils/vehicle2DHelper';
-import { getMockQRCodes } from '../mock/qrMockData';
-import { MapInfo } from '../mock/mapInfoMockData';
+import { MapInfo } from '../types/mapInfo';
+import { QRCodeInfo } from '../types/qrCode';
+import { EditingRow, ManualPin } from '../types/upload';
 import PCDMap from '../components/PCDMap';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { useMapImage } from '../hooks/useMapImage';
 import { MAP_2D_IMAGE_URL } from '../constants/mapConfig';
 import { getVehicle2DPosition } from '../utils/vehicle2DHelper';
 import { useMapInfo } from '../hooks/api/useMapInfo';
-
-interface QRCodeInfo {
-  id: string;
-  code: string;
-  position: [number, number];
-  isManual?: boolean; // Đánh dấu dòng được thêm thủ công
-}
-
-interface EditingRow {
-  tempId: string;
-  codeIndex: string;
-  position: [number, number];
-  errors: {
-    codeIndex?: string;
-    position?: string;
-  };
-}
-
-interface ManualPin {
-  id: string;
-  position: [number, number];
-  isActive?: boolean;
-  isDraft?: boolean;
-  label?: string;
-}
+import { useQRCodes } from '../hooks/api/useQRCodes';
 
 // Component cho đường hầm (copy từ VehicleMap)
 const Tunnel: React.FC = () => {
@@ -532,6 +509,8 @@ const Upload: React.FC = () => {
   const pcdObjectUrlRef = useRef<string | null>(null);
   // Fetch map info from storage using hook
   const { mapInfo, isLoading: isLoadingMapInfo, error: mapInfoError } = useMapInfo();
+  // Fetch QR codes from storage using hook
+  const { qrCodes: apiQRCodes, isLoading: isLoadingQRCodes, error: qrCodesError, refetch: refetchQRCodes } = useQRCodes();
   // State quản lý các QR code đang được chỉnh sửa (từ previewQRCodes)
   const [editingExistingQRCodes, setEditingExistingQRCodes] = useState<Map<string, {
     id: string;
@@ -828,19 +807,18 @@ const Upload: React.FC = () => {
     // Sau này có thể thay bằng PCD lấy từ ZIP hoặc backend
     setPcdUrl(DEFAULT_PCD_URL);
 
-    // Lấy mock QR code riêng (không phụ thuộc vị trí phương tiện)
-    // Giữ nguyên mock QR codes vì chưa có API
-    const generatedQRCodes: QRCodeInfo[] = getMockQRCodes().map(qr => ({
-      id: qr.id,
-      code: qr.code,
-      position: qr.position,
-      isManual: qr.isManual ?? false,
-    }));
-    setPreviewQRCodes(generatedQRCodes);
+    // Load QR codes from API (already fetched by useQRCodes hook)
+    // Refresh QR codes when loading ZIP to ensure latest data
+    if (apiQRCodes.length > 0) {
+      setPreviewQRCodes(apiQRCodes);
+    } else if (!isLoadingQRCodes && !qrCodesError) {
+      // If no QR codes and not loading, try to refetch
+      refetchQRCodes();
+    }
 
     // Map info is now loaded automatically via useMapInfo hook
     // No need to manually set it here
-  }, []);
+  }, [apiQRCodes, isLoadingQRCodes, qrCodesError, refetchQRCodes]);
 
   const loadLastZip = useCallback(() => {
     if (isLoadingLastZip) return; // Tránh race/đúp click
@@ -886,6 +864,13 @@ const Upload: React.FC = () => {
       document.body.style.overflow = '';
     };
   }, [isPickingPosition]);
+
+  // Auto-sync QR codes from API when available (only if previewQRCodes is empty)
+  useEffect(() => {
+    if (apiQRCodes.length > 0 && previewQRCodes.length === 0 && !isLoadingQRCodes) {
+      setPreviewQRCodes(apiQRCodes);
+    }
+  }, [apiQRCodes, previewQRCodes.length, isLoadingQRCodes]);
 
   useEffect(() => {
     if (pickingRowId) {
@@ -1053,6 +1038,36 @@ const Upload: React.FC = () => {
           <p className="text-xs text-gray-500 mb-3">
             {t('upload_qr_list_desc')}
           </p>
+          
+          {/* Loading and Error States for QR Codes */}
+          {isLoadingQRCodes && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                <span className="text-sm text-blue-700">{t('loading_qr_codes') || 'Loading QR codes...'}</span>
+              </div>
+            </div>
+          )}
+          {qrCodesError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-sm text-red-700">
+                    {t('error_loading_qr_codes') || 'Error loading QR codes'}: {qrCodesError}
+                  </span>
+                </div>
+                <button
+                  onClick={() => refetchQRCodes()}
+                  className="text-sm text-red-600 hover:text-red-800 underline"
+                >
+                  {t('retry') || 'Retry'}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="border border-gray-200 rounded-lg overflow-hidden">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">

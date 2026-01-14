@@ -1,12 +1,13 @@
-export interface MapInfo {
-  id: string;
-  name: string;           // Tên map
-  createdAt: string;      // Ngày tạo (format: YYYY-MM-DD HH:mm:ss)
-  uploadedBy: string;     // Người tải lên
-  uploadedAt: string;     // Ngày tải lên (format: YYYY-MM-DD HH:mm:ss)
-  fileSize: number;       // Dung lượng (bytes)
-}
+/**
+ * @deprecated Use types from '../../types/mapInfo' instead
+ * This file is kept for backward compatibility only
+ */
+export { MapInfo } from '../types/mapInfo';
 
+/**
+ * Mock data generator for MapInfo
+ * @deprecated This is only used for testing/mocking purposes
+ */
 export const getMockMapInfo = (): MapInfo => ({
   id: 'map-001',
   name: 'Tunnel Mining Project A',
