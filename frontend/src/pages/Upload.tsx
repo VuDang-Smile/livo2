@@ -394,7 +394,8 @@ const Image2DPreview: React.FC<{
       const imgY = (clickY - offsetY) / scale;
 
       // Validate inside image bounds
-      if (imgX < 0 || imgY < 0 || imgX > imageWidth || imgY > imageHeight) {
+      // Bounds check: valid pixel indices are [0, width-1] and [0, height-1]
+      if (imgX < 0 || imgY < 0 || imgX >= imageWidth || imgY >= imageHeight) {
         return;
       }
 
