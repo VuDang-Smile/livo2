@@ -1404,9 +1404,6 @@ class WorkerInterface:
         self.status_text.config(text=self.translator.get('label.stopped', 'System: Stopped'))
         # Reset pose display
         self.reset_pose_display()
-        # Cập nhật trạng thái vehicle thành offline
-        if self.vehicle_id:
-            self.update_vehicle_status("offline")
         self.log(self.translator.get('log.stop_localization_requested', 'COMMAND: Stop localization requested.'))
     
     def download_map_and_qr(self):

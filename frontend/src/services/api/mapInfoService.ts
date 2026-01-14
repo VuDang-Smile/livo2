@@ -8,21 +8,8 @@
  * Data Source: http://storage.lidar.tm/metadata_map.json
  */
 
-import { MapInfo } from '../../mock/mapInfoMockData';
+import { MapInfo, MapInfoApiResponse } from '../../types/mapInfo';
 import { formatISOToDisplay } from '../../utils/dateFormatters';
-
-/**
- * Raw response from metadata_map.json API
- */
-interface MapInfoApiResponse {
-  map_name: string;
-  vehicle_name: string;
-  vehicle_id: string;
-  size_bytes: number;
-  size_mb?: number;
-  created_at: string; // ISO 8601 format
-  uploaded_at: string; // ISO 8601 format
-}
 
 export class MapInfoService {
   constructor(private metadataUrl: string) {

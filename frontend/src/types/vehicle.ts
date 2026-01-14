@@ -12,6 +12,8 @@ export interface VehicleMarker3D {
   color: string;
   showOrientation: boolean;
   status?: 'online' | 'offline';
+  name?: string; // Vehicle name from API
+  type?: string; // Vehicle type from API (scanner, worker, etc.)
 }
 
 /**
@@ -25,6 +27,9 @@ export interface VehicleMarker2D {
   showOrientation: boolean;
   label: string;
   lastUpdate: Date;
+  name?: string; // Vehicle name from API
+  type?: string; // Vehicle type from API (scanner, worker, etc.)
+  status?: 'online' | 'offline'; // Vehicle status from API
 }
 
 /**

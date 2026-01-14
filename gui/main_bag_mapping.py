@@ -1237,9 +1237,13 @@ class BagMappingInterface:
                 else:
                     upload_msg = "✅ Backend upload successful"
                 self.add_log(upload_msg)
+                # Enable lại nút upload khi thành công
+                self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
             else:
                 fail_reason = upload_info or "Unknown error"
                 self.add_log(self.translator.get('log.upload_backend_failed', '⚠️ Backend upload failed: {reason}').replace('{reason}', str(fail_reason)))
+                # Enable lại nút upload khi thất bại để có thể thử lại
+                self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
             
             self.root.after(0, lambda: self.set_progress(100))
             self.root.after(0, lambda: self.upload_stat.config(text="100% - Done"))
@@ -3094,7 +3098,6 @@ class BagMappingInterface:
         self.cleanup_processes()
         self.btn_start.config(state=tk.NORMAL)
         self.set_progress(0)
-        self.status_label.config(text=self.translator.get('label.status_stopped', 'Status: Stopped'))
         self.add_log(self.translator.get('log.process_terminated', 'PROCESS: Mapping and Upload terminated.'))
         # Flag sẽ được reset trong cleanup_processes()
 

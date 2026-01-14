@@ -115,13 +115,15 @@ app = FastAPI(
 )
 
 # CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # In production, specify allowed origins
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# NOTE: CORS is handled by nginx reverse proxy, so we disable it here to avoid duplicate headers
+# If accessing backend directly (not through nginx), uncomment this middleware
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],  # In production, specify allowed origins
+#     allow_credentials=False,  # Must be False when using wildcard origin
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 # Include routers
 app.include_router(upload.router, prefix="/api/v1")

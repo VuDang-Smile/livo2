@@ -22,6 +22,12 @@ export const MAP_INFO_URL =
   'http://storage.lidar.tm/metadata_map.json';
 
 /**
+ * URL JSON cho danh sách QR codes được detect
+ */
+export const QR_DETECT_URL =
+  'http://storage.lidar.tm/QR_detect.json';
+
+/**
  * URL ảnh floorplan 2D cho từng view
  */
 export const MAP_FLOORPLAN_IMAGE_URLS: Record<
