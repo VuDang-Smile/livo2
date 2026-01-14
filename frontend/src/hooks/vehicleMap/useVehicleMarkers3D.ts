@@ -8,6 +8,14 @@ import { useMQTTPositionHandler } from '../shared/useMQTTPositionHandler';
 const DEBUG = process.env.REACT_APP_DEBUG_LOGS === '1';
 
 /**
+ * Helper function to get marker color based on status
+ * Green for online, red for offline
+ */
+function getMarkerColorByStatus(status: 'online' | 'offline' | undefined): string {
+  return status === 'online' ? '#22c55e' : '#ef4444'; // Green for online, red for offline
+}
+
+/**
  * Hook to manage vehicle markers for 3D monitoring mode
  * Handles MQTT position updates, API vehicle fetching, and timeout cleanup
  */
@@ -69,14 +77,16 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
           position = [0, 0, 0];
         }
 
-        const color = v.type === 'scanner' || v.vehicle_type === 'scanner' ? '#4f46e5' : '#ef4444';
+        // Determine color based on status: green for online, red for offline
+        const vehicleStatus = v.status || 'offline';
+        const color = getMarkerColorByStatus(vehicleStatus);
         markers.push({
           id: vehicleId,
           position,
           orientation,
           color,
           showOrientation,
-          status: v.status || 'offline',
+          status: vehicleStatus,
           name: v.name || vehicleId,
           type: v.vehicle_type || v.type || 'worker'
         });
@@ -132,20 +142,20 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
       // Get vehicle info from API if available
       const apiVehicle = apiVehicles.get(vehicleId);
       
-      // Determine color based on vehicle type from API or default
-      const color = apiVehicle?.type === 'scanner' || apiVehicle?.vehicle_type === 'scanner' 
-        ? '#4f46e5' 
-        : '#ef4444';
+      // Determine color based on status: green for online, red for offline
+      // Position update means vehicle is definitely online
+      const color = getMarkerColorByStatus('online'); // Green for online
       
-      // Merge: use API info (name, type, status) and update position from MQTT
+      // Merge: use API info (name, type) and update position from MQTT
+      // If we receive position update from MQTT, vehicle is definitely online
       const existingMarker = next.get(vehicleId);
       const newMarker: VehicleMarker3D = {
         id: vehicleId,
         position: positionData.position,
         orientation: positionData.orientation,
-        color: existingMarker?.color || color,
+        color, // Always green when receiving position updates (online)
         showOrientation: positionData.showOrientation,
-        status: apiVehicle?.status || existingMarker?.status || 'online',
+        status: 'online', // Position update means vehicle is online
         name: apiVehicle?.name || existingMarker?.name || vehicleId,
         type: apiVehicle?.vehicle_type || apiVehicle?.type || existingMarker?.type || 'worker'
       };
@@ -161,7 +171,7 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
   }, [lastPositionUpdate, extractPose, isExcludedVehicle, apiVehicles]);
 
   /**
-   * Handle vehicle status updates - remove markers when status = offline
+   * Handle vehicle status updates - update status instead of removing when offline
    */
   useEffect(() => {
     if (!lastVehicleStatus) return;
@@ -173,36 +183,74 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
       console.log('🔍 [useVehicleMarkers3D] Vehicle status update:', vehicleId, '->', newStatus);
     }
 
-    if (newStatus === 'offline') {
-      // Remove marker from canvas when vehicle goes offline
-      setVehicleMarkers((prev) => {
-        const filtered = prev.filter(marker => marker.id !== vehicleId);
-        if (filtered.length < prev.length) {
-          console.log('🗑️ [useVehicleMarkers3D] Removed marker for offline vehicle:', vehicleId);
+    setVehicleMarkers((prev) => {
+      const existingMarker = prev.find(marker => marker.id === vehicleId);
+      
+      if (existingMarker) {
+        // Marker exists - update status and color
+        const validStatus: 'online' | 'offline' =
+          newStatus === 'online' ? 'online' : 'offline';
+        
+        // Update color based on new status: green for online, red for offline
+        const newColor = getMarkerColorByStatus(validStatus);
+        
+        if (DEBUG) {
+          console.log('✅ Updated marker status:', vehicleId, existingMarker.status || 'unknown', '->', validStatus);
         }
-        return filtered;
-      });
-    } else {
-      // Update marker status for other status changes
-      setVehicleMarkers((prev) => {
-        return prev.map(marker => {
-          if (marker.id === vehicleId) {
-            if (DEBUG) {
-              console.log('✅ Updated marker status:', vehicleId, marker.status || 'unknown', '->', newStatus);
+        
+        return prev.map(marker => 
+          marker.id === vehicleId 
+            ? { ...marker, status: validStatus, color: newColor }
+            : marker
+        );
+      } else if (newStatus === 'online') {
+        // Marker doesn't exist but coming online - create from API data
+        const apiVehicle = apiVehicles.get(vehicleId);
+        if (apiVehicle) {
+          let position: [number, number, number];
+          let orientation: [number, number, number, number] | undefined;
+          let showOrientation = false;
+
+          if (apiVehicle.current_pose?.position) {
+            const pos = apiVehicle.current_pose.position;
+            position = [pos.x, pos.y, pos.z];
+            if (apiVehicle.current_pose.orientation) {
+              const orient = apiVehicle.current_pose.orientation;
+              orientation = [orient.w, orient.x, orient.y, orient.z];
+              showOrientation = true;
             }
-            // Only two states are supported: online/offline
-            const validStatus: 'online' | 'offline' =
-              newStatus === 'online' ? 'online' : 'offline';
-            return {
-              ...marker,
-              status: validStatus
-            };
+          } else if (apiVehicle.current_position) {
+            const pos = apiVehicle.current_position;
+            position = [pos.x, pos.y, pos.z];
+          } else {
+            // Use default position if no position data
+            position = [0, 0, 0];
           }
-          return marker;
-        });
-      });
-    }
-  }, [lastVehicleStatus]);
+
+          // Determine color based on status: green for online, red for offline
+          const color = getMarkerColorByStatus('online'); // Green for online (we're in the online branch)
+          
+          const newMarker: VehicleMarker3D = {
+            id: vehicleId,
+            position,
+            orientation,
+            color,
+            showOrientation,
+            status: 'online',
+            name: apiVehicle.name || vehicleId,
+            type: apiVehicle.vehicle_type || apiVehicle.type || 'worker'
+          };
+          
+          if (DEBUG) {
+            console.log('✅ Created marker from API (coming online):', vehicleId);
+          }
+          return [...prev, newMarker];
+        }
+      }
+      
+      return prev;
+    });
+  }, [lastVehicleStatus, apiVehicles]);
 
   return {
     vehicleMarkers,

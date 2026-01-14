@@ -33,13 +33,25 @@ const VehicleMarker: React.FC<{
   isSelected?: boolean; 
   onSelect?: () => void;
 }> = ({ marker, isSelected = false, onSelect }) => {
-  const meshRef = useRef<THREE.Mesh>(null);
+  const groupRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = React.useState(false);
   
-  // Animation cho phương tiện
+  // Transform coordinates to match PCD rotation: [x, y, z] -> [x, z, -y]
+  // PCD is rotated [-Math.PI / 2, 0, 0] (90 degrees around X axis)
+  // This means: Y -> Z, Z -> -Y, X stays the same
+  const basePosition: [number, number, number] = [
+    marker.position[0],  // X stays the same
+    marker.position[2],  // Z becomes Y
+    -marker.position[1]  // -Y becomes Z
+  ];
+  
+  // Animation cho phương tiện - animate on Z axis (vertical after rotation)
   useFrame((state) => {
-    if (meshRef.current) {
-      meshRef.current.position.y = marker.position[1] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
+    if (groupRef.current) {
+      // Update all position components to ensure sync with basePosition changes
+      groupRef.current.position.x = basePosition[0];
+      groupRef.current.position.y = basePosition[1];
+      groupRef.current.position.z = basePosition[2] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
     }
   });
 
@@ -48,12 +60,13 @@ const VehicleMarker: React.FC<{
 
   return (
     <group
-      position={[marker.position[0], marker.position[1], marker.position[2]]}
+      ref={groupRef}
+      position={basePosition}
       onPointerOver={() => setHovered(true)}
       onPointerOut={() => setHovered(false)}
       onClick={onSelect}
     >
-      <mesh ref={meshRef}>
+      <mesh>
         <boxGeometry args={[size, size, size]} />
         <meshStandardMaterial color={color} />
       </mesh>
@@ -105,10 +118,11 @@ const MapView3D: React.FC<MapView3DProps> = ({
     const selectedMarker = vehicleMarkers.find(m => m.id === selectedVehicleId);
     if (!selectedMarker) return;
 
+    // Transform coordinates to match PCD rotation: [x, y, z] -> [x, z, -y]
     const targetPosition = new THREE.Vector3(
-      selectedMarker.position[0],
-      selectedMarker.position[1],
-      selectedMarker.position[2]
+      selectedMarker.position[0],  // X stays the same
+      selectedMarker.position[2],  // Z becomes Y
+      -selectedMarker.position[1]   // -Y becomes Z
     );
 
     const currentTarget = controls.target.clone();

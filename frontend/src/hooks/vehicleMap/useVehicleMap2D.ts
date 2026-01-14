@@ -186,7 +186,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
           // Keep API info if available
           name: apiVehicle?.name || existingVehicle.name,
           type: apiVehicle?.vehicle_type || apiVehicle?.type || existingVehicle.type,
-          status: apiVehicle?.status || existingVehicle.status || 'online'
+          status: 'online' as const // Position update means vehicle is online
         } as Vehicle & { source: 'mqtt' };
 
         if (DEBUG) {
@@ -203,7 +203,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
           id: lastPositionUpdate.vehicle_id,
           name: apiVehicle?.name || `Vehicle ${lastPositionUpdate.vehicle_id}`,
           type: apiVehicle?.vehicle_type || apiVehicle?.type,
-          status: apiVehicle?.status || 'online' as const,
+          status: 'online' as const, // Position update means vehicle is online
           position: newPosition,
           timestamp: timestamp as string,
           source: 'mqtt' as const
@@ -221,7 +221,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
   }, [lastPositionUpdate, extractPosition, isExcludedVehicle, apiVehicles]);
 
   /**
-   * Handle vehicle status updates - remove from list and canvas when status = offline
+   * Handle vehicle status updates - update status instead of removing when offline
    */
   useEffect(() => {
     if (!lastVehicleStatus) return;
@@ -233,44 +233,53 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
       console.log('🔍 [useVehicleMap2D] Vehicle status update:', vehicleId, '->', newStatus);
     }
 
-    if (newStatus === 'offline') {
-      // Remove vehicle from list when status = offline
-      setMapVehicles((prev) => {
-        const filtered = prev.filter(vehicle => vehicle.id !== vehicleId);
-        if (filtered.length < prev.length) {
-          console.log('🗑️ [useVehicleMap2D] Removed vehicle from list (offline):', vehicleId);
+    // Update vehicle status instead of removing
+    setMapVehicles((prev) => {
+      const existingIndex = prev.findIndex(vehicle => vehicle.id === vehicleId);
+      
+      if (existingIndex >= 0) {
+        // Vehicle exists - update status
+        const updatedVehicles = [...prev];
+        const validStatus: 'online' | 'offline' =
+          newStatus === 'online' ? 'online'
+          : newStatus === 'offline' ? 'offline'
+          : prev[existingIndex].status;
+        
+        updatedVehicles[existingIndex] = {
+          ...prev[existingIndex],
+          status: validStatus
+        };
+        
+        if (DEBUG) {
+          console.log('✅ Updated vehicle status:', vehicleId, prev[existingIndex].status, '->', validStatus);
         }
-        return filtered;
-      });
-
-      // Remove from lastSeen tracking
-      setVehicleLastSeen(prev => {
-        const updated = new Map(prev);
-        updated.delete(vehicleId);
-        return updated;
-      });
-    } else {
-      // Update vehicle status for other status changes
-      setMapVehicles((prev) => {
-        return prev.map(vehicle => {
-          if (vehicle.id === vehicleId) {
-            if (DEBUG) {
-              console.log('✅ Updated vehicle status:', vehicleId, vehicle.status, '->', newStatus);
-            }
-            // Only two states are supported: online/offline
-            const validStatus: 'online' | 'offline' =
-              newStatus === 'online' ? 'online'
-              : newStatus === 'offline' ? 'offline'
-              : vehicle.status;
-            return {
-              ...vehicle,
-              status: validStatus
-            };
+        return updatedVehicles;
+      } else if (newStatus === 'online') {
+        // Vehicle doesn't exist but coming online - create from API data
+        const apiVehicle = apiVehicles.get(vehicleId);
+        if (apiVehicle) {
+          const position = apiVehicle.current_pose?.position || apiVehicle.current_position || { x: 0, y: 0, z: 0 };
+          const timestamp = apiVehicle.current_pose?.timestamp || apiVehicle.updated_at || new Date().toISOString();
+          
+          const newVehicle: Vehicle = {
+            id: vehicleId,
+            name: apiVehicle.name || vehicleId,
+            type: apiVehicle.vehicle_type || apiVehicle.type,
+            status: 'online' as const,
+            position,
+            timestamp,
+            source: 'api' as const
+          };
+          
+          if (DEBUG) {
+            console.log('✅ Created vehicle from API (coming online):', vehicleId);
           }
-          return vehicle;
-        });
-      });
-    }
+          return [...prev, newVehicle];
+        }
+      }
+      
+      return prev;
+    });
 
     // Remove from lastSeen if vehicle is deleted
     if (newStatus === 'deleted' || (lastVehicleStatus.action && lastVehicleStatus.action === 'deleted')) {
@@ -280,7 +289,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
         return updated;
       });
     }
-  }, [lastVehicleStatus]);
+  }, [lastVehicleStatus, apiVehicles]);
 
   /**
    * Filter vehicles: excluding excluded vehicles
