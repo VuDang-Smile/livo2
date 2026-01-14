@@ -16,7 +16,7 @@ export const VehicleStatusCard: React.FC<VehicleStatusCardProps> = ({ statusKey,
   const isTotal = statusKey === 'total';
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+    <div className="bg-white px-4 py-3 rounded-lg shadow-sm border border-gray-200">
       <div className="flex items-center">
         <div className={`p-2 rounded-lg ${config.bgClass}`}>
           {isTotal ? (
@@ -37,9 +37,9 @@ export const VehicleStatusCard: React.FC<VehicleStatusCardProps> = ({ statusKey,
             <div className={`w-4 h-4 rounded-full ${config.colorClass}`} />
           )}
         </div>
-        <div className="ml-4">
-          <p className="text-sm font-medium text-gray-600">{label}</p>
-          <p className="text-2xl font-bold text-gray-900">{value}</p>
+        <div className="ml-3">
+          <p className="text-xs font-medium text-gray-600 leading-tight">{label}</p>
+          <p className="text-xl font-bold text-gray-900 leading-tight mt-1">{value}</p>
         </div>
       </div>
     </div>
