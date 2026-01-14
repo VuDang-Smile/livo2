@@ -343,13 +343,16 @@ const Image2DPreview: React.FC<{
 
       const { x, y } = canvasPos;
 
+      // Draw square marker for QR codes
+      const size = pin.isActive ? 14 : 12;
+      const halfSize = size / 2;
       ctx.beginPath();
-      ctx.arc(x, y, pin.isActive ? 9 : 7, 0, 2 * Math.PI);
-      ctx.fillStyle = pin.isDraft ? '#0ea5e9' : '#6b7280';
+      ctx.rect(x - halfSize, y - halfSize, size, size);
+      ctx.fillStyle = pin.isDraft ? '#93c5fd' : '#93c5fd'; // Light blue for all QR markers
       ctx.globalAlpha = pin.isActive ? 0.9 : 0.75;
       ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = pin.isActive ? '#2563eb' : '#111827';
+      ctx.strokeStyle = pin.isActive ? '#3b82f6' : '#2563eb'; // Blue border
       ctx.lineWidth = pin.isActive ? 2 : 1.5;
       ctx.stroke();
 
