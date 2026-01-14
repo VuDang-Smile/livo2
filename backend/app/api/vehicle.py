@@ -266,8 +266,15 @@ async def update_vehicle_status(
         if not vehicle:
             raise HTTPException(status_code=404, detail="Vehicle not found")
         
-        # Update status (convert enum to string for database)
+        # Auto-online: If vehicle is offline and receiving heartbeat (online status), auto-switch to online
+        current_status = vehicle.get("status", "offline")
         status_value = status_request.status.value
+        
+        # If vehicle is offline and receiving online heartbeat, automatically switch to online
+        if current_status == "offline" and status_value == "online":
+            logger.info(f"Vehicle {vehicle_id} is offline but receiving heartbeat, auto-switching to online")
+        
+        # Update status (convert enum to string for database)
         success = await database_service.update_vehicle_status(vehicle_id, status_value)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update vehicle status")

@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.services.database_service import database_service
 from app.services.mqtt_service import mqtt_service
+from app.services.vehicle_status_service import vehicle_status_service
 from app.api import upload, vehicle
 
 # Configure logging
@@ -44,6 +45,13 @@ async def lifespan(app: FastAPI):
         logger.info("MQTT service initialized")
     except Exception as e:
         logger.warning(f"Failed to connect to MQTT (will retry): {e}")
+    
+    # Start vehicle status monitoring service
+    try:
+        await vehicle_status_service.start()
+        logger.info("VehicleStatusService started")
+    except Exception as e:
+        logger.warning(f"Failed to start VehicleStatusService: {e}")
     
     # Auto-extract current map on startup if storage is empty
     try:
@@ -101,6 +109,10 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down...")
+    try:
+        await vehicle_status_service.stop()
+    except Exception as e:
+        logger.warning(f"Error stopping VehicleStatusService: {e}")
     await database_service.disconnect()
     mqtt_service.disconnect()
     logger.info("Shutdown complete")
