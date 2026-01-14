@@ -43,6 +43,15 @@ const VehicleMap: React.FC = () => {
   const { vehicleMarkers: markers2D, mapMetadata: poseMetadata } = useVehiclePose2D(selectedView);
   const { mapVehicles } = useVehicleMap2D();
 
+  // Khoá scroll toàn bộ trang khi vào VehicleMap, trả lại trạng thái cũ khi rời trang
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
   // Map metadata is now loaded by useVehiclePose2D hook from local files
   // No need to load from API anymore
   useEffect(() => {
@@ -216,7 +225,7 @@ const VehicleMap: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col h-screen space-y-6 overflow-hidden px-4 py-4 md:px-6 md:py-6">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
@@ -320,7 +329,7 @@ const VehicleMap: React.FC = () => {
 
       {/* Map Container with Vehicle List */}
       <div className={`bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden ${
-        isFullscreen ? 'fixed inset-0 z-50' : 'h-[70vh] min-h-[400px]'
+        isFullscreen ? 'fixed inset-0 z-50' : 'flex-1 min-h-0'
       }`}>
         {isFullscreen && (
           <div className="absolute top-4 right-4 z-10">
@@ -335,9 +344,9 @@ const VehicleMap: React.FC = () => {
           </div>
         )}
         
-        <div className="flex h-full">
+        <div className="flex h-full flex-col md:flex-row">
           {/* Map Container */}
-          <div className="flex-1">
+          <div className="flex-1 min-h-0">
             {viewMode === '3D' ? (
               <div className="relative w-full h-full">
                 <MapView3D
@@ -413,7 +422,7 @@ const VehicleMap: React.FC = () => {
           </div>
           
           {/* Vehicle List Sidebar */}
-          <div className="w-80 bg-gray-50 border-l border-gray-200 overflow-y-auto">
+          <div className="w-full md:w-80 bg-gray-50 border-t md:border-t-0 md:border-l border-gray-200 overflow-y-auto h-64 md:h-auto">
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">{t('vehicle_list_title')}</h3>
