@@ -220,6 +220,8 @@ class DatabaseService:
                 update_data["status"] = updates["status"]
             if "metadata" in updates:
                 update_data["metadata"] = updates["metadata"]
+            if "vehicle_category" in updates:
+                update_data["vehicle_category"] = updates["vehicle_category"]
             
             # Always update updated_at in UTC
             update_data["updated_at"] = now_utc()

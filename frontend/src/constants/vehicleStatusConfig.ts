@@ -1,6 +1,6 @@
-import { Vehicle } from '../types/vehicleMap2D';
+import { VehicleMapVehicle } from '../types/vehicle';
 
-export type VehicleStatusKey = Exclude<Vehicle['status'], undefined> | 'total';
+export type VehicleStatusKey = VehicleMapVehicle['status'] | 'total';
 
 export interface VehicleStatusConfigItem {
   key: VehicleStatusKey;

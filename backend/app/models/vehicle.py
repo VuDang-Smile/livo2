@@ -11,6 +11,16 @@ class VehicleStatus(str, Enum):
     OFFLINE = "offline"
 
 
+class VehicleCategory(str, Enum):
+    """High-level vehicle category (xe ủi, máy xúc, xe tải, ...)."""
+    EXCAVATOR = "excavator"
+    BULLDOZER = "bulldozer"
+    TRUCK = "truck"
+    LOADER = "loader"
+    CRANE = "crane"
+    OTHER = "other"
+
+
 class Position(BaseModel):
     """3D position."""
     x: float
@@ -54,6 +64,7 @@ class VehicleResponse(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     vehicle_type: Optional[str] = None
+    vehicle_category: Optional[VehicleCategory] = None
     status: VehicleStatus = VehicleStatus.OFFLINE
     metadata: Optional[dict] = None
     created_at: datetime
@@ -66,6 +77,7 @@ class VehicleListItem(BaseModel):
     latest_pose: Pose
     name: Optional[str] = None
     vehicle_type: Optional[str] = None
+    vehicle_category: Optional[VehicleCategory] = None
     status: VehicleStatus = VehicleStatus.OFFLINE
     updated_at: datetime
 
@@ -82,6 +94,10 @@ class VehicleRegisterRequest(BaseModel):
     name: Optional[str] = Field(None, description="Vehicle name")
     description: Optional[str] = Field(None, description="Vehicle description")
     vehicle_type: Optional[str] = Field(None, description="Vehicle type (e.g., robot, drone, car)")
+    vehicle_category: Optional[VehicleCategory] = Field(
+        None,
+        description="High-level vehicle category (e.g., excavator, bulldozer, truck)",
+    )
     status: Optional[VehicleStatus] = Field(VehicleStatus.OFFLINE, description="Vehicle status: online or offline")
     metadata: Optional[dict] = Field(None, description="Additional metadata")
 
@@ -106,6 +122,10 @@ class VehicleUpdateRequest(BaseModel):
     vehicle_type: Optional[str] = Field(None, description="Vehicle type (e.g., robot, drone, car)")
     status: Optional[VehicleStatus] = Field(None, description="Vehicle status: online or offline")
     metadata: Optional[dict] = Field(None, description="Additional metadata")
+    vehicle_category: Optional[VehicleCategory] = Field(
+        None,
+        description="High-level vehicle category (e.g., excavator, bulldozer, truck)",
+    )
 
 
 class VehicleUpdateResponse(BaseModel):

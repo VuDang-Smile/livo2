@@ -1,18 +1,4 @@
-/**
- * Vehicle position interface for 2D map rendering
- * Tách ra từ mock data để có thể sử dụng độc lập
- */
-export interface VehiclePosition {
-  id: string;
-  licensePlate?: string;
-  driver?: string;
-  vehicleType?: string;
-  mission?: string;
-  position: [number, number, number];
-  position2D?: [number, number]; // Normalized coordinates [0-1, 0-1] for 2D map rendering
-  status?: 'online' | 'offline';
-  lastUpdate?: string;
-}
+import type { VehicleCanvasPosition } from '../types/vehicle';
 
 /**
  * Lấy tọa độ 2D của vehicle trên canvas
@@ -22,7 +8,7 @@ export interface VehiclePosition {
  * @returns Tọa độ pixel trên canvas {x, y}
  */
 export function getVehicle2DPosition(
-  vehicle: VehiclePosition,
+  vehicle: VehicleCanvasPosition,
   canvasWidth: number,
   canvasHeight: number
 ): { x: number; y: number } {

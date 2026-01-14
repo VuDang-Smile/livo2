@@ -9,7 +9,7 @@ import { PCDClipControls } from '../components/PCDClipControls';
 import { PointCloudBounds } from '../components/PCDMap';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { MapMetadata } from '../types/mapMetadata';
-import { Vehicle } from '../types/vehicleMap2D';
+import { VehicleMapVehicle } from '../types/vehicle';
 import VehicleStatusCard from '../components/vehicleMap/VehicleStatusCard';
 
 // Component chính cho trang

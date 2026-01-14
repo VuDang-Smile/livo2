@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useMQTT, PositionUpdateNotification } from '../../contexts/MQTTContext';
 import { transformPoseToPixel } from '../../utils/coordinateTransform';
 import { MapMetadata, Pose3D } from '../../types/mapMetadata';
-import { VehicleMarker2D } from '../../types/vehicle';
+import { VehicleMarker2D, ApiVehicle } from '../../types/vehicle';
 import { UseVehiclePose2DResult } from '../../types/monitoring';
 import { MAP_FLOORPLAN_METADATA_URL } from '../../config/dataSources';
 import { useVehicleService } from '../api/useVehicleService';
@@ -112,13 +112,13 @@ export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): Use
         vehiclesMap.set(vehicleId, v);
         
         // Create marker for all vehicles (even without position) to show in sidebar
-        if (v.current_pose?.position || v.current_position) {
+        if (v.latest_pose?.position) {
           // Vehicle has position - transform to 2D pixel coordinates
           const pose: Pose3D = {
-            position: v.current_pose?.position || v.current_position!,
-            orientation: v.current_pose?.orientation || { x: 0, y: 0, z: 0, w: 1 },
-            frame_id: v.current_pose?.frame_id || 'map',
-            timestamp: v.current_pose?.timestamp || v.updated_at || new Date().toISOString()
+            position: v.latest_pose.position,
+            orientation: v.latest_pose.orientation || { x: 0, y: 0, z: 0, w: 1 },
+            frame_id: 'map',
+            timestamp: v.latest_pose.timestamp || v.updated_at || new Date().toISOString()
           };
           
           // Transform 3D pose → 2D pixel coordinates
@@ -146,7 +146,8 @@ export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): Use
               label: v.name || vehicleId,
               lastUpdate: new Date(pose.timestamp || Date.now()),
               name: v.name,
-              type: v.vehicle_type || v.type,
+              vehicleType: v.vehicle_type,
+              vehicleCategory: v.vehicle_category,
               status: vehicleStatus
             });
           } else {
@@ -162,7 +163,8 @@ export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): Use
               label: v.name || vehicleId,
               lastUpdate: new Date(),
               name: v.name,
-              type: v.vehicle_type || v.type,
+              vehicleType: v.vehicle_type,
+              vehicleCategory: v.vehicle_category,
               status: vehicleStatus
             });
           }
@@ -367,12 +369,12 @@ export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): Use
       } else if (newStatus === 'online' && mapMetadata) {
         // Marker doesn't exist but coming online - create from API data
         const apiVehicle = apiVehicles.get(vehicleId);
-        if (apiVehicle && (apiVehicle.current_pose?.position || apiVehicle.current_position)) {
+        if (apiVehicle && apiVehicle.latest_pose?.position) {
           const pose: Pose3D = {
-            position: apiVehicle.current_pose?.position || apiVehicle.current_position!,
-            orientation: apiVehicle.current_pose?.orientation || { x: 0, y: 0, z: 0, w: 1 },
-            frame_id: apiVehicle.current_pose?.frame_id || 'map',
-            timestamp: apiVehicle.current_pose?.timestamp || apiVehicle.updated_at || new Date().toISOString()
+            position: apiVehicle.latest_pose.position,
+            orientation: apiVehicle.latest_pose.orientation || { x: 0, y: 0, z: 0, w: 1 },
+            frame_id: 'map',
+            timestamp: apiVehicle.latest_pose.timestamp || apiVehicle.updated_at || new Date().toISOString()
           };
           
           const debugMode = process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEBUG_LOGS === '1';
