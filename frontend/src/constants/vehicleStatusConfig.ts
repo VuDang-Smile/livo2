@@ -1,6 +1,6 @@
-import { VehicleMapVehicle } from '../types/vehicle';
+import { MapVehicle } from '../types/vehicle';
 
-export type VehicleStatusKey = VehicleMapVehicle['status'] | 'total';
+export type VehicleStatusKey = MapVehicle['status'] | 'total';
 
 export interface VehicleStatusConfigItem {
   key: VehicleStatusKey;

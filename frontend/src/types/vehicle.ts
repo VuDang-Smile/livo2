@@ -4,7 +4,7 @@
  * Quy ước:
  * - API layer: mirror backend, dùng snake_case (VehicleApi*, VehicleStatus, VehicleCategory, VehicleApiPose, ...).
  * - Domain/UI: dùng camelCase, thuận tiện cho logic & hiển thị (Vehicle, VehicleFormData, ...).
- * - Map/canvas: type riêng cho 2D/3D map, canvas (VehicleMapVehicle, VehicleCanvasPosition, ...).
+ * - Map/canvas: type riêng cho 2D/3D map, canvas (MapVehicle, VehicleCanvasPosition, ...).
  * - Marker: view-model cho render (VehicleMarker3D, VehicleMarker2D).
  */
 
@@ -91,9 +91,15 @@ export interface VehicleFormData {
  * ========================= */
 
 /**
- * Vehicle xuất hiện trên bản đồ 2D (normalized domain cho map).
+ * Vehicle được track trên bản đồ (2D/3D).
+ * 
+ * Được merge từ nhiều nguồn:
+ * - API: thông tin cơ bản (name, type, category) và position ban đầu
+ * - MQTT: position updates real-time (overwrite position/timestamp khi có)
+ * 
+ * Field `source` cho biết nguồn dữ liệu mới nhất (api hoặc mqtt).
  */
-export interface VehicleMapVehicle {
+export interface MapVehicle {
   id: string;
   name: string;
   vehicleType?: string;

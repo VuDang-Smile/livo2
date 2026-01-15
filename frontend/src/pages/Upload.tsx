@@ -4,7 +4,7 @@ import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { Edit, Trash2 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { VehiclePosition } from '../utils/vehicle2DHelper';
+import type { VehicleCanvasPosition } from '../types/vehicle';
 import { MapInfo } from '../types/mapInfo';
 import { QRCodeInfo } from '../types/qrCode';
 import { EditingRow, ManualPin } from '../types/upload';
@@ -63,7 +63,7 @@ const Tunnel: React.FC = () => {
 
 // Component cho phương tiện (copy từ VehicleMap)
 const Vehicle: React.FC<{ 
-  vehicle: VehiclePosition; 
+  vehicle: VehicleCanvasPosition; 
 }> = ({ vehicle }) => {
   const meshRef = useRef<THREE.Mesh>(null);
   
@@ -130,7 +130,7 @@ const getVehicleGeometry = (vehicleType?: string) => {
 
 // Component cho bản đồ 3D Preview
 const PCDPreview3D: React.FC<{ 
-  vehicles: VehiclePosition[];
+  vehicles: VehicleCanvasPosition[];
   pcdUrl?: string | null;
 }> = ({ vehicles, pcdUrl }) => {
   return (
@@ -183,7 +183,7 @@ const PCDPreview3D: React.FC<{
 
 // Component cho bản đồ 2D Preview
 const Image2DPreview: React.FC<{ 
-  vehicles: VehiclePosition[];
+  vehicles: VehicleCanvasPosition[];
   qrPins?: ManualPin[];
   picking?: boolean;
   onPick?: (pos: [number, number]) => void;
@@ -570,7 +570,7 @@ const Upload: React.FC = () => {
   const { t } = useLanguage();
   const [selectedZipName, setSelectedZipName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [previewVehicles, setPreviewVehicles] = useState<VehiclePosition[]>([]);
+  const [previewVehicles, setPreviewVehicles] = useState<VehicleCanvasPosition[]>([]);
   // Danh sách QRCode ban đầu rỗng; chỉ hiển thị sau khi người dùng click "Load ZIP gần nhất"
   const [previewQRCodes, setPreviewQRCodes] = useState<QRCodeInfo[]>([]);
   // State quản lý các dòng đang chỉnh sửa

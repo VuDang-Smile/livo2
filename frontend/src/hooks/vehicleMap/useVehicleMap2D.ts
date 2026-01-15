@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useMQTT } from '../../contexts/MQTTContext';
-import { VehicleMapVehicle, VehicleMapResponse } from '../../types/vehicle';
+import { MapVehicle, VehicleMapResponse } from '../../types/vehicle';
 import { UseVehicleMap2DResult } from '../../types/monitoring';
 import { useMQTTPositionHandler } from '../shared/useMQTTPositionHandler';
 import { useVehicleTimeout } from '../shared/useVehicleTimeout';
@@ -20,7 +20,7 @@ const DEBUG = process.env.REACT_APP_DEBUG_LOGS === '1';
  */
 export function useVehicleMap2D(): UseVehicleMap2DResult {
   const [mapData, setMapData] = useState<VehicleMapResponse | null>(null);
-  const [mapVehicles, setMapVehicles] = useState<VehicleMapVehicle[]>([]);
+  const [mapVehicles, setMapVehicles] = useState<MapVehicle[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [vehicleLastSeen, setVehicleLastSeen] = useState<Map<string, number>>(new Map());
@@ -64,7 +64,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
       setLoading(true);
       const vehicles = await vehicleService.getVehicles();
       const vehiclesMap = new Map<string, ApiVehicle>();
-      const transformedVehicles: VehicleMapVehicle[] = [];
+      const transformedVehicles: MapVehicle[] = [];
       
       (Array.isArray(vehicles) ? vehicles : []).forEach((v: ApiVehicle) => {
         const vehicleId = v.vehicle_id;
@@ -201,7 +201,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
       } else {
         // Create new vehicle - merge API info with MQTT data
         const timestamp = extractTimestampStringFromMQTT(lastPositionUpdate, true);
-        const newVehicle: VehicleMapVehicle = {
+        const newVehicle: MapVehicle = {
           id: lastPositionUpdate.vehicle_id,
           name: apiVehicle?.name || `Vehicle ${lastPositionUpdate.vehicle_id}`,
           vehicleType: apiVehicle?.vehicle_type,
@@ -265,7 +265,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
           const timestamp =
             apiVehicle.latest_pose?.timestamp || apiVehicle.updated_at || new Date().toISOString();
           
-          const newVehicle: VehicleMapVehicle = {
+          const newVehicle: MapVehicle = {
             id: vehicleId,
             name: apiVehicle.name || vehicleId,
             vehicleType: apiVehicle.vehicle_type,

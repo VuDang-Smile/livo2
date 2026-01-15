@@ -2,7 +2,7 @@ import type { VehicleCanvasPosition } from '../types/vehicle';
 
 /**
  * Lấy tọa độ 2D của vehicle trên canvas
- * @param vehicle VehiclePosition object
+ * @param vehicle VehicleCanvasPosition object
  * @param canvasWidth Chiều rộng canvas
  * @param canvasHeight Chiều cao canvas
  * @returns Tọa độ pixel trên canvas {x, y}

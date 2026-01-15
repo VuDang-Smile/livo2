@@ -5,7 +5,7 @@
 import { VehicleMarker3D } from './vehicle';
 import { VehicleMarker2D } from './vehicle';
 import { MapMetadata } from './mapMetadata';
-import { VehicleMapVehicle, VehicleMapResponse } from './vehicle';
+import { MapVehicle, VehicleMapResponse } from './vehicle';
 
 /**
  * Return type for useVehicleMarkers3D hook
@@ -33,8 +33,8 @@ export interface UseVehiclePose2DResult {
  */
 export interface UseVehicleMap2DResult {
   mapData: VehicleMapResponse | null;
-  mapVehicles: VehicleMapVehicle[];
-  filteredVehicles: VehicleMapVehicle[];
+  mapVehicles: MapVehicle[];
+  filteredVehicles: MapVehicle[];
   loading: boolean;
   error: string;
   loadMapData: () => Promise<void>;
