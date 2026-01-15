@@ -603,6 +603,17 @@ class LivoxIPDiscoveryTool:
         if not messagebox.askyesno(self.translator.get('dialog.warning', 'Warning'), confirm_msg):
             return
         
+        # Dừng scanner nếu đang chạy để tránh race conditions và segmentation fault
+        if self.scanner.is_scanning:
+            self.scanner.stop_scanning()
+            # Đợi scanner dừng hoàn toàn
+            import time
+            max_wait = 5  # Đợi tối đa 5 giây
+            wait_count = 0
+            while self.scanner.is_scanning and wait_count < max_wait:
+                time.sleep(0.2)
+                wait_count += 0.2
+        
         # Disable buttons when starting
         def disable_buttons():
             if source == 'auto':

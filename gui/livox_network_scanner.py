@@ -38,6 +38,7 @@ class LivoxNetworkScanner:
         
         self.found_devices = []
         self.is_scanning = False
+        self._scan_lock = threading.Lock()  # Lock để đảm bảo thread-safe
         
     def ping_host(self, ip, timeout=1):
         """Ping một host để kiểm tra xem có online không"""
@@ -45,30 +46,44 @@ class LivoxNetworkScanner:
             result = subprocess.run(['ping', '-c', '1', '-W', str(timeout), str(ip)], 
                                   capture_output=True, text=True, timeout=timeout+2)
             return result.returncode == 0
-        except:
+        except subprocess.TimeoutExpired:
+            return False
+        except Exception:
             return False
     
     def scan_tcp_port(self, ip, port, timeout=1):
         """Quét một TCP port cụ thể"""
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(timeout)
             result = sock.connect_ex((str(ip), port))
-            sock.close()
             return result == 0
-        except:
+        except Exception:
             return False
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
     
     def scan_udp_port(self, ip, port, timeout=1):
         """Quét UDP port (cho port 56100 của Livox)"""
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(timeout)
             sock.sendto(b"test", (str(ip), port))
-            sock.close()
             return True
-        except:
+        except Exception:
             return False
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
     
     def get_hostname(self, ip):
         """Lấy hostname của một IP"""
@@ -91,7 +106,9 @@ class LivoxNetworkScanner:
                         if len(parts) >= 3:
                             return parts[2]
             return "Unknown"
-        except:
+        except subprocess.TimeoutExpired:
+            return "Unknown"
+        except Exception:
             return "Unknown"
     
     def get_local_network_info(self):
@@ -134,6 +151,8 @@ class LivoxNetworkScanner:
                                                     'subnet_mask': subnet
                                                 }
             return None
+        except subprocess.TimeoutExpired:
+            return None
         except Exception as e:
             return None
     
@@ -160,6 +179,8 @@ class LivoxNetworkScanner:
                                         'status': 'resolved'
                                     }
             return {'in_arp': False, 'mac': None, 'status': 'not_found'}
+        except subprocess.TimeoutExpired:
+            return {'in_arp': False, 'mac': None, 'status': 'error'}
         except Exception as e:
             return {'in_arp': False, 'mac': None, 'status': 'error'}
     
@@ -180,6 +201,8 @@ class LivoxNetworkScanner:
         try:
             latencies = []
             for _ in range(count):
+                if not self.is_scanning:
+                    break
                 start_time = time.time()
                 result = subprocess.run(['ping', '-c', '1', '-W', '1', str(ip)], 
                                       capture_output=True, text=True, timeout=2)
@@ -203,7 +226,9 @@ class LivoxNetworkScanner:
                     'count': len(latencies)
                 }
             return None
-        except:
+        except subprocess.TimeoutExpired:
+            return None
+        except Exception:
             return None
     
     def check_direct_route(self, ip, local_network_info):
@@ -222,7 +247,9 @@ class LivoxNetworkScanner:
                 if 'via' not in output and local_network_info['interface'] in output:
                     return True
             return False
-        except:
+        except subprocess.TimeoutExpired:
+            return False
+        except Exception:
             return False
     
     def check_device_connectivity_score(self, ip, device_info):
@@ -316,6 +343,7 @@ class LivoxNetworkScanner:
     
     def check_livox_udp_signature(self, ip):
         """Kiểm tra UDP signature đặc trưng của Livox"""
+        sock = None
         try:
             # Kiểm tra port 56100 với packet đặc trưng của Livox
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -336,21 +364,24 @@ class LivoxNetworkScanner:
                         if (response[0] == 0x00 and response[1] == 0x01) or \
                            (response[0] == 0x01 and response[1] == 0x00) or \
                            (response[0] == 0x02 and response[1] == 0x03):
-                            sock.close()
                             return True
                     
                     # Kiểm tra response size đặc trưng của Livox
                     if len(response) in [4, 8, 16, 32, 64]:
-                        sock.close()
                         return True
                         
-            except:
+            except Exception:
                 pass
             
-            sock.close()
             return False
-        except:
+        except Exception:
             return False
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
     
     def check_livox_hostname_pattern(self, hostname):
         """Kiểm tra hostname pattern đặc trưng của Livox"""
@@ -564,11 +595,13 @@ class LivoxNetworkScanner:
             stop_on_found: Nếu True, dừng khi tìm thấy thiết bị Livox (cho scan đơn lẻ)
         """
         # Chỉ set is_scanning = True nếu chưa được set (cho phép scan nhiều mạng)
-        if not self.is_scanning:
-            self.is_scanning = True
+        with self._scan_lock:
+            if not self.is_scanning:
+                self.is_scanning = True
         # Không reset found_devices nếu đang quét nhiều mạng
         if stop_on_found:
-            self.found_devices = []
+            with self._scan_lock:
+                self.found_devices = []
         
         def scan_thread():
             try:
@@ -602,11 +635,17 @@ class LivoxNetworkScanner:
                 
                 # Ping tất cả IP để tìm host online
                 online_hosts = []
-                with ThreadPoolExecutor(max_workers=50) as executor:
-                    future_to_ip = {executor.submit(self.ping_host, ip): ip for ip in filtered_ip_list}
+                executor_ping = None
+                try:
+                    executor_ping = ThreadPoolExecutor(max_workers=50)
+                    future_to_ip = {executor_ping.submit(self.ping_host, ip): ip for ip in filtered_ip_list}
                     
                     for future in as_completed(future_to_ip):
                         if not self.is_scanning:
+                            # Cancel remaining futures
+                            for f in future_to_ip:
+                                if not f.done():
+                                    f.cancel()
                             break
                             
                         ip = future_to_ip[future]
@@ -617,22 +656,32 @@ class LivoxNetworkScanner:
                                     callback(f"✅ Host online: {ip}")
                         except Exception as e:
                             pass
+                finally:
+                    if executor_ping is not None:
+                        executor_ping.shutdown(wait=True, cancel_futures=True)
                 
                 if callback:
                     callback(f"Found {len(online_hosts)} online hosts. Scanning in detail...")
                 
                 # Quét chi tiết từng host online
-                with ThreadPoolExecutor(max_workers=20) as executor:
-                    future_to_ip = {executor.submit(self.check_livox_device, ip): ip for ip in online_hosts}
+                executor_scan = None
+                try:
+                    executor_scan = ThreadPoolExecutor(max_workers=20)
+                    future_to_ip = {executor_scan.submit(self.check_livox_device, ip): ip for ip in online_hosts}
                     
                     for future in as_completed(future_to_ip):
                         if not self.is_scanning:
+                            # Cancel remaining futures
+                            for f in future_to_ip:
+                                if not f.done():
+                                    f.cancel()
                             break
                             
                         ip = future_to_ip[future]
                         try:
                             device_info = future.result()
-                            self.found_devices.append(device_info)
+                            with self._scan_lock:
+                                self.found_devices.append(device_info)
                             
                             if callback:
                                 if device_info['is_livox']:
@@ -651,27 +700,38 @@ class LivoxNetworkScanner:
                         except Exception as e:
                             if callback:
                                 callback(f"❌ Error scanning {ip}: {e}")
+                finally:
+                    if executor_scan is not None:
+                        executor_scan.shutdown(wait=True, cancel_futures=True)
                 
                 if callback:
-                    livox_count = len([d for d in self.found_devices if d['is_livox']])
-                    callback(f"✅ Completed! Found {livox_count} Livox devices out of {len(self.found_devices)} devices")
+                    with self._scan_lock:
+                        livox_count = len([d for d in self.found_devices if d['is_livox']])
+                        total_count = len(self.found_devices)
+                    callback(f"✅ Completed! Found {livox_count} Livox devices out of {total_count} devices")
                     
             except Exception as e:
                 if callback:
                     callback(f"❌ Scan error: {e}")
             finally:
-                self.is_scanning = False
+                with self._scan_lock:
+                    self.is_scanning = False
         
         threading.Thread(target=scan_thread, daemon=True).start()
     
     def stop_scanning(self):
-        """Dừng quá trình quét"""
-        self.is_scanning = False
+        """Dừng quá trình quét an toàn"""
+        with self._scan_lock:
+            self.is_scanning = False
+        # Đợi một chút để các threads có thể cleanup
+        time.sleep(0.1)
     
     def get_livox_devices(self):
         """Lấy danh sách các thiết bị Livox đã tìm thấy"""
-        return [d for d in self.found_devices if d['is_livox']]
+        with self._scan_lock:
+            return [d for d in self.found_devices if d['is_livox']]
     
     def get_all_devices(self):
         """Lấy danh sách tất cả thiết bị đã tìm thấy"""
-        return self.found_devices
+        with self._scan_lock:
+            return self.found_devices.copy()  # Trả về copy để tránh race condition
