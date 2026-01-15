@@ -64,7 +64,7 @@ const Tunnel: React.FC = () => {
 
 // Component cho phương tiện (copy từ VehicleMap) - đã chuẩn hóa theo hệ trục
 const Vehicle: React.FC<{ 
-  vehicle: VehiclePosition; 
+  vehicle: VehicleCanvasPosition; 
   coordinateConfig?: CoordinateSystemConfig;
 }> = ({ vehicle, coordinateConfig }) => {
   const meshRef = useRef<THREE.Mesh>(null);
