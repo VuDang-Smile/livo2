@@ -649,6 +649,37 @@ class BagMappingInterface:
         if hasattr(self, 'qr_listbox'):
             # QR codes section sẽ được cập nhật tự động khi có QR codes mới
             pass
+        
+        # Update Design Map Comparison section
+        if hasattr(self, 'comparison_frame'):
+            self.comparison_frame.config(
+                text=self.translator.get('label.design_map_comparison', 'Design Map Comparison')
+            )
+        
+        if hasattr(self, 'design_file_type_label'):
+            self.design_file_type_label.config(
+                text=self.translator.get('label.design_file_type', 'Design file type:')
+            )
+        
+        if hasattr(self, 'design_file_label'):
+            self.design_file_label.config(
+                text=self.translator.get('label.design_file', 'Design file:')
+            )
+        
+        if hasattr(self, 'design_browse_btn'):
+            self.design_browse_btn.config(
+                text=self.translator.get('button.browse', 'Browse')
+            )
+        
+        # Update comparison status label if exists (only if default text)
+        if hasattr(self, 'comparison_status_label'):
+            current_text = self.comparison_status_label.cget('text')
+            # Only update if it's the default "not configured" text
+            if 'not configured' in current_text.lower() or '未設定' in current_text:
+                self.comparison_status_label.config(
+                    text=self.translator.get('label.design_comparison_not_configured', 
+                        'Design comparison: not configured')
+                )
 
     def setup_control_card(self):
         self.control_card = tk.LabelFrame(self.workspace, text=self.translator.get('label.execution_control', 'Execution Control'), padx=15, pady=10)
@@ -750,23 +781,24 @@ class BagMappingInterface:
         self.upload_stat.pack(side=tk.RIGHT)
 
         # 2.2. Design map comparison section
-        comparison_frame = tk.LabelFrame(
+        self.comparison_frame = tk.LabelFrame(
             self.preview_card,
-            text="Design Map Comparison",
+            text=self.translator.get('label.design_map_comparison', 'Design Map Comparison'),
             padx=10,
             pady=8,
         )
-        comparison_frame.pack(fill=tk.X, pady=(0, 10))
+        self.comparison_frame.pack(fill=tk.X, pady=(0, 10))
 
         # Loại file thiết kế: PCD / OBJ
-        design_type_frame = tk.Frame(comparison_frame)
+        design_type_frame = tk.Frame(self.comparison_frame)
         design_type_frame.pack(fill=tk.X, pady=(0, 5))
 
-        tk.Label(
+        self.design_file_type_label = tk.Label(
             design_type_frame,
-            text="Design file type:",
+            text=self.translator.get('label.design_file_type', 'Design file type:'),
             font=("Arial", 9, "bold"),
-        ).pack(side=tk.LEFT)
+        )
+        self.design_file_type_label.pack(side=tk.LEFT)
 
         self.design_type_var = tk.StringVar(value=self.design_file_type)
         design_pcd_radio = tk.Radiobutton(
@@ -788,31 +820,32 @@ class BagMappingInterface:
         design_obj_radio.pack(side=tk.LEFT, padx=5)
 
         # Chọn file thiết kế
-        design_file_frame = tk.Frame(comparison_frame)
+        design_file_frame = tk.Frame(self.comparison_frame)
         design_file_frame.pack(fill=tk.X, pady=(0, 5))
 
-        tk.Label(
+        self.design_file_label = tk.Label(
             design_file_frame,
-            text="Design file:",
+            text=self.translator.get('label.design_file', 'Design file:'),
             font=("Arial", 9),
-        ).pack(side=tk.LEFT)
+        )
+        self.design_file_label.pack(side=tk.LEFT)
 
         self.design_path_var = tk.StringVar()
         design_entry = tk.Entry(design_file_frame, textvariable=self.design_path_var)
         design_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        design_browse_btn = tk.Button(
+        self.design_browse_btn = tk.Button(
             design_file_frame,
             text=self.translator.get('button.browse', 'Browse'),
             command=self.browse_design_file,
         )
-        design_browse_btn.pack(side=tk.LEFT, padx=5)
+        self.design_browse_btn.pack(side=tk.LEFT, padx=5)
 
         # Nhãn hiển thị kết quả so sánh
         self.comparison_status_label = tk.Label(
-            comparison_frame,
-            text="Design comparison: not configured",
-            font=("Arial", 8),
+            self.comparison_frame,
+            text=self.translator.get('label.design_comparison_not_configured', 'Design comparison: not configured'),
+            font=("Arial", 11, "bold"),
             fg="gray",
         )
         self.comparison_status_label.pack(fill=tk.X, pady=(2, 0))
@@ -1253,6 +1286,26 @@ class BagMappingInterface:
             )
             return
 
+        # Kiểm tra bắt buộc phải chọn file thiết kế để so sánh
+        if not self.design_file_path:
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                self.translator.get('message.design_file_required', 
+                    'Please select a design map file (PCD or OBJ) before uploading.\n\nDesign map comparison is required to ensure map quality.')
+            )
+            return
+        
+        # Validate design file exists
+        design_path = Path(self.design_file_path)
+        if not design_path.exists():
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                self.translator.get('message.design_file_not_exists', 
+                    'Design map file does not exist:\n{path}\n\nPlease select a valid design map file.')
+                    .replace('{path}', str(design_path))
+            )
+            return
+
         # Lưu lại để truyền vào thread upload
         self.current_map_name = map_name
         self.current_vehicle_id = vehicle_id
@@ -1309,7 +1362,8 @@ class BagMappingInterface:
             
             # 4.5. So sánh với bản thiết kế (PCD/OBJ) nếu người dùng đã chọn
             if self.design_file_path:
-                self.add_log("Step 5/7: Comparing generated map with design map...")
+                self.add_log(self.translator.get('log.step_comparing_design_map', 
+                    'Step 5/7: Comparing generated map with design map...'))
                 generated_pcd_path = (
                     self.workspace_path
                     / "src"
@@ -1321,7 +1375,8 @@ class BagMappingInterface:
 
                 success, similarity = self.run_design_map_comparison(generated_pcd_path)
                 if not success:
-                    self.add_log("❌ Design map comparison failed. Stopping pipeline before upload.")
+                    self.add_log(self.translator.get('log.design_map_comparison_failed', 
+                        '❌ Design map comparison failed. Stopping pipeline before upload.'))
                     self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                     return
 
@@ -1335,21 +1390,25 @@ class BagMappingInterface:
                     threshold = 90.0
                 if similarity < threshold:
                     warn_msg = (
-                        f"Similarity with design map is only {similarity:.1f}% "
-                        f"(threshold {threshold:.1f}%).\n\n"
-                        "Possible drift or mismatch.\n"
-                        "Do you still want to continue uploading this map?"
+                        self.translator.get('log.low_similarity_warning', 
+                            '⚠️ Low similarity with design map: {similarity}% (threshold: {threshold}%)\n\nPossible drift detected. Do you want to continue upload anyway?')
+                            .replace('{similarity}', f'{similarity:.1f}')
+                            .replace('{threshold}', f'{threshold:.1f}')
                     )
                     self.add_log(
                         f"⚠️ Low similarity with design map: {similarity:.1f}% "
                         f"(threshold {threshold:.1f}%). Asking user..."
                     )
-                    if not messagebox.askyesno("Low similarity warning", warn_msg):
+                    if not messagebox.askyesno(
+                        self.translator.get('dialog.low_similarity_warning_title', 'Low similarity warning'), 
+                        warn_msg
+                    ):
                         self.add_log("⛔ User cancelled upload due to low similarity with design map.")
                         self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                         return
                     else:
-                        self.add_log("➡ User chose to continue upload despite low similarity.")
+                        self.add_log(self.translator.get('log.user_continue_upload_low_similarity', 
+                            '➡ User chose to continue upload despite low similarity.'))
             
             # 5. Save QR codes to JSON
             self.add_log(self.translator.get('log.step_save_qr', 'Step 5/7: Saving QR codes...'))
@@ -1450,15 +1509,14 @@ class BagMappingInterface:
         """Cập nhật loại file thiết kế (PCD / OBJ) khi người dùng chọn."""
         self.design_file_type = self.design_type_var.get()
         if self.design_file_type == "obj":
-            msg = (
-                "Design type: OBJ | voxel=0.15 | sampling=uniform | "
-                "Match PCD density + Save converted PCD"
-            )
+            msg = self.translator.get('label.design_type_obj', 
+                'Design type: OBJ | voxel=0.15 | sampling=uniform | Match PCD density + Save converted PCD')
         else:
-            msg = "Design type: PCD"
+            msg = self.translator.get('label.design_type_pcd', 'Design type: PCD')
         if hasattr(self, "comparison_status_label"):
-            self.comparison_status_label.config(text=msg, fg="blue")
-        self.add_log(f"CONFIG: Design map type set to {self.design_file_type.upper()}")
+            self.comparison_status_label.config(text=msg, fg="blue", font=("Arial", 11, "bold"))
+        self.add_log(self.translator.get('log.design_type_set', 
+            'CONFIG: Design map type set to {type}').replace('{type}', self.design_file_type.upper()))
 
     def browse_design_file(self):
         """Chọn file bản thiết kế (PCD hoặc OBJ) để so sánh."""
@@ -1469,10 +1527,10 @@ class BagMappingInterface:
 
         if self.design_file_type == "obj":
             filetypes = [("OBJ files", "*.obj"), ("All files", "*.*")]
-            title = "Chọn file OBJ thiết kế"
+            title = self.translator.get('dialog.choose_design_obj_file', 'Choose Design OBJ File')
         else:
             filetypes = [("PCD files", "*.pcd"), ("All files", "*.*")]
-            title = "Chọn file PCD thiết kế"
+            title = self.translator.get('dialog.choose_design_pcd_file', 'Choose Design PCD File')
 
         filename = filedialog.askopenfilename(
             title=title,
@@ -1484,11 +1542,15 @@ class BagMappingInterface:
             self.design_path_var.set(filename)
             self.design_file_path = filename
             file_ext = "OBJ" if self.design_file_type == "obj" else "PCD"
-            self.add_log(f"✅ Design {file_ext} selected: {Path(filename).name}")
+            self.add_log(self.translator.get('log.design_file_selected', 
+                '✅ Design {file_ext} selected: {filename}').replace('{file_ext}', file_ext).replace('{filename}', Path(filename).name))
             if hasattr(self, "comparison_status_label"):
+                status_text = self.translator.get('label.design_file_selected', 
+                    'Design file: {filename}').replace('{filename}', Path(filename).name)
                 self.comparison_status_label.config(
-                    text=f"Design file: {Path(filename).name}",
+                    text=status_text,
                     fg="green",
+                    font=("Arial", 11, "bold"),
                 )
 
     def launch_rviz_cmd(self):
@@ -1521,10 +1583,14 @@ class BagMappingInterface:
             if not generated_pcd_path.exists():
                 msg = f"Generated map PCD not found: {generated_pcd_path}"
                 self.add_log(f"❌ {msg}")
-                messagebox.showerror("Design map comparison", msg)
+                messagebox.showerror(
+                    self.translator.get('dialog.design_map_comparison', 'Design map comparison'), 
+                    msg
+                )
                 return False, 0.0
 
-            self.add_log(f"🔍 Running design map comparison...")
+            self.add_log(self.translator.get('log.running_design_map_comparison', 
+                '🔍 Running design map comparison...'))
             self.add_log(f"   Design file: {design_path.name} ({self.design_file_type.upper()})")
             self.add_log(f"   Generated map: {generated_pcd_path.name}")
 
@@ -1616,8 +1682,10 @@ class BagMappingInterface:
 
             # Log tóm tắt
             self.add_log("=" * 60)
-            self.add_log(f"Design Map Comparison Results")
-            self.add_log(f"   Similarity: {similarity:.2f}%")
+            self.add_log(self.translator.get('log.design_map_comparison_results', 
+                'Design Map Comparison Results'))
+            self.add_log(self.translator.get('label.similarity_percent', 
+                '   Similarity: {similarity}%').replace('{similarity}', f'{similarity:.2f}'))
             self.add_log(f"   ICP fitness: {metrics.get('icp_fitness', 0.0):.4f}")
             self.add_log(f"   Hausdorff distance: {metrics.get('hausdorff_distance', 0.0):.4f} m")
             self.add_log(f"   Chamfer distance: {metrics.get('chamfer_distance', 0.0):.4f} m")
@@ -1625,16 +1693,33 @@ class BagMappingInterface:
             self.add_log(f"   Centroid distance: {metrics.get('centroid_distance', 0.0):.4f} m")
             self.add_log(f"   Density ratio: {metrics.get('density_ratio', 0.0):.4f}")
 
-            status_text = f"Similarity: {similarity:.2f}%"
+            status_text = self.translator.get('label.similarity_percent', 
+                'Similarity: {similarity}%').replace('{similarity}', f'{similarity:.2f}')
             if drift_detected:
                 self.add_log("   Drift detected:")
                 for reason in drift_reasons:
                     self.add_log(f"     - {reason}")
-                status_text += " (Possible drift)"
-                status_color = "orange"
-            else:
-                status_text += " (No significant drift)"
+                status_text += " (" + self.translator.get('label.possible_drift', 'Possible drift') + ")"
+            
+            # Xác định màu sắc dựa trên % similarity
+            if similarity >= 90:
                 status_color = "green"
+                if not drift_detected:
+                    status_text = self.translator.get('label.similarity_percent', 
+                        'Similarity: {similarity}%').replace('{similarity}', f'{similarity:.2f}') + \
+                        " (" + self.translator.get('label.no_significant_drift', 'No significant drift') + ")"
+            elif similarity >= 50:
+                status_color = "orange"
+                if not drift_detected:
+                    status_text = self.translator.get('label.similarity_percent', 
+                        'Similarity: {similarity}%').replace('{similarity}', f'{similarity:.2f}') + \
+                        " (" + self.translator.get('label.moderate_match', 'Moderate match') + ")"
+            else:
+                status_color = "red"
+                if not drift_detected:
+                    status_text = self.translator.get('label.similarity_percent', 
+                        'Similarity: {similarity}%').replace('{similarity}', f'{similarity:.2f}') + \
+                        " (" + self.translator.get('label.low_match', 'Low match') + ")"
 
             self.add_log("=" * 60)
 
@@ -1643,7 +1728,7 @@ class BagMappingInterface:
                 self.root.after(
                     0,
                     lambda txt=status_text, col=status_color: self.comparison_status_label.config(
-                        text=txt, fg=col
+                        text=txt, fg=col, font=("Arial", 11, "bold")
                     ),
                 )
 
@@ -1654,7 +1739,10 @@ class BagMappingInterface:
             import traceback
             self.add_log(f"   Details: {traceback.format_exc()[:500]}")
             try:
-                messagebox.showerror("Design map comparison", f"Error during comparison:\n{e}")
+                messagebox.showerror(
+                    self.translator.get('dialog.design_map_comparison', 'Design map comparison'), 
+                    f"Error during comparison:\n{e}"
+                )
             except Exception:
                 pass
             return False, 0.0
