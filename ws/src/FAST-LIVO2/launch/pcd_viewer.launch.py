@@ -3,9 +3,9 @@
 
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, LogInfo
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
 
@@ -13,6 +13,10 @@ def generate_launch_description():
     
     # Find path
     rviz_config_file = os.path.join(get_package_share_directory("fast_livo"), "rviz_cfg", "pcd_viewer.rviz")
+    
+    # Check if RViz config exists
+    if not os.path.exists(rviz_config_file):
+        print(f"WARNING: RViz config file not found: {rviz_config_file}")
     
     # Declare launch arguments
     pcd_file_arg = DeclareLaunchArgument(
@@ -59,6 +63,15 @@ def generate_launch_description():
         loop_arg,
         use_rviz_arg,
         
+        # Log launch parameters
+        LogInfo(msg=["Launching PCD Viewer with parameters:"]),
+        LogInfo(msg=["  pcd_file: ", LaunchConfiguration("pcd_file")]),
+        LogInfo(msg=["  topic_name: ", LaunchConfiguration("topic_name")]),
+        LogInfo(msg=["  frame_id: ", LaunchConfiguration("frame_id")]),
+        LogInfo(msg=["  publish_rate: ", LaunchConfiguration("publish_rate")]),
+        LogInfo(msg=["  loop: ", LaunchConfiguration("loop")]),
+        LogInfo(msg=["  use_rviz: ", LaunchConfiguration("use_rviz")]),
+        
         # PCD Viewer Node
         Node(
             package="fast_livo",
@@ -71,7 +84,8 @@ def generate_launch_description():
                 "publish_rate": LaunchConfiguration("publish_rate"),
                 "loop": LaunchConfiguration("loop"),
             }],
-            output="screen"
+            output="screen",
+            emulate_tty=True
         ),
         
         # RViz2
@@ -81,7 +95,8 @@ def generate_launch_description():
             executable="rviz2",
             name="rviz2",
             arguments=["-d", rviz_config_file],
-            output="screen"
+            output="screen",
+            emulate_tty=True
         ),
     ])
 
