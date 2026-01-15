@@ -23,6 +23,14 @@ if project_root not in sys.path:
 from languages.translate_engine import Translator
 from contants.API import VEHICLE_ENDPOINT, API_TIMEOUT, HEADERS, BACKEND_HOST
 
+# Theta driver import (optional)
+try:
+    from gui.theta_logic import ThetaDriver
+    THETA_DRIVER_AVAILABLE = True
+except ImportError:
+    THETA_DRIVER_AVAILABLE = False
+    print("Warning: ThetaDriver not available. Theta camera features will be disabled.")
+
 # Heartbeat configuration
 HEARTBEAT_INTERVAL_SECONDS = 10
 
@@ -32,10 +40,85 @@ try:
     from rclpy.node import Node
     from rclpy.executors import SingleThreadedExecutor
     from nav_msgs.msg import Odometry
+    from sensor_msgs.msg import Image
+    try:
+        from cv_bridge import CvBridge
+        CV_BRIDGE_AVAILABLE = True
+    except ImportError:
+        CV_BRIDGE_AVAILABLE = False
+        print("Warning: cv_bridge not available. QR scanning from ROS topic will be disabled.")
     ROS2_AVAILABLE = True
 except ImportError:
     ROS2_AVAILABLE = False
+    CV_BRIDGE_AVAILABLE = False
     print("Warning: ROS2 not available. Pose publishing will be disabled.")
+
+# QR Scanner imports (optional)
+try:
+    import cv2
+    import numpy as np
+    try:
+        from pyzbar import pyzbar
+        PYZBAR_AVAILABLE = True
+    except ImportError:
+        PYZBAR_AVAILABLE = False
+        print("Warning: pyzbar not available. QR scanning will be disabled.")
+    QR_SCANNER_AVAILABLE = True
+except ImportError:
+    QR_SCANNER_AVAILABLE = False
+    PYZBAR_AVAILABLE = False
+    print("Warning: cv2 or numpy not available. QR scanning will be disabled.")
+
+
+class QRImageSubscriberNode(Node):
+    """ROS2 Node để subscribe image topic từ theta driver cho QR scanning"""
+    
+    def __init__(self, image_topic, image_callback, node_name='qr_image_subscriber'):
+        super().__init__(node_name)
+        
+        # Đảm bảo topic name có / prefix
+        if not image_topic.startswith('/'):
+            image_topic = '/' + image_topic
+        
+        # Subscribe image topic
+        self.image_subscription = self.create_subscription(
+            Image,
+            image_topic,
+            self.image_callback,
+            10
+        )
+        
+        self.bridge = CvBridge() if CV_BRIDGE_AVAILABLE else None
+        self.image_callback_func = image_callback
+        self.image_topic_name = image_topic
+        self.get_logger().info(f'QR Scanner subscribed to image topic {image_topic}')
+    
+    def image_callback(self, msg):
+        """Callback when receiving image"""
+        try:
+            if cv2 is None or self.bridge is None:
+                return
+            
+            # Handle JPEG compressed images
+            if msg.encoding.lower() in ['jpeg', 'jpg']:
+                # Decode JPEG data directly from compressed format
+                jpeg_data = np.frombuffer(msg.data, dtype=np.uint8)
+                cv_image = cv2.imdecode(jpeg_data, cv2.IMREAD_COLOR)
+                if cv_image is None:
+                    raise ValueError("Failed to decode JPEG image")
+                # Convert BGR to RGB
+                cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+            else:
+                # Use cv_bridge for standard encodings
+                cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
+            
+            # Gọi callback với ảnh đã decode
+            if self.image_callback_func:
+                self.image_callback_func(cv_image)
+            
+        except Exception as e:
+            error_msg = f'Error processing image from {self.image_topic_name}: {e}'
+            self.get_logger().error(error_msg)
 
 
 class PoseSubscriber(Node):
@@ -143,9 +226,34 @@ class WorkerInterface:
         self.heartbeat_timer_id = None
         self.heartbeat_logged = False  # Đã log heartbeat thành công chưa
         
-        # Translator for multi-language support
+        # QR Scanner (sử dụng ROS topic từ theta driver)
+        self.is_qr_scanning = False
+        self.qr_ros_node = None  # ROS node để subscribe image topic
+        self.qr_ros_executor = None  # ROS executor cho QR scanning
+        self.qr_ros_thread = None  # Thread để chạy ROS executor
+        self.qr_detect_data = {}  # Dictionary chứa QR codes và tọa độ từ JSON
+        self.last_detected_qr = None  # QR code cuối cùng được phát hiện
+        self.qr_scan_frame_interval = 5  # Quét QR mỗi 5 frame để tối ưu performance
+        self.qr_frame_count = 0
+        self.qr_lock = threading.Lock()  # Lock để thread-safe khi truy cập shared data
+        
+        # Translator for multi-language support (cần khởi tạo trước khi load QR data)
         self.translator = Translator('en')
         self.current_lang = 'en'
+        
+        # Theta driver (for QR scanning camera)
+        self.theta_driver = None
+        self.is_theta_connected = False
+        if THETA_DRIVER_AVAILABLE:
+            try:
+                self.theta_driver = ThetaDriver(
+                    log_callback=self.log,
+                    update_ui_theta_connected=self.update_ui_theta_connected
+                )
+            except Exception as e:
+                # Không thể log vì log_panel chưa được setup, dùng print
+                print(f"⚠️ Error initializing ThetaDriver: {e}")
+                self.theta_driver = None
         
         # Set title with translator
         self.root.title(self.translator.get('title.worker_interface', 'Worker Interface | System Monitoring'))
@@ -178,6 +286,9 @@ class WorkerInterface:
         # Cài đặt phần Log bên phải
         self.setup_log_area()
         
+        # Load QR detect data (sau khi log_panel đã được setup)
+        self.load_qr_detect_data()
+        
         # Update UI texts after all components are set up
         self.update_ui_texts()
         
@@ -193,6 +304,10 @@ class WorkerInterface:
         
         # Bắt đầu monitoring kết nối thiết bị định kỳ
         self.start_device_connection_monitoring()
+        
+        # Tự động check Theta USB connection khi khởi động
+        if self.theta_driver:
+            self.check_theta_usb_on_startup()
         
         # Thêm handler khi đóng cửa sổ
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -316,6 +431,10 @@ class WorkerInterface:
             self.check_device_connection()
         if hasattr(self, 'pose_display_frame'):
             self.pose_display_frame.config(text=self.translator.get('label.pose_orientation', 'Pose & Orientation'))
+        
+        # Update QR scanning UI
+        if hasattr(self, 'qr_scanning_status_label'):
+            self.update_qr_scanning_ui()
 
     def setup_movement_control(self):
         frame = tk.LabelFrame(self.sidebar, text=self.translator.get('label.movement_control', 'Movement Control'), padx=10, pady=10)
@@ -1105,8 +1224,149 @@ class WorkerInterface:
         )
         self.device_status_label.pack(anchor=tk.W, pady=2)
         
+        # Theta Camera status (nếu có ThetaDriver)
+        if THETA_DRIVER_AVAILABLE:
+            self.theta_camera_status_label = tk.Label(
+                frame,
+                text=self.translator.get('label.theta_camera', 'Theta Camera: Checking...'),
+                foreground="gray",
+                font=("Arial", 8),
+                wraplength=280,
+                justify=tk.LEFT
+            )
+            self.theta_camera_status_label.pack(anchor=tk.W, pady=2)
+        
+        # Separator
+        separator = tk.Frame(frame, height=1, bg="gray")
+        separator.pack(fill=tk.X, pady=5)
+        
+        # QR Scanning status
+        self.qr_scanning_status_label = tk.Label(
+            frame,
+            text=self.translator.get('label.qr_scanning_status', 'QR Scanning: Inactive'),
+            foreground="gray",
+            font=("Arial", 8),
+            wraplength=280,
+            justify=tk.LEFT
+        )
+        self.qr_scanning_status_label.pack(anchor=tk.W, pady=2)
+        
+        # Last detected QR
+        self.last_qr_label = tk.Label(
+            frame,
+            text=self.translator.get('label.last_qr', 'Last QR: None'),
+            foreground="gray",
+            font=("Arial", 7),
+            wraplength=280,
+            justify=tk.LEFT
+        )
+        self.last_qr_label.pack(anchor=tk.W, pady=2)
+        
         # Cập nhật trạng thái ban đầu
         self.check_device_connection()
+        self.update_qr_scanning_ui()
+    
+    def update_ui_theta_connected(self, is_connected):
+        """Callback để cập nhật UI khi Theta camera connection thay đổi"""
+        self.is_theta_connected = is_connected
+        if hasattr(self, 'theta_camera_status_label'):
+            if is_connected:
+                self.theta_camera_status_label.config(
+                    text="● " + self.translator.get('label.theta_camera', 'Theta Camera') + ": " + self.translator.get('status.connected', 'Connected'),
+                    foreground="green"
+                )
+            else:
+                self.theta_camera_status_label.config(
+                    text="● " + self.translator.get('label.theta_camera', 'Theta Camera') + ": " + self.translator.get('status.disconnected', 'Disconnected'),
+                    foreground="red"
+                )
+    
+    def check_theta_usb_on_startup(self):
+        """Tự động check Theta USB connection khi khởi động"""
+        if not self.theta_driver:
+            return
+        
+        def check():
+            try:
+                self.theta_driver.check_theta_usb_connection(self.check_theta_usb_callback)
+            except Exception as e:
+                self.log(f"⚠️ Error checking Theta USB: {e}")
+        
+        # Chạy trong background thread sau một chút để không block UI
+        threading.Thread(target=check, daemon=True).start()
+    
+    def check_theta_usb_callback(self, is_connected):
+        """Callback khi check Theta USB connection xong"""
+        self.root.after(0, lambda: self.update_ui_theta_connected(is_connected))
+        # Chỉ cập nhật UI, không tự động launch theta driver
+        # Theta driver sẽ được launch khi start localization
+    
+    def _launch_theta_driver_if_needed(self):
+        """Launch theta driver nếu chưa chạy và camera đã kết nối"""
+        if not self.theta_driver:
+            return False
+        
+        try:
+            # Kiểm tra xem theta driver đã chạy chưa
+            if hasattr(self.theta_driver, 'theta_driver_process') and \
+               self.theta_driver.theta_driver_process and \
+               self.theta_driver.theta_driver_process.poll() is None:
+                # Đã chạy rồi
+                self.log(self.translator.get('log.theta_driver_already_running', '✅ Theta driver đã đang chạy'))
+                return True
+            
+            # Launch theta driver
+            self.log(self.translator.get('log.launching_theta_driver', '🚀 Launching Theta driver...'))
+            self.theta_driver.launch_theta_driver()
+            
+            # Đợi một chút để theta driver khởi động
+            time.sleep(0.5)
+            
+            # Kiểm tra lại xem đã start thành công chưa
+            if hasattr(self.theta_driver, 'theta_driver_process') and \
+               self.theta_driver.theta_driver_process and \
+               self.theta_driver.theta_driver_process.poll() is None:
+                self.log(self.translator.get('log.theta_driver_started', '✅ Theta driver started successfully'))
+                return True
+            else:
+                self.log(self.translator.get('log.theta_driver_start_failed', '⚠️ Theta driver failed to start'))
+                return False
+            
+        except Exception as e:
+            self.log(f"⚠️ Error launching Theta driver: {e}")
+            return False
+    
+    def update_qr_scanning_ui(self):
+        """Cập nhật UI hiển thị trạng thái QR scanning"""
+        if not hasattr(self, 'qr_scanning_status_label') or not hasattr(self, 'last_qr_label'):
+            return
+        
+        # Cập nhật trạng thái QR scanning
+        if self.is_qr_scanning:
+            self.qr_scanning_status_label.config(
+                text="● " + self.translator.get('label.qr_scanning_active', 'QR Scanning: Active'),
+                foreground="green"
+            )
+        else:
+            self.qr_scanning_status_label.config(
+                text="● " + self.translator.get('label.qr_scanning_inactive', 'QR Scanning: Inactive'),
+                foreground="gray"
+            )
+        
+        # Cập nhật QR code cuối cùng được phát hiện
+        with self.qr_lock:
+            last_qr = self.last_detected_qr
+        
+        if last_qr:
+            self.last_qr_label.config(
+                text=self.translator.get('label.last_qr_detected', 'Last QR: {qr}').replace('{qr}', last_qr),
+                foreground="blue"
+            )
+        else:
+            self.last_qr_label.config(
+                text=self.translator.get('label.last_qr_none', 'Last QR: None'),
+                foreground="gray"
+            )
     
     def check_device_connection(self):
         """Kiểm tra kết nối thiết bị Livox bằng ping"""
@@ -1341,6 +1601,27 @@ class WorkerInterface:
         # Luôn luôn thử start driver khi người dùng bấm START MOVING (giống như recorder)
         # Không check topics trước vì khi thiết bị chưa start thì không có topics
         self.log("=" * 60)
+        
+        # Kiểm tra và launch Theta driver trước (cần cho QR scanning)
+        self.log(self.translator.get('log.checking_theta_driver', '🔍 Kiểm tra Theta driver...'))
+        if self.theta_driver:
+            try:
+                # Check USB connection nếu chưa check
+                if not hasattr(self, 'is_theta_connected') or self.is_theta_connected is None:
+                    # Check USB trong main thread với timeout ngắn
+                    self.theta_driver.check_theta_usb_connection(self.check_theta_usb_callback)
+                    time.sleep(0.5)  # Đợi một chút để check hoàn thành
+                
+                # Launch theta driver nếu chưa chạy và camera đã kết nối
+                if self.is_theta_connected:
+                    self._launch_theta_driver_if_needed()
+                else:
+                    self.log(self.translator.get('log.theta_camera_not_connected', '⚠️ Theta camera not connected. QR scanning may not work.'))
+            except Exception as e:
+                self.log(f"⚠️ Error checking/launching Theta driver: {e}")
+        else:
+            self.log(self.translator.get('log.theta_driver_not_available', '⚠️ Theta driver not available. QR scanning will be disabled.'))
+        
         self.log(self.translator.get('log.checking_livox_driver', '🔍 Kiểm tra Livox driver...'))
         
         if not self.is_livox_driver_running:
@@ -1389,6 +1670,11 @@ class WorkerInterface:
             # Bắt đầu publish pose lên backend
             self.start_pose_publishing()
             
+            # Bắt đầu QR scanning (cần theta driver đã chạy)
+            # Đợi một chút để đảm bảo theta driver đã publish topic /image_raw
+            time.sleep(1.0)
+            self.start_qr_scanning()
+            
             # Cập nhật UI
             self.btn_start.config(text=self.translator.get('button.stop_movement', '■ STOP MOVEMENT'), state=tk.NORMAL)
             self.btn_stop.config(state=tk.NORMAL)
@@ -1402,8 +1688,32 @@ class WorkerInterface:
 
     def stop_system(self):
         """Dừng localization node"""
+        # Dừng QR scanning trước
+        self.stop_qr_scanning()
         self.stop_pose_publishing()
         self.stop_localization()
+        
+        # Dừng Theta driver nếu đang chạy
+        if self.theta_driver:
+            try:
+                self.log(self.translator.get('log.stopping_theta_driver', '🛑 Stopping Theta driver...'))
+                if hasattr(self.theta_driver, 'stop_all'):
+                    self.theta_driver.stop_all()
+                    self.log(self.translator.get('log.theta_driver_stopped', '✅ Theta driver stopped'))
+                else:
+                    # Fallback: kill process trực tiếp
+                    if hasattr(self.theta_driver, 'theta_driver_process') and \
+                       self.theta_driver.theta_driver_process:
+                        try:
+                            self.theta_driver.theta_driver_process.terminate()
+                            self.theta_driver.theta_driver_process.wait(timeout=3)
+                        except:
+                            if self.theta_driver.theta_driver_process:
+                                self.theta_driver.theta_driver_process.kill()
+                        self.log(self.translator.get('log.theta_driver_stopped', '✅ Theta driver stopped'))
+            except Exception as e:
+                self.log(f"⚠️ Error stopping Theta driver: {e}")
+        
         # Dừng Livox driver nếu đã khởi động tự động
         if self.is_livox_driver_running:
             self.stop_livox_driver()
@@ -1516,6 +1826,8 @@ class WorkerInterface:
                     with open(self.qr_detect_path, 'wb') as f:
                         f.write(resp.content)
                     self.log(self.translator.get('log.qr_detect_downloaded', '✅ QR_detect.json downloaded successfully'))
+                    # Reload QR detect data sau khi download
+                    self.root.after(0, self.reload_qr_detect_data)
                 else:
                     self.log(self.translator.get('log.qr_detect_download_failed', '⚠️ Failed to download QR_detect.json (HTTP {code})').replace('{code}', str(resp.status_code)))
             except requests.exceptions.RequestException as e:
@@ -1638,8 +1950,294 @@ class WorkerInterface:
                 self.translator.get('log.error_heartbeat', '⚠️ Heartbeat error: {error}').replace('{error}', str(e))
             ))
     
+    def load_qr_detect_data(self):
+        """Load và parse file QR_detect.json"""
+        try:
+            if not self.qr_detect_path.exists():
+                self.log(self.translator.get('log.qr_detect_file_not_found', '⚠️ QR_detect.json not found at: {path}').replace('{path}', str(self.qr_detect_path)))
+                self.qr_detect_data = {}
+                return
+            
+            with open(self.qr_detect_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                self.qr_detect_data = data
+                
+            # Log số lượng QR codes đã load
+            qr_count = len(self.qr_detect_data)
+            if qr_count > 0:
+                self.log(self.translator.get('log.qr_detect_loaded', '✅ Loaded {count} QR codes from QR_detect.json').replace('{count}', str(qr_count)))
+            else:
+                self.log(self.translator.get('log.qr_detect_empty', '⚠️ QR_detect.json is empty'))
+                
+        except json.JSONDecodeError as e:
+            self.log(self.translator.get('log.qr_detect_json_error', '❌ Error parsing QR_detect.json: {error}').replace('{error}', str(e)))
+            self.qr_detect_data = {}
+        except Exception as e:
+            self.log(self.translator.get('log.qr_detect_load_error', '❌ Error loading QR_detect.json: {error}').replace('{error}', str(e)))
+            self.qr_detect_data = {}
+    
+    def reload_qr_detect_data(self):
+        """Reload QR_detect.json (có thể gọi khi file được cập nhật)"""
+        self.load_qr_detect_data()
+    
+    def start_qr_scanning(self):
+        """Khởi động QR scanning từ ROS topic /image_raw (theta driver)"""
+        if not QR_SCANNER_AVAILABLE or not PYZBAR_AVAILABLE:
+            self.log(self.translator.get('log.qr_scanner_not_available', '⚠️ QR scanner not available (cv2 or pyzbar not installed)'))
+            return
+        
+        if not ROS2_AVAILABLE or not CV_BRIDGE_AVAILABLE:
+            self.log(self.translator.get('log.ros2_cvbridge_not_available', '⚠️ ROS2 or cv_bridge not available. QR scanning requires ROS topic /image_raw'))
+            return
+        
+        if self.is_qr_scanning:
+            return  # Đã đang quét
+        
+        if not self.is_localization_running:
+            self.log(self.translator.get('log.qr_scanning_requires_localization', '⚠️ QR scanning requires localization to be running'))
+            return
+        
+        try:
+            # Khởi tạo ROS2 nếu chưa có
+            if not rclpy.ok():
+                rclpy.init()
+            
+            # Tạo ROS node để subscribe image topic từ theta driver
+            self.qr_ros_node = QRImageSubscriberNode(
+                '/image_raw',  # Topic từ theta driver
+                self.on_qr_image_received,
+                'qr_image_subscriber_worker'
+            )
+            
+            # Tạo executor
+            self.qr_ros_executor = SingleThreadedExecutor()
+            self.qr_ros_executor.add_node(self.qr_ros_node)
+            
+            # Kiểm tra topic có tồn tại không
+            self.log(self.translator.get('log.checking_image_topic', '🔍 Checking /image_raw topic...'))
+            time.sleep(1)  # Đợi một chút để topic có thể xuất hiện
+            
+            result = subprocess.run(
+                ['ros2', 'topic', 'list'],
+                capture_output=True,
+                text=True,
+                timeout=3
+            )
+            
+            if '/image_raw' in result.stdout:
+                self.log(self.translator.get('log.image_topic_exists', '✓ Topic /image_raw exists'))
+            else:
+                self.log(self.translator.get('log.image_topic_not_found_warning', '⚠️ Warning: Topic /image_raw not found. Theta driver may not be running.'))
+                self.log(self.translator.get('log.will_try_subscribe_anyway', '   Will try to subscribe anyway and wait for topic...'))
+            
+            # Khởi động ROS executor trong background thread
+            self.is_qr_scanning = True
+            self.qr_frame_count = 0
+            
+            self.qr_ros_thread = threading.Thread(
+                target=self._qr_ros_spin,
+                daemon=True
+            )
+            self.qr_ros_thread.start()
+            
+            self.log(self.translator.get('log.qr_scanning_started', '✅ QR scanning started (subscribing to /image_raw)'))
+            
+            # Cập nhật UI
+            self.root.after(0, self.update_qr_scanning_ui)
+            
+        except Exception as e:
+            self.log(self.translator.get('log.error_starting_qr_scanning', '❌ Error starting QR scanning: {error}').replace('{error}', str(e)))
+            self.is_qr_scanning = False
+            if self.qr_ros_node:
+                self.qr_ros_node.destroy_node()
+                self.qr_ros_node = None
+            if self.qr_ros_executor:
+                self.qr_ros_executor = None
+    
+    def stop_qr_scanning(self):
+        """Dừng QR scanning"""
+        if not self.is_qr_scanning:
+            return
+        
+        self.is_qr_scanning = False
+        
+        # Dừng ROS executor
+        if self.qr_ros_executor:
+            try:
+                if self.qr_ros_node:
+                    self.qr_ros_executor.remove_node(self.qr_ros_node)
+                    self.qr_ros_node.destroy_node()
+            except:
+                pass
+            self.qr_ros_executor = None
+        
+        # Đợi thread kết thúc
+        if self.qr_ros_thread and self.qr_ros_thread.is_alive():
+            self.qr_ros_thread.join(timeout=2)
+        
+        # Cleanup
+        self.qr_ros_node = None
+        self.qr_ros_executor = None
+        self.qr_ros_thread = None
+        
+        self.log(self.translator.get('log.qr_scanning_stopped', '🛑 QR scanning stopped'))
+        
+        # Cập nhật UI
+        self.root.after(0, self.update_qr_scanning_ui)
+    
+    def _qr_ros_spin(self):
+        """Spin ROS executor trong background thread cho QR scanning"""
+        try:
+            while self.is_qr_scanning and self.is_localization_running and rclpy.ok():
+                if self.qr_ros_executor is not None:
+                    self.qr_ros_executor.spin_once(timeout_sec=0.1)
+                else:
+                    break
+        except Exception as e:
+            if self.is_qr_scanning:
+                self.root.after(0, lambda: self.log(
+                    self.translator.get('log.error_qr_ros_spin', '❌ Error in QR ROS spin: {error}').replace('{error}', str(e))
+                ))
+        finally:
+            self.is_qr_scanning = False
+    
+    def on_qr_image_received(self, cv_image):
+        """Callback khi nhận được ảnh từ ROS topic để quét QR"""
+        try:
+            self.qr_frame_count += 1
+            
+            # Chỉ quét QR mỗi N frame để tối ưu performance
+            if self.qr_frame_count % self.qr_scan_frame_interval == 0:
+                # Quét QR code trong background thread để không block ROS callback
+                threading.Thread(
+                    target=self._scan_qr_in_background,
+                    args=(cv_image.copy(),),
+                    daemon=True
+                ).start()
+            
+        except Exception as e:
+            # Log lỗi trong main thread
+            self.root.after(0, lambda: self.log(
+                self.translator.get('log.error_qr_image_callback', '⚠️ Error in QR image callback: {error}').replace('{error}', str(e))
+            ))
+    
+    def _scan_qr_in_background(self, cv_image):
+        """Quét QR code trong background thread"""
+        try:
+            # Chuyển sang grayscale để tăng tốc độ xử lý
+            try:
+                gray = cv2.cvtColor(cv_image, cv2.COLOR_RGB2GRAY)
+            except:
+                # Nếu frame không phải RGB, thử BGR
+                try:
+                    gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+                except:
+                    # Nếu frame không phải color, dùng trực tiếp
+                    if len(cv_image.shape) == 2:
+                        gray = cv_image
+                    else:
+                        return
+            
+            # Resize frame lớn xuống để tăng tốc độ (camera 360 có thể rất lớn)
+            height, width = gray.shape[:2]
+            if width > 1600:
+                scale = 1600 / width
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                gray = cv2.resize(gray, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            
+            # Detect QR codes
+            try:
+                qr_codes = pyzbar.decode(gray)
+                
+                if qr_codes:
+                    for qr in qr_codes:
+                        try:
+                            qr_data = qr.data.decode('utf-8')
+                            # Gọi callback để xử lý QR code
+                            self.root.after(0, lambda data=qr_data: self.on_qr_detected(data))
+                        except Exception as e:
+                            # Ignore lỗi decode
+                            pass
+            except Exception as e:
+                # Ignore lỗi khi decode QR
+                pass
+                
+        except Exception as e:
+            # Ignore lỗi trong background thread
+            pass
+    
+    def on_qr_detected(self, qr_data):
+        """Xử lý khi phát hiện QR code"""
+        try:
+            # Cập nhật QR code cuối cùng được phát hiện
+            with self.qr_lock:
+                self.last_detected_qr = qr_data
+            
+            # Cập nhật UI
+            self.root.after(0, self.update_qr_scanning_ui)
+            
+            # Kiểm tra xem QR code có trong danh sách không
+            if qr_data not in self.qr_detect_data:
+                # QR code không khớp, chỉ log
+                self.log(self.translator.get('log.qr_not_in_list', '📷 QR detected but not in list: {qr}').replace('{qr}', qr_data))
+                return
+            
+            # QR code khớp, lấy tọa độ từ JSON
+            qr_coords = self.qr_detect_data[qr_data]
+            
+            if not isinstance(qr_coords, list) or len(qr_coords) < 3:
+                self.log(self.translator.get('log.qr_invalid_coords', '⚠️ Invalid coordinates for QR {qr}').replace('{qr}', qr_data))
+                return
+            
+            x, y, z = qr_coords[0], qr_coords[1], qr_coords[2]
+            
+            # Tạo pose với tọa độ QR
+            position = {
+                "x": float(x),
+                "y": float(y),
+                "z": float(z)
+            }
+            
+            # Sử dụng orientation mặc định (identity quaternion)
+            # Có thể thay đổi để giữ orientation hiện tại từ localization nếu cần
+            orientation = {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
+            }
+            
+            # Tạo timestamp hiện tại (UTC)
+            timestamp_iso = datetime.now(timezone.utc).isoformat()
+            
+            # Gửi pose lên backend
+            self.log(f"✅ QR matched: {qr_data} -> Sending pose ({x:.2f}, {y:.2f}, {z:.2f})")
+            
+            # Gửi trong background thread để không block UI
+            threading.Thread(
+                target=self.send_pose_to_backend,
+                args=(position, orientation, timestamp_iso),
+                daemon=True
+            ).start()
+            
+        except Exception as e:
+            self.log(self.translator.get('log.error_processing_qr', '❌ Error processing QR code: {error}').replace('{error}', str(e)))
+    
     def on_closing(self):
         """Xử lý khi đóng cửa sổ"""
+        # Dừng QR scanning
+        if self.is_qr_scanning:
+            self.stop_qr_scanning()
+        
+        # Dừng Theta driver nếu đang chạy
+        if self.theta_driver:
+            try:
+                if hasattr(self.theta_driver, 'stop_all'):
+                    self.theta_driver.stop_all()
+            except Exception as e:
+                self.log(f"⚠️ Error stopping Theta driver: {e}")
+        
         # Dừng monitoring kết nối thiết bị
         self.stop_device_connection_monitoring()
         
