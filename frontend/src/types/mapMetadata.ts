@@ -37,6 +37,39 @@ export interface Pose2DPixel {
 }
 
 /**
+ * Coordinate system convention definition
+ * Dùng để mô tả hệ trục của dữ liệu bản đồ/PCD so với chuẩn ROS hoặc Three.js.
+ */
+export interface CoordinateSystemConfig {
+  /**
+   * Tên quy ước:
+   * - 'ros': X=forward, Y=left, Z=up (chuẩn ROS / RViz)
+   * - 'threejs': X=right, Y=up, Z=backward (chuẩn Three.js mặc định)
+   * - 'custom': cấu hình tuỳ chỉnh qua transform phía dưới
+   */
+  convention: 'ros' | 'threejs' | 'custom';
+  /**
+   * Cấu hình transform tuỳ chỉnh nếu convention = 'custom'.
+   * Có thể dùng rotation Euler hoặc axis mapping đơn giản.
+   */
+  transform?: {
+    /** Rotation Euler (rad) XYZ, áp dụng lên dữ liệu trước khi render */
+    rotation?: [number, number, number];
+    /**
+     * Ánh xạ trục: chọn trục world nào map sang trục scene X/Y/Z.
+     * Ví dụ: sceneX='X', sceneY='Z', sceneZ='Y'
+     */
+    axisMapping?: {
+      sceneX: 'X' | 'Y' | 'Z';
+      sceneY: 'X' | 'Y' | 'Z';
+      sceneZ: 'X' | 'Y' | 'Z';
+    };
+    /** Dấu của từng trục sau mapping: 1 hoặc -1 cho [X, Y, Z] */
+    axisSigns?: [number, number, number];
+  };
+}
+
+/**
  * Projection information: which axis is projected and which plane is used
  */
 export interface ProjectionInfo {
@@ -141,6 +174,11 @@ export interface ViewMetadata {
 export interface MapMetadata {
   input_file: string;
   resolution_m_per_pixel: number;
+  /**
+   * Thông tin hệ trục của bản đồ/PCD.
+   * Nếu không có, frontend sẽ mặc định coi dữ liệu ở chuẩn ROS.
+   */
+  coordinate_system?: CoordinateSystemConfig;
   views: {
     top: ViewMetadata;
     side_x: ViewMetadata;

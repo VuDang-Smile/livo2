@@ -5,6 +5,8 @@ import { ArrowHelper } from 'three';
 import * as THREE from 'three';
 import { VehicleMarker3D } from '../../types/vehicle';
 import PCDMap, { PointCloudBounds } from '../PCDMap';
+import { MapMetadata, CoordinateSystemConfig } from '../../types/mapMetadata';
+import { getPCDRotation, transformWorldToScene } from '../../utils/coordinateTransformer';
 import {
   DEFAULT_PCD_URL,
   PCD_CAMERA_FOV,
@@ -16,6 +18,8 @@ import {
 interface MapView3DProps {
   vehicleMarkers: VehicleMarker3D[];
   pcdUrl?: string;
+  /** Metadata của bản đồ/PCD để chuẩn hóa hệ trục */
+  mapMetadata?: MapMetadata | null;
   clipXMin?: number;
   clipXMax?: number;
   clipYMin?: number;
@@ -32,31 +36,28 @@ const VehicleMarker: React.FC<{
   marker: VehicleMarker3D; 
   isSelected?: boolean; 
   onSelect?: () => void;
-}> = ({ marker, isSelected = false, onSelect }) => {
+  coordinateConfig?: CoordinateSystemConfig;
+}> = ({ marker, isSelected = false, onSelect, coordinateConfig }) => {
   const groupRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = React.useState(false);
   
-  // Transform coordinates to match PCD rotation: [x, y, z] -> [x, z, -y]
-  // PCD is rotated [-Math.PI / 2, 0, 0] (90 degrees around X axis)
-  // This means: Y -> Z, Z -> -Y, X stays the same
-  const basePosition: [number, number, number] = [
-    marker.position[0],  // X stays the same
-    marker.position[2],  // Z becomes Y
-    -marker.position[1]  // -Y becomes Z
-  ];
-  
-  // Animation cho phương tiện - animate on Z axis (vertical after rotation)
-  useFrame((state) => {
-    if (groupRef.current) {
-      // Update all position components to ensure sync with basePosition changes
-      groupRef.current.position.x = basePosition[0];
-      groupRef.current.position.y = basePosition[1];
-      groupRef.current.position.z = basePosition[2] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
-    }
-  });
+  // Chuẩn hóa toạ độ world [x, y, z] sang scene Three.js dựa trên config hệ trục
+  const basePosition: [number, number, number] = transformWorldToScene(
+    marker.position,
+    coordinateConfig
+  );
 
   const color = marker.color || '#ef4444';
+  const isGreenMarker = color === '#22c55e';
   const size = isSelected ? 1.5 : hovered ? 1.2 : 1.0;
+
+  // Chỉ animate cho marker màu xanh (online), marker màu đỏ đứng im
+  useFrame((state) => {
+    if (!isGreenMarker || !groupRef.current) return;
+    groupRef.current.position.x = basePosition[0];
+    groupRef.current.position.y = basePosition[1];
+    groupRef.current.position.z = basePosition[2] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
+  });
 
   return (
     <group
@@ -98,6 +99,7 @@ const VehicleMarker: React.FC<{
 const MapView3D: React.FC<MapView3DProps> = ({
   vehicleMarkers,
   pcdUrl = DEFAULT_PCD_URL,
+  mapMetadata,
   clipXMin,
   clipXMax,
   clipYMin,
@@ -109,6 +111,7 @@ const MapView3D: React.FC<MapView3DProps> = ({
   onBoundsCalculated,
 }) => {
   const controlsRef = useRef<any>(null);
+  const coordinateConfig = mapMetadata?.coordinate_system;
 
   // Focus camera vào phương tiện được chọn
   useEffect(() => {
@@ -118,12 +121,9 @@ const MapView3D: React.FC<MapView3DProps> = ({
     const selectedMarker = vehicleMarkers.find(m => m.id === selectedVehicleId);
     if (!selectedMarker) return;
 
-    // Transform coordinates to match PCD rotation: [x, y, z] -> [x, z, -y]
-    const targetPosition = new THREE.Vector3(
-      selectedMarker.position[0],  // X stays the same
-      selectedMarker.position[2],  // Z becomes Y
-      -selectedMarker.position[1]   // -Y becomes Z
-    );
+    // Chuẩn hóa toạ độ world [x, y, z] sang scene Three.js dựa trên config hệ trục
+    const [sx, sy, sz] = transformWorldToScene(selectedMarker.position, coordinateConfig);
+    const targetPosition = new THREE.Vector3(sx, sy, sz);
 
     const currentTarget = controls.target.clone();
     const camera = controls.object;
@@ -181,7 +181,7 @@ const MapView3D: React.FC<MapView3DProps> = ({
             <PCDMap 
               url={pcdUrl} 
               scale={1}
-              rotation={[-Math.PI / 2, 0, 0]}
+              rotation={getPCDRotation(coordinateConfig)}
               position={[0, 0, 0]}
               clipXMin={clipXMin}
               clipXMax={clipXMax}
@@ -200,6 +200,7 @@ const MapView3D: React.FC<MapView3DProps> = ({
             marker={marker} 
             isSelected={marker.id === selectedVehicleId}
             onSelect={() => onVehicleSelect?.(marker.id)}
+            coordinateConfig={coordinateConfig}
           />
         ))}
         
