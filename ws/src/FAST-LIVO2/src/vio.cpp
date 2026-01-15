@@ -306,6 +306,29 @@ void VIOManager::warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, c
     return;
   }
   
+  // Additional validation: check that image data pointer is valid and image is large enough
+  if (img_ref.data == nullptr)
+  {
+    printf("[ VIO ] Error: warpAffine called with null image data pointer\n");
+    return;
+  }
+  
+  // interpolateMat_8u needs to access pixels at (x+1, y+1), so we need at least 2x2 image
+  if (img_ref.cols < 2 || img_ref.rows < 2)
+  {
+    printf("[ VIO ] Error: warpAffine called with image too small (cols: %d, rows: %d)\n", 
+           img_ref.cols, img_ref.rows);
+    return;
+  }
+  
+  // Validate Mat step size to ensure it's reasonable (should be >= cols for CV_8U)
+  if (img_ref.step.p[0] < static_cast<size_t>(img_ref.cols))
+  {
+    printf("[ VIO ] Error: warpAffine called with invalid Mat step size (step: %zu, cols: %d)\n",
+           img_ref.step.p[0], img_ref.cols);
+    return;
+  }
+  
   if (patch_size_total <= 0 || patch_pyrimid_level <= 0)
   {
     printf("[ VIO ] Error: warpAffine called with uninitialized patch_size_total (%d) or patch_pyrimid_level (%d)\n", 
@@ -323,6 +346,10 @@ void VIOManager::warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, c
 
   // Calculate maximum valid index to prevent out-of-bounds access
   const int max_valid_index = patch_size_total * patch_pyrimid_level - 1;
+  
+  // Pre-compute bounds for faster checking inside the loop
+  const float max_x = static_cast<float>(img_ref.cols - 1);
+  const float max_y = static_cast<float>(img_ref.rows - 1);
   
   float *patch_ptr = patch;
   for (int y = 0; y < patch_size; ++y)
@@ -349,10 +376,26 @@ void VIOManager::warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, c
       //                          floor(px[1]) >= 0, floor(px[1]) + 1 < img_ref.rows
       // Since floor rounds down, this means: px[0] >= 0, px[0] < img_ref.cols - 1
       //                                       px[1] >= 0, px[1] < img_ref.rows - 1
-      if (px[0] < 0.0f || px[1] < 0.0f || px[0] >= static_cast<float>(img_ref.cols - 1) || px[1] >= static_cast<float>(img_ref.rows - 1))
+      // Use strict less-than to ensure floor(px[0]) + 1 < cols and floor(px[1]) + 1 < rows
+      if (px[0] < 0.0f || px[1] < 0.0f || px[0] >= max_x || px[1] >= max_y)
+      {
         patch_ptr[index] = 0;
+      }
       else
-        patch_ptr[index] = (float)vk::interpolateMat_8u(img_ref, px[0], px[1]);
+      {
+        // Double-check that floor(px[0]) + 1 < cols and floor(px[1]) + 1 < rows
+        // This is a redundant check but ensures safety
+        const int px_x = static_cast<int>(floor(px[0]));
+        const int px_y = static_cast<int>(floor(px[1]));
+        if (px_x < 0 || px_y < 0 || px_x + 1 >= img_ref.cols || px_y + 1 >= img_ref.rows)
+        {
+          patch_ptr[index] = 0;
+        }
+        else
+        {
+          patch_ptr[index] = (float)vk::interpolateMat_8u(img_ref, px[0], px[1]);
+        }
+      }
     }
   }
 }

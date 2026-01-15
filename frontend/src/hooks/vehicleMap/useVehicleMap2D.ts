@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useMQTT } from '../../contexts/MQTTContext';
-import { Vehicle, VehicleMapResponse } from '../../types/vehicleMap2D';
+import { MapVehicle, VehicleMapResponse } from '../../types/vehicle';
 import { UseVehicleMap2DResult } from '../../types/monitoring';
 import { useMQTTPositionHandler } from '../shared/useMQTTPositionHandler';
 import { useVehicleTimeout } from '../shared/useVehicleTimeout';
@@ -20,7 +20,7 @@ const DEBUG = process.env.REACT_APP_DEBUG_LOGS === '1';
  */
 export function useVehicleMap2D(): UseVehicleMap2DResult {
   const [mapData, setMapData] = useState<VehicleMapResponse | null>(null);
-  const [mapVehicles, setMapVehicles] = useState<Vehicle[]>([]);
+  const [mapVehicles, setMapVehicles] = useState<MapVehicle[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [vehicleLastSeen, setVehicleLastSeen] = useState<Map<string, number>>(new Map());
@@ -64,7 +64,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
       setLoading(true);
       const vehicles = await vehicleService.getVehicles();
       const vehiclesMap = new Map<string, ApiVehicle>();
-      const transformedVehicles: Vehicle[] = [];
+      const transformedVehicles: MapVehicle[] = [];
       
       (Array.isArray(vehicles) ? vehicles : []).forEach((v: ApiVehicle) => {
         const vehicleId = v.vehicle_id;
@@ -78,13 +78,14 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
         vehiclesMap.set(vehicleId, v);
         
         // Transform to Vehicle format
-        const position = v.current_pose?.position || v.current_position || { x: 0, y: 0, z: 0 };
-        const timestamp = v.current_pose?.timestamp || v.updated_at || v.created_at || new Date().toISOString();
+        const position = v.latest_pose?.position || { x: 0, y: 0, z: 0 };
+        const timestamp =
+          v.latest_pose?.timestamp || v.updated_at || v.created_at || new Date().toISOString();
         
         transformedVehicles.push({
           id: vehicleId,
           name: v.name || vehicleId,
-          type: v.vehicle_type || v.type,
+          vehicleType: v.vehicle_type,
           status: v.status || 'offline',
           position,
           timestamp,
@@ -185,9 +186,10 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
           source: 'mqtt' as const,
           // Keep API info if available
           name: apiVehicle?.name || existingVehicle.name,
-          type: apiVehicle?.vehicle_type || apiVehicle?.type || existingVehicle.type,
+          vehicleType: apiVehicle?.vehicle_type || existingVehicle.vehicleType,
+          vehicleCategory: apiVehicle?.vehicle_category || existingVehicle.vehicleCategory,
           status: 'online' as const // Position update means vehicle is online
-        } as Vehicle & { source: 'mqtt' };
+        };
 
         if (DEBUG) {
           console.log(
@@ -199,15 +201,16 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
       } else {
         // Create new vehicle - merge API info with MQTT data
         const timestamp = extractTimestampStringFromMQTT(lastPositionUpdate, true);
-        const newVehicle = {
+        const newVehicle: MapVehicle = {
           id: lastPositionUpdate.vehicle_id,
           name: apiVehicle?.name || `Vehicle ${lastPositionUpdate.vehicle_id}`,
-          type: apiVehicle?.vehicle_type || apiVehicle?.type,
+          vehicleType: apiVehicle?.vehicle_type,
+          vehicleCategory: apiVehicle?.vehicle_category,
           status: 'online' as const, // Position update means vehicle is online
           position: newPosition,
           timestamp: timestamp as string,
           source: 'mqtt' as const
-        } as Vehicle & { source: 'mqtt' };
+        };
 
         if (DEBUG) {
           console.log(
@@ -258,13 +261,15 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
         // Vehicle doesn't exist but coming online - create from API data
         const apiVehicle = apiVehicles.get(vehicleId);
         if (apiVehicle) {
-          const position = apiVehicle.current_pose?.position || apiVehicle.current_position || { x: 0, y: 0, z: 0 };
-          const timestamp = apiVehicle.current_pose?.timestamp || apiVehicle.updated_at || new Date().toISOString();
+          const position = apiVehicle.latest_pose?.position || { x: 0, y: 0, z: 0 };
+          const timestamp =
+            apiVehicle.latest_pose?.timestamp || apiVehicle.updated_at || new Date().toISOString();
           
-          const newVehicle: Vehicle = {
+          const newVehicle: MapVehicle = {
             id: vehicleId,
             name: apiVehicle.name || vehicleId,
-            type: apiVehicle.vehicle_type || apiVehicle.type,
+            vehicleType: apiVehicle.vehicle_type,
+            vehicleCategory: apiVehicle.vehicle_category,
             status: 'online' as const,
             position,
             timestamp,

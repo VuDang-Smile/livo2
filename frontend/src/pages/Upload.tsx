@@ -4,7 +4,7 @@ import { OrbitControls, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { Edit, Trash2, Grid3x3, ImageIcon, Maximize2, X } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { VehiclePosition } from '../utils/vehicle2DHelper';
+import type { VehicleCanvasPosition } from '../types/vehicle';
 import { MapInfo } from '../types/mapInfo';
 import { QRCodeInfo } from '../types/qrCode';
 import { EditingRow, ManualPin } from '../types/upload';
@@ -15,8 +15,9 @@ import { MAP_2D_IMAGE_URL } from '../constants/mapConfig';
 import { getVehicle2DPosition } from '../utils/vehicle2DHelper';
 import { useMapInfo } from '../hooks/api/useMapInfo';
 import { useQRCodes } from '../hooks/api/useQRCodes';
-import { MapMetadata } from '../types/mapMetadata';
+import { MapMetadata, CoordinateSystemConfig } from '../types/mapMetadata';
 import { transformPoseToPixel, pixelToWorld } from '../utils/coordinateTransform';
+import { getPCDRotation, transformWorldToScene } from '../utils/coordinateTransformer';
 import { MAP_FLOORPLAN_METADATA_URL } from '../config/dataSources';
 
 // Component cho đường hầm (copy từ VehicleMap)
@@ -61,16 +62,23 @@ const Tunnel: React.FC = () => {
   );
 };
 
-// Component cho phương tiện (copy từ VehicleMap)
+// Component cho phương tiện (copy từ VehicleMap) - đã chuẩn hóa theo hệ trục
 const Vehicle: React.FC<{ 
-  vehicle: VehiclePosition; 
-}> = ({ vehicle }) => {
+  vehicle: VehicleCanvasPosition; 
+  coordinateConfig?: CoordinateSystemConfig;
+}> = ({ vehicle, coordinateConfig }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+  // Chuẩn hóa vị trí world [x, y, z] sang scene Three.js
+  const basePosition: [number, number, number] = transformWorldToScene(
+    vehicle.position,
+    coordinateConfig
+  );
   
   // Animation cho phương tiện
   useFrame((state) => {
     if (meshRef.current) {
-      meshRef.current.position.y = vehicle.position[1] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
+      // Nhún nhẹ theo trục Y của scene (đã chuẩn hoá)
+      meshRef.current.position.y = basePosition[1] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
     }
   });
 
@@ -104,7 +112,7 @@ const getVehicleGeometry = (vehicleType?: string) => {
   };
 
   return (
-    <group position={vehicle.position}>
+    <group position={basePosition}>
       {/* Phương tiện */}
       <mesh ref={meshRef}>
         {getVehicleGeometry(vehicle.vehicleType)}
@@ -403,14 +411,16 @@ const ClickHandler3D: React.FC<{
 
 // Component cho bản đồ 3D Preview
 const PCDPreview3D: React.FC<{ 
-  vehicles: VehiclePosition[];
+  vehicles: VehicleCanvasPosition[];
   pcdUrl?: string | null;
+  mapMetadata?: MapMetadata | null;
   isPickingMode?: boolean;
   qrMarkers?: Array<{ position: [number, number, number]; id: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>;
   onPositionPick?: (position: [number, number, number], surface: 'floor' | 'ceiling' | 'left' | 'right') => void;
   previewPosition?: [number, number, number] | null;
   onPreviewPositionUpdate?: (position: [number, number, number] | null) => void;
-}> = ({ vehicles, pcdUrl, isPickingMode = false, qrMarkers = [], onPositionPick, previewPosition, onPreviewPositionUpdate }) => {
+}> = ({ vehicles, pcdUrl, isPickingMode = false, qrMarkers = [], onPositionPick, previewPosition, onPreviewPositionUpdate, mapMetadata }) => {
+  const coordinateConfig = mapMetadata?.coordinate_system;
   return (
     <>
       {/* Camera controls */}
@@ -437,7 +447,7 @@ const PCDPreview3D: React.FC<{
             url={pcdUrl}
             // Đơn vị: mét (scale = 1)
             scale={1}
-            rotation={[-Math.PI / 2, 0, 0]}
+            rotation={getPCDRotation(coordinateConfig)}
             position={[0, 0, 0]}
           />
         </Suspense>
@@ -449,7 +459,8 @@ const PCDPreview3D: React.FC<{
       {vehicles.map((vehicle) => (
         <Vehicle 
           key={vehicle.id} 
-          vehicle={vehicle} 
+          vehicle={vehicle}
+          coordinateConfig={coordinateConfig}
         />
       ))}
       
@@ -482,7 +493,7 @@ const PCDPreview3D: React.FC<{
 
 // Component cho bản đồ 2D Preview
 const Image2DPreview: React.FC<{ 
-  vehicles: VehiclePosition[];
+  vehicles: VehicleCanvasPosition[];
   qrPins?: ManualPin[];
   picking?: boolean;
   onPick?: (pos: [number, number]) => void;
@@ -869,7 +880,7 @@ const Upload: React.FC = () => {
   const { t } = useLanguage();
   const [selectedZipName, setSelectedZipName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [previewVehicles, setPreviewVehicles] = useState<VehiclePosition[]>([]);
+  const [previewVehicles, setPreviewVehicles] = useState<VehicleCanvasPosition[]>([]);
   // Danh sách QRCode ban đầu rỗng; chỉ hiển thị sau khi người dùng click "Load ZIP gần nhất"
   const [previewQRCodes, setPreviewQRCodes] = useState<QRCodeInfo[]>([]);
   // State quản lý các dòng đang chỉnh sửa
@@ -1652,6 +1663,7 @@ const Upload: React.FC = () => {
                     onPositionPick={handleMap3DPositionPick}
                     previewPosition={previewPickPosition}
                     onPreviewPositionUpdate={setPreviewPickPosition}
+                    mapMetadata={mapMetadata}
                   />
                 </Canvas>
                 {isPickingPosition3D && (

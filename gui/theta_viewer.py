@@ -48,6 +48,7 @@ from replay_tab import ReplayTab
 from bag_mapping_tab import BagMappingTab
 from pcd_viewer_tab import PCDViewerTab
 from localization_tab import LocalizationTab
+from pcd_comparison_tab import PCDComparisonTab
 
 
 class MainGUI:
@@ -95,6 +96,10 @@ class MainGUI:
         # Tạo tab PCD Viewer
         self.pcd_viewer_tab = PCDViewerTab(self.notebook)
         self.notebook.add(self.pcd_viewer_tab, text="PCD Viewer")
+        
+        # Tạo tab PCD Comparison
+        self.pcd_comparison_tab = PCDComparisonTab(self.notebook)
+        self.notebook.add(self.pcd_comparison_tab, text="PCD Comparison")
         
         # Bind events
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)

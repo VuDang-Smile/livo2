@@ -9,11 +9,8 @@
  * API Base: /api/v1/pcd và /api/v1/vehicles
  */
 
-import { Vehicle, VehicleMapResponse } from '../../types/vehicleMap2D';
+import { MapVehicle, VehicleMapResponse } from '../../types/vehicle';
 import { normalizeTimestamp } from '../../utils/timestampHelpers';
-
-// Re-export types for backward compatibility
-export type { Vehicle, VehicleMapResponse };
 
 export class VehicleMapService {
   constructor(private apiBaseUrl: string) {
@@ -97,7 +94,7 @@ export class VehicleMapService {
   /**
    * Get vehicles with real-time position updates
    */
-  async getVehiclesWithPositions(): Promise<Vehicle[]> {
+  async getVehiclesWithPositions(): Promise<MapVehicle[]> {
     const res = await fetch(`${this.apiBaseUrl}/api/v1/vehicles/`, {
       method: "GET",
       headers: {
@@ -110,31 +107,26 @@ export class VehicleMapService {
       throw new Error(text || `Failed to get vehicles with status ${res.status}`);
     }
     
-    const vehicles = await res.json();
-    
-    // Transform API response to Vehicle format with position data
-    return vehicles.map((vehicle: any) => ({
-      id: vehicle.vehicle_id,
-      name: vehicle.name,
-      type: vehicle.type_category || vehicle.type, // Backend uses type_category
-      status: vehicle.status,
-      position: vehicle.current_pose?.position ? {
-        x: vehicle.current_pose.position.x,
-        y: vehicle.current_pose.position.y,
-        z: vehicle.current_pose.position.z
-      } : vehicle.current_position ? {
-        x: vehicle.current_position.x,
-        y: vehicle.current_position.y,
-        z: vehicle.current_position.z
-      } : {
-        x: 0,
-        y: 0,
-        z: 0
-      },
-      timestamp: normalizeTimestamp(
-        vehicle.current_pose?.timestamp || vehicle.current_position?.timestamp,
-        true
-      ) as string
-    }));
+    const data = await res.json();
+
+    // Backend hiện trả VehiclesListResponse { vehicles, total }
+    const vehicles = Array.isArray(data.vehicles) ? data.vehicles : data;
+
+    // Transform API response to MapVehicle format with position data (dựa trên latest_pose)
+    return vehicles.map((vehicle: any): MapVehicle => {
+      const latest = vehicle.latest_pose;
+      const position = latest?.position || { x: 0, y: 0, z: 0 };
+      const rawTimestamp = latest?.timestamp || vehicle.updated_at || vehicle.created_at;
+
+      return {
+        id: vehicle.vehicle_id,
+        name: vehicle.name,
+        vehicleType: vehicle.vehicle_type,
+        vehicleCategory: vehicle.vehicle_category,
+        status: vehicle.status,
+        position,
+        timestamp: normalizeTimestamp(rawTimestamp, true) as string,
+      };
+    });
   }
 }

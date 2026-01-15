@@ -16,7 +16,6 @@ export * from './upload';
 
 // Vehicle types
 export * from './vehicle';
-export * from './vehicleMap2D';
 
 // Monitoring types
 export * from './monitoring';

@@ -53,6 +53,30 @@ except (ImportError, SystemError, OSError) as e:
             self.lang = lang
     Translator = Translator
 
+# Import comparison utils cho tính năng so sánh bản đồ thiết kế
+COMPARISON_UTILS_AVAILABLE = False
+try:
+    # Thêm đường dẫn scripts để import pcd_comparison_utils
+    scripts_dir = Path(__file__).parent.parent / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+
+    from pcd_comparison_utils import (
+        load_pcd,
+        load_obj_as_pointcloud,
+        preprocess_pcd,
+        compute_similarity_metrics,
+        calculate_similarity_percentage,
+        detect_drift,
+        DEFAULT_ICP_MAX_ITERATIONS,
+        DEFAULT_ICP_THRESHOLD_MULTIPLIER,
+    )
+    COMPARISON_UTILS_AVAILABLE = True
+except (ImportError, SystemError, OSError, SystemExit) as e:
+    # Thiếu open3d hoặc file utils – chỉ log cảnh báo, không làm crash GUI
+    print(f"Warning: pcd_comparison_utils not available: {e}. Design map comparison will be disabled.")
+    COMPARISON_UTILS_AVAILABLE = False
+
 # Try to import pyzbar for QR code scanning với error handling tốt hơn
 PYZBAR_AVAILABLE = False
 QRCODE_SYMBOLS = None
@@ -443,6 +467,13 @@ class BagMappingInterface:
         self.bag_rate = 0.5
         # Backend URL for map upload
         self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.tm")
+        # Thư mục lưu PCD convert từ OBJ (bản thiết kế)
+        self.obj_converted_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "obj_converted_pcd"
+        # Cấu hình so sánh bản đồ thiết kế
+        self.design_file_type = "pcd"  # 'pcd' hoặc 'obj'
+        self.design_file_path = None
+        self.comparison_result = None
+        self.comparison_threshold = 90.0  # % khớp tối thiểu khuyến nghị
         
         # QR code scanning - chỉ khởi tạo nếu tất cả dependencies có sẵn
         try:
@@ -618,6 +649,37 @@ class BagMappingInterface:
         if hasattr(self, 'qr_listbox'):
             # QR codes section sẽ được cập nhật tự động khi có QR codes mới
             pass
+        
+        # Update Design Map Comparison section
+        if hasattr(self, 'comparison_frame'):
+            self.comparison_frame.config(
+                text=self.translator.get('label.design_map_comparison', 'Design Map Comparison')
+            )
+        
+        if hasattr(self, 'design_file_type_label'):
+            self.design_file_type_label.config(
+                text=self.translator.get('label.design_file_type', 'Design file type:')
+            )
+        
+        if hasattr(self, 'design_file_label'):
+            self.design_file_label.config(
+                text=self.translator.get('label.design_file', 'Design file:')
+            )
+        
+        if hasattr(self, 'design_browse_btn'):
+            self.design_browse_btn.config(
+                text=self.translator.get('button.browse', 'Browse')
+            )
+        
+        # Update comparison status label if exists (only if default text)
+        if hasattr(self, 'comparison_status_label'):
+            current_text = self.comparison_status_label.cget('text')
+            # Only update if it's the default "not configured" text
+            if 'not configured' in current_text.lower() or '未設定' in current_text:
+                self.comparison_status_label.config(
+                    text=self.translator.get('label.design_comparison_not_configured', 
+                        'Design comparison: not configured')
+                )
 
     def setup_control_card(self):
         self.control_card = tk.LabelFrame(self.workspace, text=self.translator.get('label.execution_control', 'Execution Control'), padx=15, pady=10)
@@ -717,7 +779,77 @@ class BagMappingInterface:
         
         self.upload_stat = tk.Label(progress_controls, text=self.translator.get('label.waiting', 'Waiting...'), font=("Arial", 8))
         self.upload_stat.pack(side=tk.RIGHT)
-        
+
+        # 2.2. Design map comparison section
+        self.comparison_frame = tk.LabelFrame(
+            self.preview_card,
+            text=self.translator.get('label.design_map_comparison', 'Design Map Comparison'),
+            padx=10,
+            pady=8,
+        )
+        self.comparison_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Loại file thiết kế: PCD / OBJ
+        design_type_frame = tk.Frame(self.comparison_frame)
+        design_type_frame.pack(fill=tk.X, pady=(0, 5))
+
+        self.design_file_type_label = tk.Label(
+            design_type_frame,
+            text=self.translator.get('label.design_file_type', 'Design file type:'),
+            font=("Arial", 9, "bold"),
+        )
+        self.design_file_type_label.pack(side=tk.LEFT)
+
+        self.design_type_var = tk.StringVar(value=self.design_file_type)
+        design_pcd_radio = tk.Radiobutton(
+            design_type_frame,
+            text="PCD",
+            variable=self.design_type_var,
+            value="pcd",
+            command=self.update_design_type,
+        )
+        design_pcd_radio.pack(side=tk.LEFT, padx=5)
+
+        design_obj_radio = tk.Radiobutton(
+            design_type_frame,
+            text="OBJ",
+            variable=self.design_type_var,
+            value="obj",
+            command=self.update_design_type,
+        )
+        design_obj_radio.pack(side=tk.LEFT, padx=5)
+
+        # Chọn file thiết kế
+        design_file_frame = tk.Frame(self.comparison_frame)
+        design_file_frame.pack(fill=tk.X, pady=(0, 5))
+
+        self.design_file_label = tk.Label(
+            design_file_frame,
+            text=self.translator.get('label.design_file', 'Design file:'),
+            font=("Arial", 9),
+        )
+        self.design_file_label.pack(side=tk.LEFT)
+
+        self.design_path_var = tk.StringVar()
+        design_entry = tk.Entry(design_file_frame, textvariable=self.design_path_var)
+        design_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        self.design_browse_btn = tk.Button(
+            design_file_frame,
+            text=self.translator.get('button.browse', 'Browse'),
+            command=self.browse_design_file,
+        )
+        self.design_browse_btn.pack(side=tk.LEFT, padx=5)
+
+        # Nhãn hiển thị kết quả so sánh
+        self.comparison_status_label = tk.Label(
+            self.comparison_frame,
+            text=self.translator.get('label.design_comparison_not_configured', 'Design comparison: not configured'),
+            font=("Arial", 11, "bold"),
+            fg="gray",
+        )
+        self.comparison_status_label.pack(fill=tk.X, pady=(2, 0))
+
         # Separator để tách biệt progress và log
         separator2 = ttk.Separator(self.preview_card, orient=tk.HORIZONTAL)
         separator2.pack(fill=tk.X, pady=(0, 10))
@@ -1154,6 +1286,26 @@ class BagMappingInterface:
             )
             return
 
+        # Kiểm tra bắt buộc phải chọn file thiết kế để so sánh
+        if not self.design_file_path:
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                self.translator.get('message.design_file_required', 
+                    'Please select a design map file (PCD or OBJ) before uploading.\n\nDesign map comparison is required to ensure map quality.')
+            )
+            return
+        
+        # Validate design file exists
+        design_path = Path(self.design_file_path)
+        if not design_path.exists():
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                self.translator.get('message.design_file_not_exists', 
+                    'Design map file does not exist:\n{path}\n\nPlease select a valid design map file.')
+                    .replace('{path}', str(design_path))
+            )
+            return
+
         # Lưu lại để truyền vào thread upload
         self.current_map_name = map_name
         self.current_vehicle_id = vehicle_id
@@ -1207,6 +1359,56 @@ class BagMappingInterface:
                 return
             
             self.root.after(0, lambda: self.set_progress(80))
+            
+            # 4.5. So sánh với bản thiết kế (PCD/OBJ) nếu người dùng đã chọn
+            if self.design_file_path:
+                self.add_log(self.translator.get('log.step_comparing_design_map', 
+                    'Step 5/7: Comparing generated map with design map...'))
+                generated_pcd_path = (
+                    self.workspace_path
+                    / "src"
+                    / "FAST-LIVO2"
+                    / "Log"
+                    / "merged_map"
+                    / "merged_all.pcd"
+                )
+
+                success, similarity = self.run_design_map_comparison(generated_pcd_path)
+                if not success:
+                    self.add_log(self.translator.get('log.design_map_comparison_failed', 
+                        '❌ Design map comparison failed. Stopping pipeline before upload.'))
+                    self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
+                    return
+
+                # Cập nhật progress nhẹ sau khi so sánh
+                self.root.after(0, lambda: self.set_progress(82))
+
+                # Nếu % khớp thấp hơn ngưỡng, hỏi người dùng có tiếp tục upload không
+                try:
+                    threshold = float(self.comparison_threshold)
+                except Exception:
+                    threshold = 90.0
+                if similarity < threshold:
+                    warn_msg = (
+                        self.translator.get('log.low_similarity_warning', 
+                            '⚠️ Low similarity with design map: {similarity}% (threshold: {threshold}%)\n\nPossible drift detected. Do you want to continue upload anyway?')
+                            .replace('{similarity}', f'{similarity:.1f}')
+                            .replace('{threshold}', f'{threshold:.1f}')
+                    )
+                    self.add_log(
+                        f"⚠️ Low similarity with design map: {similarity:.1f}% "
+                        f"(threshold {threshold:.1f}%). Asking user..."
+                    )
+                    if not messagebox.askyesno(
+                        self.translator.get('dialog.low_similarity_warning_title', 'Low similarity warning'), 
+                        warn_msg
+                    ):
+                        self.add_log("⛔ User cancelled upload due to low similarity with design map.")
+                        self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
+                        return
+                    else:
+                        self.add_log(self.translator.get('log.user_continue_upload_low_similarity', 
+                            '➡ User chose to continue upload despite low similarity.'))
             
             # 5. Save QR codes to JSON
             self.add_log(self.translator.get('log.step_save_qr', 'Step 5/7: Saving QR codes...'))
@@ -1303,8 +1505,247 @@ class BagMappingInterface:
                 error_msg = self.translator.get('message.bag_folder_not_exists', 'Bag folder does not exist: {path}').replace('{path}', bag_path)
                 messagebox.showerror(self.translator.get('dialog.error', 'Error'), error_msg)
 
+    def update_design_type(self):
+        """Cập nhật loại file thiết kế (PCD / OBJ) khi người dùng chọn."""
+        self.design_file_type = self.design_type_var.get()
+        if self.design_file_type == "obj":
+            msg = self.translator.get('label.design_type_obj', 
+                'Design type: OBJ | voxel=0.15 | sampling=uniform | Match PCD density + Save converted PCD')
+        else:
+            msg = self.translator.get('label.design_type_pcd', 'Design type: PCD')
+        if hasattr(self, "comparison_status_label"):
+            self.comparison_status_label.config(text=msg, fg="blue", font=("Arial", 11, "bold"))
+        self.add_log(self.translator.get('log.design_type_set', 
+            'CONFIG: Design map type set to {type}').replace('{type}', self.design_file_type.upper()))
+
+    def browse_design_file(self):
+        """Chọn file bản thiết kế (PCD hoặc OBJ) để so sánh."""
+        # Thư mục gợi ý: dùng đường dẫn hiện tại hoặc Log
+        initial_dir = self.design_path_var.get()
+        if not initial_dir:
+            initial_dir = str(self.workspace_path / "src" / "FAST-LIVO2" / "Log")
+
+        if self.design_file_type == "obj":
+            filetypes = [("OBJ files", "*.obj"), ("All files", "*.*")]
+            title = self.translator.get('dialog.choose_design_obj_file', 'Choose Design OBJ File')
+        else:
+            filetypes = [("PCD files", "*.pcd"), ("All files", "*.*")]
+            title = self.translator.get('dialog.choose_design_pcd_file', 'Choose Design PCD File')
+
+        filename = filedialog.askopenfilename(
+            title=title,
+            initialdir=initial_dir,
+            filetypes=filetypes,
+        )
+
+        if filename:
+            self.design_path_var.set(filename)
+            self.design_file_path = filename
+            file_ext = "OBJ" if self.design_file_type == "obj" else "PCD"
+            self.add_log(self.translator.get('log.design_file_selected', 
+                '✅ Design {file_ext} selected: {filename}').replace('{file_ext}', file_ext).replace('{filename}', Path(filename).name))
+            if hasattr(self, "comparison_status_label"):
+                status_text = self.translator.get('label.design_file_selected', 
+                    'Design file: {filename}').replace('{filename}', Path(filename).name)
+                self.comparison_status_label.config(
+                    text=status_text,
+                    fg="green",
+                    font=("Arial", 11, "bold"),
+                )
+
     def launch_rviz_cmd(self):
         self.add_log(self.translator.get('log.system_launching_rviz2', 'SYSTEM: Launching RViz2...'))
+
+    def run_design_map_comparison(self, generated_pcd_path: Path):
+        """
+        So sánh bản đồ tạo ra (merged_all.pcd) với bản thiết kế (PCD/OBJ).
+        
+        Returns:
+            (success: bool, similarity: float)
+        """
+        if not COMPARISON_UTILS_AVAILABLE:
+            self.add_log("⚠️ Design comparison utils not available. Skipping comparison step.")
+            return True, 100.0
+
+        try:
+            design_path_str = self.design_file_path
+            if not design_path_str:
+                self.add_log("⚠️ No design file selected. Skipping comparison.")
+                return True, 100.0
+
+            design_path = Path(design_path_str)
+            if not design_path.exists():
+                msg = f"Design file not found: {design_path}"
+                self.add_log(f"❌ {msg}")
+                messagebox.showerror("Design map comparison", msg)
+                return False, 0.0
+
+            if not generated_pcd_path.exists():
+                msg = f"Generated map PCD not found: {generated_pcd_path}"
+                self.add_log(f"❌ {msg}")
+                messagebox.showerror(
+                    self.translator.get('dialog.design_map_comparison', 'Design map comparison'), 
+                    msg
+                )
+                return False, 0.0
+
+            self.add_log(self.translator.get('log.running_design_map_comparison', 
+                '🔍 Running design map comparison...'))
+            self.add_log(f"   Design file: {design_path.name} ({self.design_file_type.upper()})")
+            self.add_log(f"   Generated map: {generated_pcd_path.name}")
+
+            # Load test PCD (bản đồ tạo ra)
+            pcd_test = load_pcd(generated_pcd_path)
+            test_points = len(pcd_test.points)
+
+            # Load reference từ PCD hoặc OBJ
+            if self.design_file_type == "obj":
+                # Thiết lập sampling cho OBJ: uniform, match density, lưu PCD convert
+                match_density = test_points if test_points > 0 else None
+                self.add_log(
+                    f"   OBJ settings: voxel=0.15, sampling=uniform, "
+                    f"match_density={match_density}, save_converted_pcd=True"
+                )
+
+                # Tạo thư mục lưu PCD convert từ OBJ
+                self.obj_converted_dir.mkdir(parents=True, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                converted_pcd_path = self.obj_converted_dir / f"{design_path.stem}_converted_{timestamp}.pcd"
+
+                # Convert OBJ -> point cloud
+                pcd_ref = load_obj_as_pointcloud(
+                    design_path,
+                    sampling_method="uniform",
+                    num_points=None,
+                    match_density=match_density,
+                )
+                self.add_log(f"   Converted OBJ to PCD with {len(pcd_ref.points):,} points")
+            else:
+                converted_pcd_path = None
+                pcd_ref = load_pcd(design_path)
+
+            ref_points = len(pcd_ref.points)
+            self.add_log(f"   Reference points: {ref_points:,}")
+            self.add_log(f"   Test points: {test_points:,}")
+
+            # Preprocess với voxel size = 0.15, remove outliers
+            voxel_size = 0.15
+            self.add_log(f"   Preprocessing with voxel size = {voxel_size}")
+
+            pcd_ref = preprocess_pcd(
+                pcd_ref,
+                voxel_size=voxel_size,
+                remove_outliers=True,
+            )
+            pcd_test = preprocess_pcd(
+                pcd_test,
+                voxel_size=voxel_size,
+                remove_outliers=True,
+            )
+
+            self.add_log(f"   After preprocessing - Reference: {len(pcd_ref.points):,} points")
+            self.add_log(f"   After preprocessing - Test: {len(pcd_test.points):,} points")
+
+            # ICP threshold tự động theo voxel size
+            icp_threshold = voxel_size * DEFAULT_ICP_THRESHOLD_MULTIPLIER
+            self.add_log(f"   ICP threshold: {icp_threshold:.3f} m")
+
+            # Nếu là OBJ, lưu PCD convert vào thư mục riêng
+            save_pcd_path = converted_pcd_path if converted_pcd_path is not None else None
+            if save_pcd_path is not None:
+                self.add_log(f"   Will save converted design PCD to: {save_pcd_path}")
+
+            metrics = compute_similarity_metrics(
+                pcd_ref,
+                pcd_test,
+                perform_icp=True,
+                icp_threshold=icp_threshold,
+                icp_max_iterations=DEFAULT_ICP_MAX_ITERATIONS,
+                save_obj_pcd=save_pcd_path,
+            )
+
+            if save_pcd_path is not None:
+                self.add_log(f"✅ Converted design PCD saved to: {save_pcd_path}")
+
+            similarity = calculate_similarity_percentage(metrics)
+            drift_detected, drift_reasons = detect_drift(metrics, similarity)
+
+            # Lưu kết quả vào state
+            self.comparison_result = {
+                "design_file": str(design_path),
+                "generated_file": str(generated_pcd_path),
+                "metrics": metrics,
+                "similarity": similarity,
+                "drift_detected": drift_detected,
+                "drift_reasons": drift_reasons,
+            }
+
+            # Log tóm tắt
+            self.add_log("=" * 60)
+            self.add_log(self.translator.get('log.design_map_comparison_results', 
+                'Design Map Comparison Results'))
+            self.add_log(self.translator.get('label.similarity_percent', 
+                '   Similarity: {similarity}%').replace('{similarity}', f'{similarity:.2f}'))
+            self.add_log(f"   ICP fitness: {metrics.get('icp_fitness', 0.0):.4f}")
+            self.add_log(f"   Hausdorff distance: {metrics.get('hausdorff_distance', 0.0):.4f} m")
+            self.add_log(f"   Chamfer distance: {metrics.get('chamfer_distance', 0.0):.4f} m")
+            self.add_log(f"   BBox overlap: {metrics.get('bbox_overlap', 0.0):.4f}")
+            self.add_log(f"   Centroid distance: {metrics.get('centroid_distance', 0.0):.4f} m")
+            self.add_log(f"   Density ratio: {metrics.get('density_ratio', 0.0):.4f}")
+
+            status_text = self.translator.get('label.similarity_percent', 
+                'Similarity: {similarity}%').replace('{similarity}', f'{similarity:.2f}')
+            if drift_detected:
+                self.add_log("   Drift detected:")
+                for reason in drift_reasons:
+                    self.add_log(f"     - {reason}")
+                status_text += " (" + self.translator.get('label.possible_drift', 'Possible drift') + ")"
+            
+            # Xác định màu sắc dựa trên % similarity
+            if similarity >= 90:
+                status_color = "green"
+                if not drift_detected:
+                    status_text = self.translator.get('label.similarity_percent', 
+                        'Similarity: {similarity}%').replace('{similarity}', f'{similarity:.2f}') + \
+                        " (" + self.translator.get('label.no_significant_drift', 'No significant drift') + ")"
+            elif similarity >= 50:
+                status_color = "orange"
+                if not drift_detected:
+                    status_text = self.translator.get('label.similarity_percent', 
+                        'Similarity: {similarity}%').replace('{similarity}', f'{similarity:.2f}') + \
+                        " (" + self.translator.get('label.moderate_match', 'Moderate match') + ")"
+            else:
+                status_color = "red"
+                if not drift_detected:
+                    status_text = self.translator.get('label.similarity_percent', 
+                        'Similarity: {similarity}%').replace('{similarity}', f'{similarity:.2f}') + \
+                        " (" + self.translator.get('label.low_match', 'Low match') + ")"
+
+            self.add_log("=" * 60)
+
+            # Cập nhật label UI trong main thread
+            if hasattr(self, "comparison_status_label"):
+                self.root.after(
+                    0,
+                    lambda txt=status_text, col=status_color: self.comparison_status_label.config(
+                        text=txt, fg=col, font=("Arial", 11, "bold")
+                    ),
+                )
+
+            return True, similarity
+
+        except Exception as e:
+            self.add_log(f"❌ Error in design map comparison: {e}")
+            import traceback
+            self.add_log(f"   Details: {traceback.format_exc()[:500]}")
+            try:
+                messagebox.showerror(
+                    self.translator.get('dialog.design_map_comparison', 'Design map comparison'), 
+                    f"Error during comparison:\n{e}"
+                )
+            except Exception:
+                pass
+            return False, 0.0
 
     def clear_log(self):
         self.log_panel.config(state=tk.NORMAL)

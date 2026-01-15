@@ -9,7 +9,7 @@ import { PCDClipControls } from '../components/PCDClipControls';
 import { PointCloudBounds } from '../components/PCDMap';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { MapMetadata } from '../types/mapMetadata';
-import { Vehicle } from '../types/vehicleMap2D';
+import { MapVehicle } from '../types/vehicle';
 import VehicleStatusCard from '../components/vehicleMap/VehicleStatusCard';
 
 // Component chính cho trang
@@ -42,6 +42,15 @@ const VehicleMap: React.FC = () => {
   const { vehicleMarkers: markers3D } = useVehicleMarkers3D();
   const { vehicleMarkers: markers2D, mapMetadata: poseMetadata } = useVehiclePose2D(selectedView);
   const { mapVehicles } = useVehicleMap2D();
+
+  // Khoá scroll toàn bộ trang khi vào VehicleMap, trả lại trạng thái cũ khi rời trang
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
 
   // Map metadata is now loaded by useVehiclePose2D hook from local files
   // No need to load from API anymore
@@ -108,47 +117,65 @@ const VehicleMap: React.FC = () => {
     };
   }, []);
 
-  // Get vehicles for display based on view mode
-  const displayVehicles: Vehicle[] = useMemo(() => {
+  /**
+   * Merge vehicles từ nhiều nguồn để hiển thị trên map.
+   * 
+   * Strategy merge cho 2D mode:
+   * 1. Base data từ API (mapVehicles từ useVehicleMap2D):
+   *    - Chứa tất cả vehicles từ database với thông tin cơ bản (name, type, category)
+   *    - Position có thể cũ hoặc không có
+   * 
+   * 2. Real-time updates từ MQTT (markers2D từ useVehiclePose2D):
+   *    - Position được transform từ 3D pose → 2D pixel coordinates
+   *    - Timestamp mới nhất từ MQTT
+   *    - Overwrite position/timestamp của vehicles cùng ID
+   * 
+   * Kết quả: Danh sách vehicles đầy đủ từ API, với position real-time từ MQTT khi có.
+   */
+  const displayVehicles: MapVehicle[] = useMemo(() => {
     if (viewMode === '2D') {
-      // Merge vehicles from useVehiclePose2D (markers2D) and useVehicleMap2D (mapVehicles)
-      // This ensures we show all vehicles from API even if markers2D is empty
-      const vehiclesFromMarkers = markers2D.map(marker => ({
+      // Transform markers2D (VehicleMarker2D) → MapVehicle format
+      const vehiclesFromMarkers: MapVehicle[] = markers2D.map(marker => ({
         id: marker.id,
         name: marker.name || marker.label || marker.id,
-        type: marker.type,
-        status: marker.status || 'online' as const,
-        position: { 
-          x: marker.position[0], 
-          y: marker.position[1], 
-          z: marker.position[2] 
+        vehicleType: marker.vehicleType,
+        vehicleCategory: marker.vehicleCategory,
+        status: marker.status || 'online',
+        position: {
+          x: marker.position[0],
+          y: marker.position[1],
+          z: marker.position[2],
         },
         timestamp: marker.lastUpdate.toISOString(),
+        source: 'mqtt' as const, // Markers từ MQTT pose updates
       }));
       
-      // Merge with vehicles from useVehicleMap2D (from API)
-      const vehiclesMap = new Map<string, Vehicle>();
+      // Merge strategy: API base + MQTT real-time overwrite
+      const vehiclesMap = new Map<string, MapVehicle>();
       
-      // Add vehicles from mapVehicles first (from API)
+      // Step 1: Add all vehicles from API (base data - có thể thiếu position mới nhất)
       mapVehicles.forEach(vehicle => {
         vehiclesMap.set(vehicle.id, vehicle);
       });
       
-      // Then add/update with vehicles from markers2D (may have updated positions from MQTT)
+      // Step 2: Overwrite với real-time data từ MQTT (nếu có)
+      // Vehicles từ markers2D có position mới nhất từ MQTT, nên overwrite để ưu tiên real-time
       vehiclesFromMarkers.forEach(vehicle => {
-        vehiclesMap.set(vehicle.id, vehicle);
+        vehiclesMap.set(vehicle.id, vehicle); // Overwrite: MQTT data ưu tiên hơn API
       });
       
       return Array.from(vehiclesMap.values());
     } else {
       // Convert 3D markers to display format
-      return markers3D.map(marker => ({
+      return markers3D.map<MapVehicle>(marker => ({
         id: marker.id,
         name: marker.name || marker.id,
-        type: marker.type,
-        status: marker.status || 'online' as const,
+        vehicleType: marker.vehicleType,
+        vehicleCategory: marker.vehicleCategory,
+        status: marker.status || 'online',
         position: { x: marker.position[0], y: marker.position[1], z: marker.position[2] },
         timestamp: new Date().toISOString(),
+        source: 'mqtt' as const, // 3D markers cũng từ MQTT
       }));
     }
   }, [viewMode, markers2D, markers3D, mapVehicles]);
@@ -175,7 +202,7 @@ const VehicleMap: React.FC = () => {
     
     // Apply vehicle type filter
     if (filters.vehicleType !== 'all') {
-      result = result.filter(vehicle => (vehicle.type || 'unknown') === filters.vehicleType);
+      result = result.filter(vehicle => (vehicle.vehicleType || 'unknown') === filters.vehicleType);
     }
     
     return result;
@@ -210,13 +237,13 @@ const VehicleMap: React.FC = () => {
 
   const getUniqueValues = (key: 'status' | 'vehicleType') => {
     const values = displayVehicles.map(v =>
-      key === 'status' ? v.status : (v.type || 'unknown')
+      key === 'status' ? v.status : (v.vehicleType || 'unknown')
     );
     return ['all', ...Array.from(new Set(values))];
   };
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col h-screen space-y-6 overflow-hidden px-4 py-4 md:px-6 md:py-6">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
@@ -320,7 +347,7 @@ const VehicleMap: React.FC = () => {
 
       {/* Map Container with Vehicle List */}
       <div className={`bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden ${
-        isFullscreen ? 'fixed inset-0 z-50' : 'h-[70vh] min-h-[400px]'
+        isFullscreen ? 'fixed inset-0 z-50' : 'flex-1 min-h-0'
       }`}>
         {isFullscreen && (
           <div className="absolute top-4 right-4 z-10">
@@ -335,14 +362,15 @@ const VehicleMap: React.FC = () => {
           </div>
         )}
         
-        <div className="flex h-full">
+        <div className="flex h-full flex-col md:flex-row">
           {/* Map Container */}
-          <div className="flex-1">
+          <div className="flex-1 min-h-0">
             {viewMode === '3D' ? (
               <div className="relative w-full h-full">
                 <MapView3D
                   vehicleMarkers={markers3D}
                   pcdUrl={DEFAULT_PCD_URL}
+                  mapMetadata={poseMetadata || mapMetadata}
                   clipXMin={realXRange ? realXRange[0] : undefined}
                   clipXMax={realXRange ? realXRange[1] : undefined}
                   clipYMin={realYRange ? realYRange[0] : undefined}
@@ -413,7 +441,7 @@ const VehicleMap: React.FC = () => {
           </div>
           
           {/* Vehicle List Sidebar */}
-          <div className="w-80 bg-gray-50 border-l border-gray-200 overflow-y-auto">
+          <div className="w-full md:w-80 bg-gray-50 border-t md:border-t-0 md:border-l border-gray-200 overflow-y-auto h-64 md:h-auto">
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">{t('vehicle_list_title')}</h3>
@@ -502,7 +530,7 @@ const VehicleMap: React.FC = () => {
                         <div className="text-sm text-gray-600 space-y-1">
                           <p>
                             <span className="font-medium">{t('type_label')}</span>{' '}
-                            {vehicle.type || t('vehicle_type_unknown')}
+                            {vehicle.vehicleType || t('vehicle_type_unknown')}
                           </p>
                           <p><span className="font-medium">{t('status_label_short')}</span> 
                             <span className={`ml-1 ${

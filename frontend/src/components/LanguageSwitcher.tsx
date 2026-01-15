@@ -5,7 +5,8 @@ const LanguageSwitcher: React.FC = () => {
   const { language, setLanguage, t } = useLanguage();
 
   const handleLanguageChange = () => {
-    const newLanguage = language === 'vi' ? 'ja' : 'vi';
+    // Cycle through vi -> ja -> en -> vi
+    const newLanguage = language === 'vi' ? 'ja' : language === 'ja' ? 'en' : 'vi';
     setLanguage(newLanguage);
   };
 
@@ -17,10 +18,10 @@ const LanguageSwitcher: React.FC = () => {
     >
       <div className="flex items-center">
         <span className="text-lg mr-2">
-          {language === 'ja' ? '🇯🇵' : '🇻🇳'}
+          {language === 'ja' ? '🇯🇵' : language === 'en' ? '🇺🇸' : '🇻🇳'}
         </span>
         <span className="hidden sm:inline">
-          {language === 'ja' ? '日本語' : 'Tiếng Việt'}
+          {language === 'ja' ? '日本語' : language === 'en' ? 'English' : 'Tiếng Việt'}
         </span>
       </div>
     </button>

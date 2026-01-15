@@ -1,6 +1,158 @@
 /**
- * Types for vehicle-related data structures
+ * Centralized types for all vehicle-related data structures (frontend).
+ *
+ * Quy ước:
+ * - API layer: mirror backend, dùng snake_case (VehicleApi*, VehicleStatus, VehicleCategory, VehicleApiPose, ...).
+ * - Domain/UI: dùng camelCase, thuận tiện cho logic & hiển thị (Vehicle, VehicleFormData, ...).
+ * - Map/canvas: type riêng cho 2D/3D map, canvas (MapVehicle, VehicleCanvasPosition, ...).
+ * - Marker: view-model cho render (VehicleMarker3D, VehicleMarker2D).
  */
+
+/* =========================
+ *  API MODELS (mirror backend)
+ * ========================= */
+
+export type VehicleStatus = 'online' | 'offline';
+
+export type VehicleCategory =
+  | 'roadheader'
+  | 'drill_jumbo'
+  | 'shotcrete_machine'
+  | 'concrete_mixer_truck'
+  | 'wheel_loader'
+  | 'dump_truck'
+  | 'backhoe'
+  | 'rock_breaker'
+  | 'other_named';
+
+export interface VehicleApiPose {
+  position: { x: number; y: number; z: number };
+  orientation: { x: number; y: number; z: number; w: number };
+  timestamp: string; // ISO8601 string from backend
+}
+
+export interface VehicleApi {
+  vehicle_id: string;
+  name?: string;
+  description?: string;
+  vehicle_type?: string;
+  vehicle_category?: VehicleCategory;
+  status: VehicleStatus;
+  metadata?: Record<string, unknown>;
+  latest_pose?: VehicleApiPose;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface VehiclesListApiResponse {
+  vehicles: VehicleApi[];
+  total: number;
+}
+
+// Backward compatibility alias (internal FE only)
+export type ApiVehicle = VehicleApi;
+
+/* =========================
+ *  DOMAIN / UI MODELS
+ * ========================= */
+
+export interface Vehicle {
+  id: string;
+  name?: string;
+  description?: string;
+  vehicleType?: string;
+  vehicleCategory?: VehicleCategory;
+  status: VehicleStatus;
+  metadata?: Record<string, unknown>;
+  latestPose?: {
+    position: { x: number; y: number; z: number };
+    orientation: { x: number; y: number; z: number; w: number };
+    timestamp: string;
+  };
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * View-model cho form & bảng quản lý phương tiện (Vehicles.tsx, EditVehicle.tsx).
+ */
+export interface VehicleFormData {
+  id: string;
+  licensePlate: string;
+  driver: string;
+  vehicleType: string;
+  vehicleCategory?: VehicleCategory;
+  mission: string;
+  status: VehicleStatus;
+}
+
+/* =========================
+ *  MAP & CANVAS MODELS
+ * ========================= */
+
+/**
+ * Vehicle được track trên bản đồ (2D/3D).
+ * 
+ * Được merge từ nhiều nguồn:
+ * - API: thông tin cơ bản (name, type, category) và position ban đầu
+ * - MQTT: position updates real-time (overwrite position/timestamp khi có)
+ * 
+ * Field `source` cho biết nguồn dữ liệu mới nhất (api hoặc mqtt).
+ */
+export interface MapVehicle {
+  id: string;
+  name: string;
+  vehicleType?: string;
+  vehicleCategory?: VehicleCategory;
+  status: VehicleStatus;
+  position: { x: number; y: number; z: number };
+  timestamp: string;
+  source?: 'api' | 'mqtt';
+}
+
+/**
+ * Response from vehicle map API (2D).
+ * Giữ nguyên structure cũ.
+ */
+export interface VehicleMapResponse {
+  modelUrl: string;
+  unit: string;
+  mapType: '2d';
+  source: 'converted' | 'original';
+  pcd_file_id?: string;
+}
+
+/**
+ * Vehicle dùng cho canvas 2D (upload/preview, v.v.).
+ */
+export interface VehicleCanvasPosition {
+  id: string;
+  licensePlate?: string;
+  driver?: string;
+  vehicleType?: string;
+  vehicleCategory?: VehicleCategory;
+  mission?: string;
+  position: [number, number, number];
+  position2D?: [number, number]; // Normalized [0-1,0-1] for 2D rendering
+  status?: VehicleStatus;
+  lastUpdate?: string;
+}
+
+/* =========================
+ *  METADATA
+ * ========================= */
+
+export interface VehicleMetadata {
+  licensePlate?: string;
+  driver?: string;
+  mission?: string;
+  // Mở rộng thêm các key khác tuỳ nhu cầu
+  [key: string]: unknown;
+}
+
+/* =========================
+ *  MARKER VIEW-MODELS (3D / 2D)
+ * ========================= */
 
 /**
  * Vehicle marker for 3D map display
@@ -11,9 +163,10 @@ export interface VehicleMarker3D {
   orientation?: [number, number, number, number]; // Quaternion [w, x, y, z]
   color: string;
   showOrientation: boolean;
-  status?: 'online' | 'offline';
-  name?: string; // Vehicle name from API
-  type?: string; // Vehicle type from API (scanner, worker, etc.)
+  status?: VehicleStatus;
+  name?: string;
+  vehicleType?: string;
+  vehicleCategory?: VehicleCategory;
 }
 
 /**
@@ -27,47 +180,8 @@ export interface VehicleMarker2D {
   showOrientation: boolean;
   label: string;
   lastUpdate: Date;
-  name?: string; // Vehicle name from API
-  type?: string; // Vehicle type from API (scanner, worker, etc.)
-  status?: 'online' | 'offline'; // Vehicle status from API
-}
-
-/**
- * Vehicle metadata structure
- * Các field bổ sung có thể được lưu trong metadata
- */
-export interface VehicleMetadata {
-  licensePlate?: string;
-  driver?: string;
-  mission?: string;
-  [key: string]: any; // Allow additional metadata fields
-}
-
-/**
- * Vehicle data from API
- */
-export interface ApiVehicle {
-  vehicle_id: string;
   name?: string;
-  description?: string;
-  type?: 'scanner' | 'worker';
-  type_category?: 'scanner' | 'worker';
-  vehicle_type?: string;
-  status?: 'online' | 'offline';
-  current_pose?: {
-    frame_id: string;
-    position: { x: number; y: number; z: number };
-    orientation: { w: number; x: number; y: number; z: number };
-    timestamp: string;
-  };
-  current_position?: {
-    x: number;
-    y: number;
-    z: number;
-    timestamp?: string;
-  };
-  metadata?: VehicleMetadata;
-  created_at?: string;
-  updated_at?: string;
-  [key: string]: any; // Allow additional fields
+  vehicleType?: string;
+  vehicleCategory?: VehicleCategory;
+  status?: VehicleStatus;
 }

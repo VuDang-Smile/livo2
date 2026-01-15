@@ -11,6 +11,19 @@ class VehicleStatus(str, Enum):
     OFFLINE = "offline"
 
 
+class VehicleCategory(str, Enum):
+    """High-level vehicle category for tunnel/mining equipment."""
+    ROADHEADER = "roadheader"
+    DRILL_JUMBO = "drill_jumbo"
+    SHOTCRETE_MACHINE = "shotcrete_machine"
+    CONCRETE_MIXER_TRUCK = "concrete_mixer_truck"
+    WHEEL_LOADER = "wheel_loader"
+    DUMP_TRUCK = "dump_truck"
+    BACKHOE = "backhoe"
+    ROCK_BREAKER = "rock_breaker"
+    OTHER_NAMED = "other_named"
+
+
 class Position(BaseModel):
     """3D position."""
     x: float
@@ -54,6 +67,7 @@ class VehicleResponse(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     vehicle_type: Optional[str] = None
+    vehicle_category: Optional[VehicleCategory] = None
     status: VehicleStatus = VehicleStatus.OFFLINE
     metadata: Optional[dict] = None
     created_at: datetime
@@ -66,6 +80,7 @@ class VehicleListItem(BaseModel):
     latest_pose: Pose
     name: Optional[str] = None
     vehicle_type: Optional[str] = None
+    vehicle_category: Optional[VehicleCategory] = None
     status: VehicleStatus = VehicleStatus.OFFLINE
     updated_at: datetime
 
@@ -82,6 +97,14 @@ class VehicleRegisterRequest(BaseModel):
     name: Optional[str] = Field(None, description="Vehicle name")
     description: Optional[str] = Field(None, description="Vehicle description")
     vehicle_type: Optional[str] = Field(None, description="Vehicle type (e.g., robot, drone, car)")
+    vehicle_category: Optional[VehicleCategory] = Field(
+        None,
+        description=(
+            "High-level vehicle category "
+            "(roadheader, drill_jumbo, shotcrete_machine, concrete_mixer_truck, "
+            "wheel_loader, dump_truck, backhoe, rock_breaker, other_named)"
+        ),
+    )
     status: Optional[VehicleStatus] = Field(VehicleStatus.OFFLINE, description="Vehicle status: online or offline")
     metadata: Optional[dict] = Field(None, description="Additional metadata")
 
@@ -106,6 +129,14 @@ class VehicleUpdateRequest(BaseModel):
     vehicle_type: Optional[str] = Field(None, description="Vehicle type (e.g., robot, drone, car)")
     status: Optional[VehicleStatus] = Field(None, description="Vehicle status: online or offline")
     metadata: Optional[dict] = Field(None, description="Additional metadata")
+    vehicle_category: Optional[VehicleCategory] = Field(
+        None,
+        description=(
+            "High-level vehicle category "
+            "(roadheader, drill_jumbo, shotcrete_machine, concrete_mixer_truck, "
+            "wheel_loader, dump_truck, backhoe, rock_breaker, other_named)"
+        ),
+    )
 
 
 class VehicleUpdateResponse(BaseModel):
