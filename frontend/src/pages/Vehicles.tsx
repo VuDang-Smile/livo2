@@ -4,9 +4,11 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useVehicleService } from '../hooks/api/useVehicleService';
 import { ApiVehicle, VehicleFormData } from '../types/vehicle';
+import { getVehicleCategoryLabel } from '../utils/vehicleCategoryUtils';
+import { getVehicleTypeLabel } from '../utils/vehicleTypeUtils';
 
 const Vehicles: React.FC = () => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { logout } = useAuth();
   const navigate = useNavigate();
   const vehicleService = useVehicleService();
@@ -37,6 +39,7 @@ const Vehicles: React.FC = () => {
             licensePlate: metadata.licensePlate || apiVehicle.vehicle_id,
             driver: metadata.driver || apiVehicle.name || t('not_given') || 'N/A',
             vehicleType: apiVehicle.vehicle_type || t('not_given') || 'N/A',
+            vehicleCategory: apiVehicle.vehicle_category,
             mission: metadata.mission || apiVehicle.description || t('not_given') || 'N/A',
             status: apiVehicle.status || 'offline',
           };
@@ -180,6 +183,9 @@ const Vehicles: React.FC = () => {
                   {t('vehicle_type')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  {t('vehicle_category')}
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   {t('mission')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -193,7 +199,7 @@ const Vehicles: React.FC = () => {
             <tbody className="bg-white divide-y divide-gray-200">
               {!loading && vehicles.length === 0 && !error && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
                     <p className="text-lg font-medium">{t('no_vehicles_found') || 'No vehicles found'}</p>
                     <p className="text-sm mt-2">{t('no_vehicles_description') || 'Get started by adding your first vehicle.'}</p>
                   </td>
@@ -231,7 +237,14 @@ const Vehicles: React.FC = () => {
                       <div className="text-sm text-gray-900">{vehicle.driver}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{vehicle.vehicleType}</div>
+                      <div className="text-sm text-gray-900">
+                        {getVehicleTypeLabel(vehicle.vehicleType, language)}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {getVehicleCategoryLabel(vehicle.vehicleCategory, language)}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{vehicle.mission}</div>
