@@ -28,3 +28,6 @@ dependencies/HBA/build_standalone/**
 **/*.dylib
 **/*.dll
 **/*.exe
+
+# Python cache
+scripts/__pycache__/
