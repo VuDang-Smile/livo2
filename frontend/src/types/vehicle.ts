@@ -15,12 +15,15 @@
 export type VehicleStatus = 'online' | 'offline';
 
 export type VehicleCategory =
-  | 'excavator'
-  | 'bulldozer'
-  | 'truck'
-  | 'loader'
-  | 'crane'
-  | 'other';
+  | 'roadheader'
+  | 'drill_jumbo'
+  | 'shotcrete_machine'
+  | 'concrete_mixer_truck'
+  | 'wheel_loader'
+  | 'dump_truck'
+  | 'backhoe'
+  | 'rock_breaker'
+  | 'other_named';
 
 export interface VehicleApiPose {
   position: { x: number; y: number; z: number };

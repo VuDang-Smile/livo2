@@ -109,19 +109,20 @@ const VehicleMap: React.FC = () => {
   }, []);
 
   // Get vehicles for display based on view mode
-  const displayVehicles: Vehicle[] = useMemo(() => {
+  const displayVehicles: VehicleMapVehicle[] = useMemo(() => {
     if (viewMode === '2D') {
       // Merge vehicles from useVehiclePose2D (markers2D) and useVehicleMap2D (mapVehicles)
       // This ensures we show all vehicles from API even if markers2D is empty
-      const vehiclesFromMarkers = markers2D.map(marker => ({
+      const vehiclesFromMarkers: VehicleMapVehicle[] = markers2D.map(marker => ({
         id: marker.id,
         name: marker.name || marker.label || marker.id,
-        type: marker.type,
-        status: marker.status || 'online' as const,
-        position: { 
-          x: marker.position[0], 
-          y: marker.position[1], 
-          z: marker.position[2] 
+        vehicleType: marker.vehicleType,
+        vehicleCategory: marker.vehicleCategory,
+        status: marker.status || 'online',
+        position: {
+          x: marker.position[0],
+          y: marker.position[1],
+          z: marker.position[2],
         },
         timestamp: marker.lastUpdate.toISOString(),
       }));
@@ -142,11 +143,12 @@ const VehicleMap: React.FC = () => {
       return Array.from(vehiclesMap.values());
     } else {
       // Convert 3D markers to display format
-      return markers3D.map(marker => ({
+      return markers3D.map<VehicleMapVehicle>(marker => ({
         id: marker.id,
         name: marker.name || marker.id,
-        type: marker.type,
-        status: marker.status || 'online' as const,
+        vehicleType: marker.vehicleType,
+        vehicleCategory: marker.vehicleCategory,
+        status: marker.status || 'online',
         position: { x: marker.position[0], y: marker.position[1], z: marker.position[2] },
         timestamp: new Date().toISOString(),
       }));
@@ -175,7 +177,7 @@ const VehicleMap: React.FC = () => {
     
     // Apply vehicle type filter
     if (filters.vehicleType !== 'all') {
-      result = result.filter(vehicle => (vehicle.type || 'unknown') === filters.vehicleType);
+      result = result.filter(vehicle => (vehicle.vehicleType || 'unknown') === filters.vehicleType);
     }
     
     return result;
@@ -210,7 +212,7 @@ const VehicleMap: React.FC = () => {
 
   const getUniqueValues = (key: 'status' | 'vehicleType') => {
     const values = displayVehicles.map(v =>
-      key === 'status' ? v.status : (v.type || 'unknown')
+      key === 'status' ? v.status : (v.vehicleType || 'unknown')
     );
     return ['all', ...Array.from(new Set(values))];
   };
@@ -502,7 +504,7 @@ const VehicleMap: React.FC = () => {
                         <div className="text-sm text-gray-600 space-y-1">
                           <p>
                             <span className="font-medium">{t('type_label')}</span>{' '}
-                            {vehicle.type || t('vehicle_type_unknown')}
+                            {vehicle.vehicleType || t('vehicle_type_unknown')}
                           </p>
                           <p><span className="font-medium">{t('status_label_short')}</span> 
                             <span className={`ml-1 ${
@@ -556,7 +558,7 @@ const VehicleMap: React.FC = () => {
                 <p className="text-sm"><span className="font-medium">{t('id_label')}</span> {selectedVehicle.id}</p>
                 <p className="text-sm">
                   <span className="font-medium">{t('vehicle_type_label')}</span>{' '}
-                  {selectedVehicle.type || t('vehicle_type_unknown')}
+                  {selectedVehicle.vehicleType || t('vehicle_type_unknown')}
                 </p>
                 <p className="text-sm"><span className="font-medium">{t('status_label')}</span> 
                   <span className={`ml-1 ${

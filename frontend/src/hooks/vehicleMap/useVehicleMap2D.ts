@@ -85,7 +85,7 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
         transformedVehicles.push({
           id: vehicleId,
           name: v.name || vehicleId,
-          type: v.vehicle_type,
+          vehicleType: v.vehicle_type,
           status: v.status || 'offline',
           position,
           timestamp,
@@ -186,9 +186,10 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
           source: 'mqtt' as const,
           // Keep API info if available
           name: apiVehicle?.name || existingVehicle.name,
-          type: apiVehicle?.vehicle_type || apiVehicle?.type || existingVehicle.type,
+          vehicleType: apiVehicle?.vehicle_type || existingVehicle.vehicleType,
+          vehicleCategory: apiVehicle?.vehicle_category || existingVehicle.vehicleCategory,
           status: 'online' as const // Position update means vehicle is online
-        } as Vehicle & { source: 'mqtt' };
+        };
 
         if (DEBUG) {
           console.log(
@@ -203,12 +204,13 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
         const newVehicle: VehicleMapVehicle = {
           id: lastPositionUpdate.vehicle_id,
           name: apiVehicle?.name || `Vehicle ${lastPositionUpdate.vehicle_id}`,
-          type: apiVehicle?.vehicle_type || apiVehicle?.type,
+          vehicleType: apiVehicle?.vehicle_type,
+          vehicleCategory: apiVehicle?.vehicle_category,
           status: 'online' as const, // Position update means vehicle is online
           position: newPosition,
           timestamp: timestamp as string,
           source: 'mqtt' as const
-        } as Vehicle & { source: 'mqtt' };
+        };
 
         if (DEBUG) {
           console.log(
@@ -266,7 +268,8 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
           const newVehicle: VehicleMapVehicle = {
             id: vehicleId,
             name: apiVehicle.name || vehicleId,
-            type: apiVehicle.vehicle_type,
+            vehicleType: apiVehicle.vehicle_type,
+            vehicleCategory: apiVehicle.vehicle_category,
             status: 'online' as const,
             position,
             timestamp,

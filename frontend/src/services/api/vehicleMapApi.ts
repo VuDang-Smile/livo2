@@ -121,11 +121,12 @@ export class VehicleMapService {
       return {
         id: vehicle.vehicle_id,
         name: vehicle.name,
-        type: vehicle.vehicle_type,
+        vehicleType: vehicle.vehicle_type,
+        vehicleCategory: vehicle.vehicle_category,
         status: vehicle.status,
         position,
         timestamp: normalizeTimestamp(rawTimestamp, true) as string,
-      } as Vehicle;
+      };
     });
   }
 }

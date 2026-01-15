@@ -12,13 +12,16 @@ class VehicleStatus(str, Enum):
 
 
 class VehicleCategory(str, Enum):
-    """High-level vehicle category (xe ủi, máy xúc, xe tải, ...)."""
-    EXCAVATOR = "excavator"
-    BULLDOZER = "bulldozer"
-    TRUCK = "truck"
-    LOADER = "loader"
-    CRANE = "crane"
-    OTHER = "other"
+    """High-level vehicle category for tunnel/mining equipment."""
+    ROADHEADER = "roadheader"
+    DRILL_JUMBO = "drill_jumbo"
+    SHOTCRETE_MACHINE = "shotcrete_machine"
+    CONCRETE_MIXER_TRUCK = "concrete_mixer_truck"
+    WHEEL_LOADER = "wheel_loader"
+    DUMP_TRUCK = "dump_truck"
+    BACKHOE = "backhoe"
+    ROCK_BREAKER = "rock_breaker"
+    OTHER_NAMED = "other_named"
 
 
 class Position(BaseModel):
@@ -96,7 +99,11 @@ class VehicleRegisterRequest(BaseModel):
     vehicle_type: Optional[str] = Field(None, description="Vehicle type (e.g., robot, drone, car)")
     vehicle_category: Optional[VehicleCategory] = Field(
         None,
-        description="High-level vehicle category (e.g., excavator, bulldozer, truck)",
+        description=(
+            "High-level vehicle category "
+            "(roadheader, drill_jumbo, shotcrete_machine, concrete_mixer_truck, "
+            "wheel_loader, dump_truck, backhoe, rock_breaker, other_named)"
+        ),
     )
     status: Optional[VehicleStatus] = Field(VehicleStatus.OFFLINE, description="Vehicle status: online or offline")
     metadata: Optional[dict] = Field(None, description="Additional metadata")
@@ -124,7 +131,11 @@ class VehicleUpdateRequest(BaseModel):
     metadata: Optional[dict] = Field(None, description="Additional metadata")
     vehicle_category: Optional[VehicleCategory] = Field(
         None,
-        description="High-level vehicle category (e.g., excavator, bulldozer, truck)",
+        description=(
+            "High-level vehicle category "
+            "(roadheader, drill_jumbo, shotcrete_machine, concrete_mixer_truck, "
+            "wheel_loader, dump_truck, backhoe, rock_breaker, other_named)"
+        ),
     )
 
 

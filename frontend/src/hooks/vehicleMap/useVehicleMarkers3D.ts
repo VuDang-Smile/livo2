@@ -151,7 +151,8 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
         showOrientation: positionData.showOrientation,
         status: 'online', // Position update means vehicle is online
         name: apiVehicle?.name || existingMarker?.name || vehicleId,
-        type: apiVehicle?.vehicle_type || apiVehicle?.type || existingMarker?.type || 'worker'
+        vehicleType: apiVehicle?.vehicle_type || existingMarker?.vehicleType || 'worker',
+        vehicleCategory: apiVehicle?.vehicle_category || existingMarker?.vehicleCategory
       };
       
       next.set(vehicleId, newMarker);

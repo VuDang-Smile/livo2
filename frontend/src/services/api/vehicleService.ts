@@ -93,7 +93,7 @@ export class VehicleService {
     // Client-side filtering vì backend không hỗ trợ query params
     if (params?.type) {
       vehicles = vehicles.filter((v: ApiVehicle) => 
-        (v.vehicle_type || v.type || '').toLowerCase() === params.type?.toLowerCase()
+        (v.vehicle_type || '').toLowerCase() === params.type?.toLowerCase()
       );
     }
     if (params?.status) {

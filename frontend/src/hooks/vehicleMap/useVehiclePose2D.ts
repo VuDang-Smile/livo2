@@ -6,7 +6,6 @@ import { VehicleMarker2D, ApiVehicle } from '../../types/vehicle';
 import { UseVehiclePose2DResult } from '../../types/monitoring';
 import { MAP_FLOORPLAN_METADATA_URL } from '../../config/dataSources';
 import { useVehicleService } from '../api/useVehicleService';
-import { ApiVehicle } from '../../types/vehicle';
 import { useMQTTPositionHandler } from '../shared/useMQTTPositionHandler';
 
 /**
@@ -181,7 +180,8 @@ export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): Use
             label: v.name || vehicleId,
             lastUpdate: new Date(),
             name: v.name,
-            type: v.vehicle_type || v.type,
+            vehicleType: v.vehicle_type,
+            vehicleCategory: v.vehicle_category,
             status: vehicleStatus
           });
         }
@@ -270,7 +270,8 @@ export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): Use
       label: apiVehicle?.name || update.vehicle_id,
       lastUpdate: new Date(),
       name: apiVehicle?.name,
-      type: apiVehicle?.vehicle_type || apiVehicle?.type,
+      vehicleType: apiVehicle?.vehicle_type,
+      vehicleCategory: apiVehicle?.vehicle_category,
       status: 'online' // Position update means vehicle is online
     };
   }, [view, apiVehicles]);
@@ -325,7 +326,8 @@ export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): Use
         color: finalColor, // Ensure green color for online
         label: apiVehicle?.name || existingMarker?.label || marker.id,
         name: apiVehicle?.name || existingMarker?.name,
-        type: apiVehicle?.vehicle_type || apiVehicle?.type || existingMarker?.type,
+        vehicleType: apiVehicle?.vehicle_type || existingMarker?.vehicleType,
+        vehicleCategory: apiVehicle?.vehicle_category || existingMarker?.vehicleCategory,
         status: 'online' // Position update means vehicle is online
       };
       
@@ -399,7 +401,8 @@ export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): Use
               label: apiVehicle.name || vehicleId,
               lastUpdate: new Date(pose.timestamp || Date.now()),
               name: apiVehicle.name,
-              type: apiVehicle.vehicle_type || apiVehicle.type,
+              vehicleType: apiVehicle.vehicle_type,
+              vehicleCategory: apiVehicle.vehicle_category,
               status: 'online'
             };
             
