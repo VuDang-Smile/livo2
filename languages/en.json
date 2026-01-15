@@ -24,6 +24,7 @@
         "display_name": "Display Name",
         "vehicle_id_system_id": "Vehicle ID (System ID)",
         "type_category": "Type Category",
+        "vehicle_category": "Vehicle Category",
         "description_and_notes": "Description & Notes",
         "camera": "Camera",
         "execution_control": "Execution Control",
@@ -559,5 +560,16 @@
         "choose_design_obj_file": "Choose Design OBJ File",
         "choose_design_pcd_file": "Choose Design PCD File",
         "low_similarity_warning_title": "Low similarity warning"
+    },
+    "category": {
+        "roadheader": "Roadheader",
+        "drill_jumbo": "Drill jumbo",
+        "shotcrete_machine": "Shotcrete machine",
+        "concrete_mixer_truck": "Concrete mixer truck",
+        "wheel_loader": "Wheel loader",
+        "dump_truck": "Dump truck",
+        "backhoe": "Backhoe excavator",
+        "rock_breaker": "Rock breaker",
+        "other_named": "Other (named)"
     }
 }

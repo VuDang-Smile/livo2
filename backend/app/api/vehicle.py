@@ -261,6 +261,14 @@ async def get_all_vehicles():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/categories")
+async def get_vehicle_categories():
+    """Get list of available vehicle categories."""
+    return {
+        "categories": [cat.value for cat in VehicleCategory]
+    }
+
+
 @router.get("/{vehicle_id}/poses")
 async def get_pose_history(
     vehicle_id: str,
