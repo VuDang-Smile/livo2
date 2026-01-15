@@ -4,39 +4,21 @@ import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { Edit, Trash2 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { VehiclePosition, getMockVehiclePositions } from '../mock/vehicleMockData';
-import { getMockQRCodes } from '../mock/qrMockData';
-import { MapInfo, getMockMapInfo } from '../mock/mapInfoMockData';
+import { VehiclePosition } from '../utils/vehicle2DHelper';
+import { MapInfo } from '../types/mapInfo';
+import { QRCodeInfo } from '../types/qrCode';
+import { EditingRow, ManualPin } from '../types/upload';
 import PCDMap from '../components/PCDMap';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { useMapImage } from '../hooks/useMapImage';
 import { MAP_2D_IMAGE_URL } from '../constants/mapConfig';
 import { getVehicle2DPosition } from '../utils/vehicle2DHelper';
-
-interface QRCodeInfo {
-  id: string;
-  code: string;
-  position: [number, number];
-  isManual?: boolean; // Đánh dấu dòng được thêm thủ công
-}
-
-interface EditingRow {
-  tempId: string;
-  codeIndex: string;
-  position: [number, number];
-  errors: {
-    codeIndex?: string;
-    position?: string;
-  };
-}
-
-interface ManualPin {
-  id: string;
-  position: [number, number];
-  isActive?: boolean;
-  isDraft?: boolean;
-  label?: string;
-}
+import { useMapInfo } from '../hooks/api/useMapInfo';
+import { useQRCodes } from '../hooks/api/useQRCodes';
+import { MapMetadata, CoordinateSystemConfig } from '../types/mapMetadata';
+import { transformPoseToPixel, pixelToWorld } from '../utils/coordinateTransform';
+import { getPCDRotation, transformWorldToScene } from '../utils/coordinateTransformer';
+import { MAP_FLOORPLAN_METADATA_URL } from '../config/dataSources';
 
 // Component cho đường hầm (copy từ VehicleMap)
 const Tunnel: React.FC = () => {
@@ -80,30 +62,37 @@ const Tunnel: React.FC = () => {
   );
 };
 
-// Component cho phương tiện (copy từ VehicleMap)
+// Component cho phương tiện (copy từ VehicleMap) - đã chuẩn hóa theo hệ trục
 const Vehicle: React.FC<{ 
   vehicle: VehiclePosition; 
-}> = ({ vehicle }) => {
+  coordinateConfig?: CoordinateSystemConfig;
+}> = ({ vehicle, coordinateConfig }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+  // Chuẩn hóa vị trí world [x, y, z] sang scene Three.js
+  const basePosition: [number, number, number] = transformWorldToScene(
+    vehicle.position,
+    coordinateConfig
+  );
   
   // Animation cho phương tiện
   useFrame((state) => {
     if (meshRef.current) {
-      meshRef.current.position.y = vehicle.position[1] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
+      // Nhún nhẹ theo trục Y của scene (đã chuẩn hoá)
+      meshRef.current.position.y = basePosition[1] + Math.sin(state.clock.elapsedTime * 2) * 0.1;
     }
   });
 
-  const getVehicleColor = (status: string) => {
-    switch (status) {
-      case 'active': return '#27ae60';
-      case 'maintenance': return '#f39c12';
-      case 'inactive': return '#e74c3c';
+const getVehicleColor = (status?: string) => {
+  switch (status) {
+      case 'online': return '#27ae60';
+      case 'offline': return '#e74c3c';
       default: return '#95a5a6';
     }
   };
 
-  const getVehicleGeometry = (vehicleType: string) => {
-    switch (vehicleType) {
+const getVehicleGeometry = (vehicleType?: string) => {
+  const type = vehicleType || 'default';
+  switch (type) {
       case 'Xe đào hầm TBM':
         // Cylinder: bán kính 0.7m, chiều cao 1.4m (giảm 30% so với kích thước thực tế)
         return <cylinderGeometry args={[0.7, 0.7, 1.4, 8]} />;
@@ -123,7 +112,7 @@ const Vehicle: React.FC<{
   };
 
   return (
-    <group position={vehicle.position}>
+    <group position={basePosition}>
       {/* Phương tiện */}
       <mesh ref={meshRef}>
         {getVehicleGeometry(vehicle.vehicleType)}
@@ -135,7 +124,7 @@ const Vehicle: React.FC<{
       </mesh>
       
       {/* Đèn phát sáng cho phương tiện đang hoạt động */}
-      {vehicle.status === 'active' && (
+      {vehicle.status === 'online' && (
         <pointLight 
           position={[0, 2, 0]} 
           intensity={0.3} 
@@ -151,7 +140,9 @@ const Vehicle: React.FC<{
 const PCDPreview3D: React.FC<{ 
   vehicles: VehiclePosition[];
   pcdUrl?: string | null;
-}> = ({ vehicles, pcdUrl }) => {
+  mapMetadata?: MapMetadata | null;
+}> = ({ vehicles, pcdUrl, mapMetadata }) => {
+  const coordinateConfig = mapMetadata?.coordinate_system;
   return (
     <>
       {/* Camera controls */}
@@ -178,7 +169,7 @@ const PCDPreview3D: React.FC<{
             url={pcdUrl}
             // Đơn vị: mét (scale = 1)
             scale={1}
-            rotation={[-Math.PI / 2, 0, 0]}
+            rotation={getPCDRotation(coordinateConfig)}
             position={[0, 0, 0]}
           />
         </Suspense>
@@ -190,7 +181,8 @@ const PCDPreview3D: React.FC<{
       {vehicles.map((vehicle) => (
         <Vehicle 
           key={vehicle.id} 
-          vehicle={vehicle} 
+          vehicle={vehicle}
+          coordinateConfig={coordinateConfig}
         />
       ))}
       
@@ -206,7 +198,9 @@ const Image2DPreview: React.FC<{
   qrPins?: ManualPin[];
   picking?: boolean;
   onPick?: (pos: [number, number]) => void;
-}> = ({ vehicles, qrPins = [], picking = false, onPick }) => {
+  mapMetadata?: MapMetadata | null;
+  view?: 'top' | 'side_x' | 'side_y';
+}> = ({ vehicles, qrPins = [], picking = false, onPick, mapMetadata, view = 'top' }) => {
   const { t } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
@@ -251,25 +245,33 @@ const Image2DPreview: React.FC<{
     canvas.width = canvasSize.width;
     canvas.height = canvasSize.height;
 
+    // Helper: compute scale & offsets for image fit (contain)
+    const computeImageTransform = () => {
+      if (mapImage && mapImage.complete && !imageError && mapImage.naturalWidth > 0 && mapImage.naturalHeight > 0) {
+        const scale = Math.min(
+          canvas.width / mapImage.naturalWidth,
+          canvas.height / mapImage.naturalHeight
+        );
+        const scaledWidth = mapImage.naturalWidth * scale;
+        const scaledHeight = mapImage.naturalHeight * scale;
+        const offsetX = (canvas.width - scaledWidth) / 2;
+        const offsetY = (canvas.height - scaledHeight) / 2;
+        return { scale, offsetX, offsetY, scaledWidth, scaledHeight, imageWidth: mapImage.naturalWidth, imageHeight: mapImage.naturalHeight };
+      }
+      return null;
+    };
+
+    const imageTransform = computeImageTransform();
+
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Draw background image nếu đã load thành công
-    if (mapImage && mapImage.complete && !imageError) {
-      // Calculate scale để fit toàn bộ image trong canvas (contain mode - không crop)
-      const scale = Math.min(
-        canvas.width / mapImage.naturalWidth,
-        canvas.height / mapImage.naturalHeight
-      );
-      const scaledWidth = mapImage.naturalWidth * scale;
-      const scaledHeight = mapImage.naturalHeight * scale;
-      const x = (canvas.width - scaledWidth) / 2;
-      const y = (canvas.height - scaledHeight) / 2;
-      
-      ctx.drawImage(mapImage, x, y, scaledWidth, scaledHeight);
+    if (imageTransform && mapImage) {
+      const { offsetX, offsetY, scaledWidth, scaledHeight } = imageTransform;
+      ctx.drawImage(mapImage, offsetX, offsetY, scaledWidth, scaledHeight);
     } else {
       // Fallback: Draw tunnel outline và grid nếu image chưa load hoặc load fail
-      // Draw tunnel outline
       ctx.strokeStyle = '#34495e';
       ctx.lineWidth = 2;
       ctx.strokeRect(50, 50, canvas.width - 100, canvas.height - 100);
@@ -292,26 +294,31 @@ const Image2DPreview: React.FC<{
       }
     }
 
-    const worldToCanvas = (worldX: number, worldZ: number) => {
+    const worldToCanvasFallback = (worldX: number, worldZ: number) => {
       const x = ((worldX + 100) / 200) * (canvas.width - 100) + 50;
       const y = ((worldZ + 50) / 100) * (canvas.height - 100) + 50;
       return { x, y };
     };
 
+    const pixelToCanvas = (pixelX: number, pixelY: number) => {
+      if (!imageTransform) return null;
+      const { offsetX, offsetY, scaledWidth, scaledHeight, imageWidth, imageHeight } = imageTransform;
+      return {
+        x: offsetX + (pixelX / imageWidth) * scaledWidth,
+        y: offsetY + (pixelY / imageHeight) * scaledHeight,
+      };
+    };
+
     // Draw vehicles
     vehicles.forEach(vehicle => {
-      // Get 2D position using helper function (uses position2D if available, otherwise falls back to center)
       const { x, y } = getVehicle2DPosition(vehicle, canvas.width, canvas.height);
       
-      // Vehicle color based on status
       let color = '#95a5a6';
       switch (vehicle.status) {
-        case 'active': color = '#27ae60'; break;
-        case 'maintenance': color = '#f39c12'; break;
-        case 'inactive': color = '#e74c3c'; break;
+        case 'online': color = '#27ae60'; break;
+        case 'offline': color = '#e74c3c'; break;
       }
 
-      // Draw vehicle circle
       ctx.beginPath();
       ctx.arc(x, y, 8, 0, 2 * Math.PI);
       ctx.fillStyle = color;
@@ -321,25 +328,42 @@ const Image2DPreview: React.FC<{
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Draw vehicle label
       ctx.fillStyle = '#2c3e50';
       ctx.font = '12px Arial';
       ctx.textAlign = 'center';
-      ctx.fillText(vehicle.licensePlate, x, y - 15);
+      const label = vehicle.licensePlate || vehicle.id;
+      ctx.fillText(label, x, y - 15);
     });
+
     // Draw QR pins (existing + drafting)
     qrPins.forEach(pin => {
       const [px, py] = pin.position;
       if (!isFinite(px) || !isFinite(py)) return;
-      const { x, y } = worldToCanvas(px, py);
 
+      let canvasPos: { x: number; y: number } | null = null;
+
+      if (pin.pixelPosition) {
+        canvasPos = pixelToCanvas(pin.pixelPosition[0], pin.pixelPosition[1]);
+      }
+
+      if (!canvasPos) {
+        // Fallback using world-to-canvas legacy mapping
+        const fallback = worldToCanvasFallback(px, py);
+        canvasPos = fallback;
+      }
+
+      const { x, y } = canvasPos;
+
+      // Draw square marker for QR codes
+      const size = pin.isActive ? 14 : 12;
+      const halfSize = size / 2;
       ctx.beginPath();
-      ctx.arc(x, y, pin.isActive ? 9 : 7, 0, 2 * Math.PI);
-      ctx.fillStyle = pin.isDraft ? '#0ea5e9' : '#6b7280';
+      ctx.rect(x - halfSize, y - halfSize, size, size);
+      ctx.fillStyle = pin.isDraft ? '#93c5fd' : '#93c5fd'; // Light blue for all QR markers
       ctx.globalAlpha = pin.isActive ? 0.9 : 0.75;
       ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = pin.isActive ? '#2563eb' : '#111827';
+      ctx.strokeStyle = pin.isActive ? '#3b82f6' : '#2563eb'; // Blue border
       ctx.lineWidth = pin.isActive ? 2 : 1.5;
       ctx.stroke();
 
@@ -358,14 +382,55 @@ const Image2DPreview: React.FC<{
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
 
-    const worldX = ((x - 50) / (canvas.width - 100)) * 200 - 100;
-    const worldZ = ((y - 50) / (canvas.height - 100)) * 100 - 50;
+    const computeImageTransform = () => {
+      if (mapImage && mapImage.complete && !imageError && mapImage.naturalWidth > 0 && mapImage.naturalHeight > 0) {
+        const scale = Math.min(
+          canvas.width / mapImage.naturalWidth,
+          canvas.height / mapImage.naturalHeight
+        );
+        const scaledWidth = mapImage.naturalWidth * scale;
+        const scaledHeight = mapImage.naturalHeight * scale;
+        const offsetX = (canvas.width - scaledWidth) / 2;
+        const offsetY = (canvas.height - scaledHeight) / 2;
+        return { scale, offsetX, offsetY, scaledWidth, scaledHeight, imageWidth: mapImage.naturalWidth, imageHeight: mapImage.naturalHeight };
+      }
+      return null;
+    };
+
+    const imageTransform = computeImageTransform();
+
+    if (imageTransform && mapMetadata?.views?.[view]) {
+      const { offsetX, offsetY, scale, imageWidth, imageHeight } = imageTransform;
+      const imgX = (clickX - offsetX) / scale;
+      const imgY = (clickY - offsetY) / scale;
+
+      // Validate inside image bounds
+      // Bounds check: valid pixel indices are [0, width-1] and [0, height-1]
+      if (imgX < 0 || imgY < 0 || imgX >= imageWidth || imgY >= imageHeight) {
+        return;
+      }
+
+      const world = pixelToWorld(imgX, imgY, mapMetadata, view);
+      const projection = mapMetadata.views[view].projection.world_axes;
+      const worldU = world[projection.horizontal];
+      const worldV = world[projection.vertical];
+
+      if (isFinite(worldU) && isFinite(worldV)) {
+        const roundedU = parseFloat(worldU.toFixed(2));
+        const roundedV = parseFloat(worldV.toFixed(2));
+        onPick([roundedU, roundedV]);
+        return;
+      }
+    }
+
+    // Fallback when thiếu metadata/ảnh
+    const worldX = ((clickX - 50) / (canvas.width - 100)) * 200 - 100;
+    const worldZ = ((clickY - 50) / (canvas.height - 100)) * 100 - 50;
     const roundedX = parseFloat(worldX.toFixed(2));
     const roundedY = parseFloat(worldZ.toFixed(2));
-
     onPick([roundedX, roundedY]);
   };
 
@@ -383,15 +448,11 @@ const Image2DPreview: React.FC<{
         <div className="space-y-1">
           <div className="flex items-center space-x-2">
             <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-            <span className="text-xs text-gray-600">{t('active_status')}</span>
-          </div>
-          <div className="flex items-center space-x-2">
-            <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-            <span className="text-xs text-gray-600">{t('maintenance_status')}</span>
+            <span className="text-xs text-gray-600">{t('online')}</span>
           </div>
           <div className="flex items-center space-x-2">
             <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-            <span className="text-xs text-gray-600">{t('inactive_status')}</span>
+            <span className="text-xs text-gray-600">{t('offline')}</span>
           </div>
         </div>
       </div>
@@ -419,9 +480,63 @@ const formatDateTime = (dateTimeStr: string): string => {
 };
 
 // Component hiển thị thông tin map (info card style)
-const MapInfoCard: React.FC<{ mapInfo: MapInfo }> = ({ mapInfo }) => {
+const MapInfoCard: React.FC<{ 
+  mapInfo: MapInfo | null; 
+  isLoading?: boolean; 
+  error?: string | null;
+}> = ({ mapInfo, isLoading = false, error = null }) => {
   const { t } = useLanguage();
 
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="bg-blue-50 border-l-4 border-blue-500 rounded-md p-4">
+        <div className="flex items-start">
+          <div className="flex-shrink-0">
+            <svg className="h-5 w-5 text-blue-500 mt-0.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </div>
+          <div className="ml-3 flex-1">
+            <h3 className="text-sm font-medium text-blue-800 mb-3">
+              {t('map_info_title')}
+            </h3>
+            <p className="text-xs text-blue-600">{t('loading') || 'Loading...'}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="bg-red-50 border-l-4 border-red-500 rounded-md p-4">
+        <div className="flex items-start">
+          <div className="flex-shrink-0">
+            <svg className="h-5 w-5 text-red-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div className="ml-3 flex-1">
+            <h3 className="text-sm font-medium text-red-800 mb-2">
+              {t('map_info_title')} 
+            </h3>
+            <p className="text-xs text-red-700">
+              {t('error_loading_map_info') || 'Error loading map information'}: {error}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // No data state
+  if (!mapInfo) {
+    return null;
+  }
+
+  // Success state - display map info
   return (
     <div className="bg-blue-50 border-l-4 border-blue-500 rounded-md p-4">
       <div className="flex items-start">
@@ -479,7 +594,14 @@ const Upload: React.FC = () => {
   const mapCardRef = useRef<HTMLDivElement>(null);
   const [pcdUrl, setPcdUrl] = useState<string | null>(null);
   const pcdObjectUrlRef = useRef<string | null>(null);
-  const [mapInfo, setMapInfo] = useState<MapInfo | null>(null);
+  // Map metadata (floorplan)
+  const [mapMetadata, setMapMetadata] = useState<MapMetadata | null>(null);
+  const [isLoadingMetadata, setIsLoadingMetadata] = useState<boolean>(false);
+  const [mapMetadataError, setMapMetadataError] = useState<string | null>(null);
+  // Fetch map info from storage using hook
+  const { mapInfo, isLoading: isLoadingMapInfo, error: mapInfoError } = useMapInfo();
+  // Fetch QR codes from storage using hook
+  const { qrCodes: apiQRCodes, isLoading: isLoadingQRCodes, error: qrCodesError, refetch: refetchQRCodes } = useQRCodes();
   // State quản lý các QR code đang được chỉnh sửa (từ previewQRCodes)
   const [editingExistingQRCodes, setEditingExistingQRCodes] = useState<Map<string, {
     id: string;
@@ -492,6 +614,31 @@ const Upload: React.FC = () => {
   }>>(new Map());
   // State quản lý các QR code đã bị xóa (tạm thời)
   const [deletedQRCodeIds, setDeletedQRCodeIds] = useState<Set<string>>(new Set());
+  const fetchMapMetadata = useCallback(async () => {
+    try {
+      setIsLoadingMetadata(true);
+      setMapMetadataError(null);
+      const response = await fetch(MAP_FLOORPLAN_METADATA_URL);
+      if (!response.ok) {
+        throw new Error(`Failed to load map metadata: ${response.statusText}`);
+      }
+      const metadata: MapMetadata = await response.json();
+      if (!metadata?.views?.top) {
+        throw new Error('Invalid map metadata: missing top view');
+      }
+      setMapMetadata(metadata);
+      console.log('✅ [Upload] Loaded map metadata', {
+        imageSize: metadata.views.top.image,
+        resolution: metadata.resolution_m_per_pixel,
+      });
+    } catch (error: any) {
+      console.error('❌ [Upload] Failed to load map metadata', error);
+      setMapMetadataError(error?.message || 'Failed to load map metadata');
+      setMapMetadata(null);
+    } finally {
+      setIsLoadingMetadata(false);
+    }
+  }, []);
 
   const handleZipChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -768,27 +915,26 @@ const Upload: React.FC = () => {
   };
 
   const handleLastZipLoad = useCallback(() => {
-    // Sử dụng getMockVehiclePositions trực tiếp
-    const vehicles: VehiclePosition[] = getMockVehiclePositions(t);
-    setPreviewVehicles(vehicles);
+    // Loại bỏ mock vehicles - preview vehicles sẽ được load từ API nếu cần
+    // Hiện tại để empty array vì vehicles sẽ được hiển thị từ real-time MQTT data
+    setPreviewVehicles([]);
 
     // Tạm thời dùng file PCD tĩnh trong public cho demo
     // Sau này có thể thay bằng PCD lấy từ ZIP hoặc backend
     setPcdUrl(DEFAULT_PCD_URL);
 
-    // Lấy mock QR code riêng (không phụ thuộc vị trí phương tiện)
-    const generatedQRCodes: QRCodeInfo[] = getMockQRCodes().map(qr => ({
-      id: qr.id,
-      code: qr.code,
-      position: qr.position,
-      isManual: qr.isManual ?? false,
-    }));
-    setPreviewQRCodes(generatedQRCodes);
+    // Load QR codes from API (already fetched by useQRCodes hook)
+    // Refresh QR codes when loading ZIP to ensure latest data
+    if (apiQRCodes.length > 0) {
+      setPreviewQRCodes(apiQRCodes);
+    } else if (!isLoadingQRCodes && !qrCodesError) {
+      // If no QR codes and not loading, try to refetch
+      refetchQRCodes();
+    }
 
-    // Load map info
-    const mapInfo = getMockMapInfo();
-    setMapInfo(mapInfo);
-  }, [t]);
+    // Map info is now loaded automatically via useMapInfo hook
+    // No need to manually set it here
+  }, [apiQRCodes, isLoadingQRCodes, qrCodesError, refetchQRCodes]);
 
   const loadLastZip = useCallback(() => {
     if (isLoadingLastZip) return; // Tránh race/đúp click
@@ -829,11 +975,22 @@ const Upload: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    fetchMapMetadata();
+  }, [fetchMapMetadata]);
+
+  useEffect(() => {
     document.body.style.overflow = isPickingPosition ? 'hidden' : '';
     return () => {
       document.body.style.overflow = '';
     };
   }, [isPickingPosition]);
+
+  // Auto-sync QR codes from API when available (only if previewQRCodes is empty)
+  useEffect(() => {
+    if (apiQRCodes.length > 0 && previewQRCodes.length === 0 && !isLoadingQRCodes) {
+      setPreviewQRCodes(apiQRCodes);
+    }
+  }, [apiQRCodes, previewQRCodes.length, isLoadingQRCodes]);
 
   useEffect(() => {
     if (pickingRowId) {
@@ -847,46 +1004,122 @@ const Upload: React.FC = () => {
 
   const qrPins = useMemo<ManualPin[]>(() => {
     const pins: ManualPin[] = [];
-    
+
+    const viewMeta = mapMetadata?.views?.top;
+    const projection = viewMeta?.projection.world_axes;
+    const toPosition3D = (pair: [number, number]): { x: number; y: number; z: number } => {
+      const base = { x: 0, y: 0, z: 0 };
+      if (!projection) {
+        return { x: pair[0], y: 0, z: pair[1] };
+      }
+      const setAxis = (axis: 'X' | 'Y' | 'Z', val: number) => {
+        switch (axis) {
+          case 'X': base.x = val; break;
+          case 'Y': base.y = val; break;
+          case 'Z': base.z = val; break;
+          default: break;
+        }
+      };
+      setAxis(projection.horizontal, pair[0]);
+      setAxis(projection.vertical, pair[1]);
+      return base;
+    };
+
+    const extractPair = (pos3d: { x: number; y: number; z: number }): [number, number] => {
+      if (!projection) return [pos3d.x, pos3d.z];
+      const getAxis = (axis: 'X' | 'Y' | 'Z') => {
+        switch (axis) {
+          case 'X': return pos3d.x;
+          case 'Y': return pos3d.y;
+          case 'Z': return pos3d.z;
+          default: return 0;
+        }
+      };
+      return [getAxis(projection.horizontal), getAxis(projection.vertical)];
+    };
+
+    const buildPin = (id: string, label: string | undefined, worldPair: [number, number], position3D?: { x: number; y: number; z: number }, isDraft = false, isActive = false): ManualPin => {
+      let pixelPosition: [number, number] | undefined;
+      let isOutOfBounds: boolean | undefined;
+      let isClamped: boolean | undefined;
+
+      if (viewMeta) {
+        const pose = position3D
+          ? {
+              position: position3D,
+              orientation: { x: 0, y: 0, z: 0, w: 1 },
+            }
+          : {
+              position: toPosition3D(worldPair),
+              orientation: { x: 0, y: 0, z: 0, w: 1 },
+            };
+        const pixel = transformPoseToPixel(pose, mapMetadata!, 'top', process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEBUG_LOGS === '1');
+        if (pixel) {
+          pixelPosition = [pixel.pixel_x, pixel.pixel_y];
+          isOutOfBounds = pixel.is_out_of_bounds;
+          isClamped = pixel.is_clamped;
+        }
+      }
+
+      return {
+        id,
+        position: worldPair,
+        pixelPosition,
+        label,
+        isDraft,
+        isActive,
+        isOutOfBounds,
+        isClamped,
+      };
+    };
+
     // Thêm các QR code đã lưu (loại trừ các QR đã xóa)
     previewQRCodes
       .filter(qr => !deletedQRCodeIds.has(qr.id))
       .forEach(qr => {
-        const [x, y] = qr.position;
-        if (isNaN(x) || isNaN(y)) return;
-        
+        const pos3d = qr.position3D
+          ? { x: qr.position3D[0], y: qr.position3D[1], z: qr.position3D[2] }
+          : { x: qr.position[0], y: 0, z: qr.position[1] };
+
         // Kiểm tra xem QR này có đang được chỉnh sửa không
         const editedQR = editingExistingQRCodes.get(qr.id);
-        const finalPosition = editedQR ? editedQR.position : qr.position;
+        const worldPair = editedQR ? editedQR.position : extractPair(pos3d);
         const isBeingEdited = !!editedQR;
-        
-        pins.push({
-          id: qr.id,
-          position: finalPosition,
-          isDraft: false,
-          label: qr.code,
-          isActive: isBeingEdited || pickingRowId === qr.id,
-        });
+
+        pins.push(
+          buildPin(
+            qr.id,
+            qr.code,
+            worldPair,
+            editedQR ? toPosition3D(editedQR.position) : pos3d,
+            false,
+            isBeingEdited || pickingRowId === qr.id
+          )
+        );
       });
 
-    // Thêm các dòng đang chỉnh sửa (editingRows) - giữ nguyên logic cũ
+    // Thêm các dòng đang chỉnh sửa (editingRows)
     editingRows.forEach(row => {
       const [x, y] = row.position;
       if (isNaN(x) || isNaN(y)) return;
       const normalizedIndex = row.codeIndex && /^\d+$/.test(row.codeIndex)
         ? `TM:${String(parseInt(row.codeIndex, 10)).padStart(3, '0')}`
         : undefined;
-      pins.push({
-        id: row.tempId,
-        position: row.position,
-        isDraft: true,
-        isActive: row.tempId === pickingRowId,
-        label: normalizedIndex,
-      });
+
+      pins.push(
+        buildPin(
+          row.tempId,
+          normalizedIndex,
+          row.position,
+          toPosition3D(row.position),
+          true,
+          row.tempId === pickingRowId
+        )
+      );
     });
     
     return pins;
-  }, [previewQRCodes, editingRows, editingExistingQRCodes, deletedQRCodeIds, pickingRowId]);
+  }, [previewQRCodes, editingRows, editingExistingQRCodes, deletedQRCodeIds, pickingRowId, mapMetadata]);
 
   return (
     <div className="space-y-6">
@@ -929,9 +1162,12 @@ const Upload: React.FC = () => {
           )}
         </div>
       </div>
-
       {/* Map Info Card */}
-      {mapInfo && <MapInfoCard mapInfo={mapInfo} />}
+      <MapInfoCard 
+        mapInfo={mapInfo} 
+        isLoading={isLoadingMapInfo} 
+        error={mapInfoError} 
+      />
 
       {/* Section 2 & 3: Preview PCD/Image + QR codes */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -942,7 +1178,17 @@ const Upload: React.FC = () => {
             <h2 className="text-lg font-semibold text-gray-900 mb-3">
               {t('upload_image_preview_title')}
             </h2>
-            {previewVehicles.length > 0 ? (
+            {isLoadingMetadata && (
+              <div className="mb-3 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+                {t('loading') || 'Đang tải metadata bản đồ...'}
+              </div>
+            )}
+            {mapMetadataError && (
+              <div className="mb-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+                {t('error_loading_map_info') || 'Lỗi tải metadata bản đồ'}: {mapMetadataError}
+              </div>
+            )}
+            {/* {previewVehicles.length > 0 ? ( */}
               <div
                 ref={mapCardRef}
                 className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative ${isPickingPosition ? 'ring-2 ring-blue-500 z-50' : ''}`}
@@ -952,6 +1198,8 @@ const Upload: React.FC = () => {
                   qrPins={qrPins}
                   picking={isPickingPosition}
                   onPick={handleMapPositionPick}
+                  mapMetadata={mapMetadata}
+                  view="top"
                 />
                 {isPickingPosition && (
                   <div className="absolute inset-0 pointer-events-none">
@@ -969,13 +1217,6 @@ const Upload: React.FC = () => {
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="h-96 border border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50">
-                <span className="text-gray-500 text-sm">
-                  {t('upload_image_preview_mock')}
-                </span>
-              </div>
-            )}
           </div>
 
           {/* PCD Preview 3D */}
@@ -983,22 +1224,19 @@ const Upload: React.FC = () => {
             <h2 className="text-lg font-semibold text-gray-900 mb-3">
               {t('upload_pcd_preview_title')}
             </h2>
-            {previewVehicles.length > 0 ? (
               <div className="h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50">
                 <Canvas
                   camera={{ position: [0, 10, 20], fov: 60 }}
                   style={{ height: '100%' }}
                 >
-                  <PCDPreview3D vehicles={previewVehicles} pcdUrl={pcdUrl} />
+                  <PCDPreview3D
+                    vehicles={previewVehicles}
+                    pcdUrl={pcdUrl}
+                    mapMetadata={mapMetadata}
+                  />
                 </Canvas>
               </div>
-            ) : (
-              <div className="h-96 border border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50">
-                <span className="text-gray-500 text-sm">
-                  {t('upload_pcd_preview_mock')}
-                </span>
-              </div>
-            )}
+          
           </div>
         </div>
 
@@ -1012,6 +1250,36 @@ const Upload: React.FC = () => {
           <p className="text-xs text-gray-500 mb-3">
             {t('upload_qr_list_desc')}
           </p>
+          
+          {/* Loading and Error States for QR Codes */}
+          {isLoadingQRCodes && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                <span className="text-sm text-blue-700">{t('loading_qr_codes') || 'Loading QR codes...'}</span>
+              </div>
+            </div>
+          )}
+          {qrCodesError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-sm text-red-700">
+                    {t('error_loading_qr_codes') || 'Error loading QR codes'}: {qrCodesError}
+                  </span>
+                </div>
+                <button
+                  onClick={() => refetchQRCodes()}
+                  className="text-sm text-red-600 hover:text-red-800 underline"
+                >
+                  {t('retry') || 'Retry'}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="border border-gray-200 rounded-lg overflow-hidden">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">

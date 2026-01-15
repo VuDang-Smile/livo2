@@ -6,46 +6,104 @@ from pathlib import Path
 import sys
 import subprocess
 import os
+import io
 import threading
 import signal
 import zipfile
 import json
+import uuid
+# Import numpy trước (an toàn hơn)
 import numpy as np
-import cv2
+
+# Delay import cv2 để tránh segfault - import với error handling tốt hơn
+cv2 = None
+try:
+    # Thử import cv2 với error handling đầy đủ
+    import cv2
+    # Test import thành công bằng cách gọi một hàm đơn giản
+    _ = cv2.__version__
+except (ImportError, SystemError, OSError, AttributeError) as e:
+    print(f"Warning: cv2 not available: {e}. Some features will be disabled.")
+    cv2 = None
+except Exception as e:
+    # Catch tất cả các exception khác để tránh segfault
+    print(f"Warning: cv2 import failed with unexpected error: {e}. Some features will be disabled.")
+    cv2 = None
+
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import io
 import warnings
-sys.path.insert(0, str(Path(__file__).parent.parent / "languages"))
-from translate_engine import Translator
+import ctypes
+import sys
 
-# Try to import pyzbar for QR code scanning
+# Import Translator với error handling tốt hơn
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent / "languages"))
+    from translate_engine import Translator
+except (ImportError, SystemError, OSError) as e:
+    print(f"Error: Cannot import Translator: {e}")
+    # Fallback Translator class
+    class Translator:
+        def __init__(self, lang='en'):
+            self.lang = lang
+        def get(self, key, default=None):
+            return default or key
+        def switch_language(self, lang):
+            self.lang = lang
+    Translator = Translator
+
+# Try to import pyzbar for QR code scanning với error handling tốt hơn
+PYZBAR_AVAILABLE = False
+QRCODE_SYMBOLS = None
+pyzbar = None
 try:
     from pyzbar import pyzbar
+    from pyzbar.pyzbar import ZBarSymbol
     PYZBAR_AVAILABLE = True
-except ImportError:
+    # Chỉ decode QRCODE để tránh warnings từ DataBar decoder
+    QRCODE_SYMBOLS = [ZBarSymbol.QRCODE]
+except (ImportError, SystemError, OSError, AttributeError) as e:
     PYZBAR_AVAILABLE = False
-    print("Warning: pyzbar not available. QR code scanning will be disabled.")
+    QRCODE_SYMBOLS = None
+    pyzbar = None
+    print(f"Warning: pyzbar not available: {e}. QR code scanning will be disabled.")
 
-# Import geometry utils for equirectangular to perspective conversion
+# Import geometry utils với error handling tốt hơn
+GEOMETRY_UTILS_AVAILABLE = False
+get_camera_matrix = None
+get_extrinsic_matrix = None
+camera_to_world = None
+cartesian_to_spherical = None
+spherical2equirect = None
 try:
     from geometry_utils import (
         get_camera_matrix, get_extrinsic_matrix, 
         camera_to_world, cartesian_to_spherical, spherical2equirect
     )
     GEOMETRY_UTILS_AVAILABLE = True
-except ImportError:
+except (ImportError, SystemError, OSError, AttributeError) as e:
     GEOMETRY_UTILS_AVAILABLE = False
-    print("Warning: geometry_utils not available. QR code scanning will be disabled.")
+    print(f"Warning: geometry_utils not available: {e}. QR code scanning will be disabled.")
 
 # Try to import requests for backend upload
+REQUESTS_AVAILABLE = False
+requests = None
 try:
     import requests
     REQUESTS_AVAILABLE = True
-except ImportError:
+except (ImportError, SystemError, OSError):
     REQUESTS_AVAILABLE = False
+    requests = None
 
-# Try to import ROS2 for image subscription during bag playback
+# Try to import ROS2 với error handling tốt hơn
+ROS2_AVAILABLE = False
+rclpy = None
+Node = None
+SingleThreadedExecutor = None
+Image = None
+Odometry = None
+CvBridge = None
 try:
     import rclpy
     from rclpy.node import Node
@@ -54,9 +112,69 @@ try:
     from nav_msgs.msg import Odometry
     from cv_bridge import CvBridge
     ROS2_AVAILABLE = True
-except ImportError:
+except (ImportError, SystemError, OSError, AttributeError) as e:
     ROS2_AVAILABLE = False
-    print("Warning: ROS2 not available. QR code scanning from bag will be disabled.")
+    print(f"Warning: ROS2 not available: {e}. QR code scanning from bag will be disabled.")
+
+def _decode_qr_silently(gray_image):
+    """Wrapper function để decode QRCODE với suppress warnings hoàn toàn"""
+    if not PYZBAR_AVAILABLE or pyzbar is None:
+        return []
+    
+    decoded_objects = []
+    
+    # Suppress warnings ở nhiều mức
+    if sys.platform == 'linux':
+        # Linux: redirect stderr ở OS level
+        saved_stderr = None
+        devnull_fd = None
+        try:
+            devnull_fd = os.open(os.devnull, os.O_WRONLY)
+            stderr_fd = sys.stderr.fileno()
+            saved_stderr = os.dup(stderr_fd)
+            os.dup2(devnull_fd, stderr_fd)
+            os.close(devnull_fd)
+            devnull_fd = None
+            
+            # Decode chỉ QRCODE
+            try:
+                decoded_objects = pyzbar.decode(gray_image, symbols=QRCODE_SYMBOLS)
+            except (TypeError, AttributeError):
+                # Fallback: decode tất cả rồi filter
+                decoded_objects = pyzbar.decode(gray_image)
+                decoded_objects = [obj for obj in decoded_objects if obj.type == 'QRCODE']
+        except Exception:
+            pass
+        finally:
+            # Restore stderr
+            if saved_stderr is not None:
+                try:
+                    stderr_fd = sys.stderr.fileno()
+                    os.dup2(saved_stderr, stderr_fd)
+                    os.close(saved_stderr)
+                except:
+                    pass
+            if devnull_fd is not None:
+                try:
+                    os.close(devnull_fd)
+                except:
+                    pass
+    else:
+        # Windows/Mac: dùng redirect_stderr
+        stderr_buffer = io.StringIO()
+        with contextlib.redirect_stderr(stderr_buffer):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                try:
+                    decoded_objects = pyzbar.decode(gray_image, symbols=QRCODE_SYMBOLS)
+                except (TypeError, AttributeError):
+                    decoded_objects = pyzbar.decode(gray_image)
+                    decoded_objects = [obj for obj in decoded_objects if obj.type == 'QRCODE']
+                except Exception:
+                    decoded_objects = []
+    
+    return decoded_objects
+
 
 class QRScanner:
     """Class để quét QR code từ ảnh equirectangular"""
@@ -66,7 +184,8 @@ class QRScanner:
         self.max_workers = max_workers
         self._remap_cache = {}
         
-        if not PYZBAR_AVAILABLE or not GEOMETRY_UTILS_AVAILABLE:
+        # Kiểm tra tất cả dependencies trước khi enable
+        if not PYZBAR_AVAILABLE or not GEOMETRY_UTILS_AVAILABLE or cv2 is None:
             self.enabled = False
         else:
             self.enabled = True
@@ -80,6 +199,9 @@ class QRScanner:
         """
         Convert equirectangular image to perspective view with caching for speed.
         """
+        if cv2 is None or not GEOMETRY_UTILS_AVAILABLE:
+            raise RuntimeError("cv2 or geometry_utils not available")
+        
         key = (THETA, PHI, FOV, height, width)
         if key in self._remap_cache:
             XY = self._remap_cache[key]
@@ -148,49 +270,50 @@ class QRScanner:
 
                     def process_view(args):
                         theta, phi = args
-                        persp = self.Equirec2Perspec(frame, fov, theta, phi,
-                                                    self.perspec_size, self.perspec_size)
-                        gray = cv2.cvtColor(persp, cv2.COLOR_BGR2GRAY)
-                        # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-                        # gray = clahe.apply(gray)
-                        # gray = cv2.GaussianBlur(gray, (3,3), 0)
+                        if cv2 is None:
+                            return [], None
                         
-                        # Suppress zbar warnings và chỉ lấy QR code
-                        # Redirect stderr để suppress zbar warnings
-                        stderr_buffer = io.StringIO()
-                        with contextlib.redirect_stderr(stderr_buffer):
-                            try:
-                                decoded_objects = pyzbar.decode(gray)
-                            except Exception:
-                                decoded_objects = []
-                        
-                        # Chỉ lấy QR code, bỏ qua DataBar và các loại barcode khác
-                        qr_codes = [obj for obj in decoded_objects if obj.type == 'QRCODE']
-                        
-                        results = []
-                        debug_img = None
+                        try:
+                            persp = self.Equirec2Perspec(frame, fov, theta, phi,
+                                                        self.perspec_size, self.perspec_size)
+                            gray = cv2.cvtColor(persp, cv2.COLOR_BGR2GRAY)
+                            # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+                            # gray = clahe.apply(gray)
+                            # gray = cv2.GaussianBlur(gray, (3,3), 0)
+                            
+                            # Sử dụng wrapper function để suppress warnings hoàn toàn
+                            decoded_objects = _decode_qr_silently(gray)
+                            
+                            # Tất cả decoded_objects đã là QRCODE
+                            qr_codes = decoded_objects
+                            
+                            results = []
+                            debug_img = None
 
-                        for qr in qr_codes:
-                            results.append({
-                                "data": qr.data.decode('utf-8'),
-                                "rect": {
-                                    "left": qr.rect.left,
-                                    "top": qr.rect.top,
-                                    "width": qr.rect.width,
-                                    "height": qr.rect.height
-                                },
-                                "view": (theta, phi),
-                                "zoom": fov
-                            })
+                            for qr in qr_codes:
+                                results.append({
+                                    "data": qr.data.decode('utf-8'),
+                                    "rect": {
+                                        "left": qr.rect.left,
+                                        "top": qr.rect.top,
+                                        "width": qr.rect.width,
+                                        "height": qr.rect.height
+                                    },
+                                    "view": (theta, phi),
+                                    "zoom": fov
+                                })
 
-                            # Tạo debug image nếu cần (giống logic từ nhánh)
-                            x, y, w, h = qr.rect.left, qr.rect.top, qr.rect.width, qr.rect.height
-                            debug_img = persp.copy()
-                            cv2.rectangle(debug_img, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                            cv2.putText(debug_img, qr.data.decode('utf-8'), (x, y - 10),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                                # Tạo debug image nếu cần (giống logic từ nhánh)
+                                x, y, w, h = qr.rect.left, qr.rect.top, qr.rect.width, qr.rect.height
+                                debug_img = persp.copy()
+                                cv2.rectangle(debug_img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                                cv2.putText(debug_img, qr.data.decode('utf-8'), (x, y - 10),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-                        return results, debug_img  # trả về debug image
+                            return results, debug_img  # trả về debug image
+                        except Exception as e:
+                            # Tránh crash nếu có lỗi trong quá trình xử lý
+                            return [], None
 
                     with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                         futures = executor.map(process_view, views)
@@ -254,6 +377,9 @@ class QRImageSubscriberNode(Node):
     def image_callback(self, msg):
         """Callback when receiving image"""
         try:
+            if cv2 is None or CvBridge is None:
+                return
+            
             # Handle JPEG compressed images
             if msg.encoding.lower() in ['jpeg', 'jpg']:
                 # Decode JPEG data directly from compressed format
@@ -273,7 +399,8 @@ class QRImageSubscriberNode(Node):
             
         except Exception as e:
             error_msg = f'Error processing image from {self.image_topic_name}: {e}'
-            self.get_logger().error(error_msg)
+            if hasattr(self, 'get_logger'):
+                self.get_logger().error(error_msg)
             print(f'[QRImageSubscriberNode] ERROR: {error_msg}')
     
     def odom_callback(self, msg):
@@ -306,6 +433,8 @@ class BagMappingInterface:
         
         self.mapping_process = None
         self.is_mapping_running = False
+        # Flag để phân biệt crash thực sự và graceful shutdown từ STOP button
+        self.is_stopping = False
         # Thêm process cho ros2 bag play
         self.bag_process = None
         self.is_bag_playing = False
@@ -315,8 +444,21 @@ class BagMappingInterface:
         # Backend URL for map upload
         self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.tm")
         
-        # QR code scanning
-        self.qr_scanner = QRScanner() if (PYZBAR_AVAILABLE and GEOMETRY_UTILS_AVAILABLE) else None
+        # QR code scanning - chỉ khởi tạo nếu tất cả dependencies có sẵn
+        try:
+            if PYZBAR_AVAILABLE and GEOMETRY_UTILS_AVAILABLE and cv2 is not None:
+                self.qr_scanner = QRScanner()
+            else:
+                self.qr_scanner = None
+                if not PYZBAR_AVAILABLE:
+                    print("Warning: pyzbar not available. QR scanning disabled.")
+                if not GEOMETRY_UTILS_AVAILABLE:
+                    print("Warning: geometry_utils not available. QR scanning disabled.")
+                if cv2 is None:
+                    print("Warning: cv2 not available. QR scanning disabled.")
+        except Exception as e:
+            print(f"Warning: Failed to initialize QRScanner: {e}. QR scanning disabled.")
+            self.qr_scanner = None
         self.detected_qr_codes = []  # List of detected QR codes
         self.qr_codes_lock = threading.Lock()  # Lock for thread-safe access
         
@@ -336,6 +478,18 @@ class BagMappingInterface:
         
         self.translator = Translator('en')
         self.current_lang = 'en'
+        
+        # Queue system cho smooth updates
+        self.log_queue = []
+        self.progress_queue = None  # (target_value, current_value)
+        self.log_update_lock = threading.Lock()
+        self.log_batch_size = 5  # Batch log updates để mượt hơn
+        self.progress_animation_speed = 2  # Tốc độ animation progress bar (giá trị mỗi frame)
+        
+        # Start log update thread
+        self.log_update_thread_running = True
+        threading.Thread(target=self._log_update_worker, daemon=True).start()
+        threading.Thread(target=self._progress_update_worker, daemon=True).start()
         
         self.setup_language_button()
         self.update_ui_texts()
@@ -479,6 +633,34 @@ class BagMappingInterface:
         self.browse_btn = tk.Button(path_frame, text=self.translator.get('button.browse', 'Browse'), command=self.browse_file)
         self.browse_btn.pack(side=tk.LEFT, padx=5)
 
+        # Map metadata inputs (Map Name & Vehicle Info)
+        meta_frame = tk.Frame(self.control_card)
+        meta_frame.pack(fill=tk.X, pady=(5, 5))
+
+        # Map Name
+        map_name_label = tk.Label(meta_frame, text=self.translator.get('label.map_name', 'Map Name:'))
+        map_name_label.grid(row=0, column=0, sticky="w", padx=(0, 5), pady=2)
+        self.map_name_var = tk.StringVar()
+        map_name_entry = tk.Entry(meta_frame, textvariable=self.map_name_var)
+        map_name_entry.grid(row=0, column=1, sticky="we", padx=(0, 5), pady=2)
+
+        # Vehicle info (Name - ID)
+        vehicle_label = tk.Label(meta_frame, text=self.translator.get('label.vehicle_info', 'Vehicle (Name - ID):'))
+        vehicle_label.grid(row=1, column=0, sticky="w", padx=(0, 5), pady=2)
+        self.vehicle_info_var = tk.StringVar()
+        vehicle_entry = tk.Entry(meta_frame, textvariable=self.vehicle_info_var)
+        vehicle_entry.grid(row=1, column=1, sticky="we", padx=(0, 5), pady=2)
+
+        # Auto-fill vehicle_id từ MAC local và đặt read-only nếu có
+        self.local_vehicle_id = self._get_local_mac_no_colon()
+        if self.local_vehicle_id:
+            self.vehicle_info_var.set(self.local_vehicle_id)
+            vehicle_entry.config(state="readonly")
+        else:
+            self.vehicle_info_var.set(self.translator.get('label.vehicle_mac_not_found', 'MAC not found'))
+
+        meta_frame.columnconfigure(1, weight=1)
+
         # Control Buttons
         btn_row = tk.Frame(self.control_card)
         btn_row.pack(fill=tk.X, pady=5)
@@ -583,8 +765,13 @@ class BagMappingInterface:
         self.clear_log_btn.pack(side=tk.RIGHT)
 
         self.log_panel = tk.Text(log_container, height=8, bg="white", fg="black", 
-                                 font=("Consolas", 10), state=tk.DISABLED, bd=1, relief=tk.SUNKEN)
-        self.log_panel.pack(fill=tk.BOTH, expand=True)
+                                 font=("Consolas", 10), state=tk.DISABLED, bd=1, relief=tk.SUNKEN,
+                                 wrap=tk.WORD, padx=5, pady=5)
+        # Thêm scrollbar cho log
+        log_scrollbar = tk.Scrollbar(log_container, orient=tk.VERTICAL, command=self.log_panel.yview)
+        self.log_panel.config(yscrollcommand=log_scrollbar.set)
+        log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
 
 
@@ -685,6 +872,27 @@ class BagMappingInterface:
             )
             return
         
+        # Pre-flight checks để ngăn chặn crash
+        self.add_log(self.translator.get('log.preflight_checks', '🔍 Running pre-flight checks to prevent crashes...'))
+        
+        # 1. Validate config file (kiểm tra YAML hợp lệ)
+        if not self._validate_config_file(config_path_obj):
+            return
+        
+        # 2. Validate config parameters (kiểm tra các tham số quan trọng)
+        if not self._validate_config_parameters(config_path_obj):
+            return
+        
+        # 3. Check system resources
+        if not self._check_system_resources():
+            return
+        
+        # 4. Validate bag file (kiểm tra topics trong bag)
+        if not self._validate_bag_file():
+            return
+        
+        self.add_log(self.translator.get('log.preflight_checks_passed', '✅ All pre-flight checks passed!'))
+        
         try:
             ros2_setup = "/opt/ros/jazzy/setup.bash"
             rviz_arg = "True" if self.use_rviz else "False"
@@ -746,17 +954,24 @@ class BagMappingInterface:
                 preexec_fn=os.setsid if hasattr(os, 'setsid') else None
             )
             
-            time.sleep(3)
-            
-            if self.mapping_process.poll() is not None:
-                error_output = self.mapping_process.stdout.read() if self.mapping_process.stdout else self.translator.get('log.no_output', 'No output')
-                self.add_log(f"❌ {self.translator.get('log.mapping_process_exited', 'Mapping process exited immediately with code')}: {self.mapping_process.returncode}")
-                self.add_log(f"{self.translator.get('log.output', 'Output')}: {error_output[:500]}")
-                messagebox.showerror(
-                    self.translator.get('dialog.error', 'Error'),
-                    self.translator.get('message.mapping_exited_immediately', 'Mapping process exited immediately. Check log for details.')
-                )
-                self.mapping_process = None
+            # Graceful startup với health check
+            if not self._wait_for_process_health(max_wait_time=10):
+                # Process đã crash hoặc không khởi động được
+                if self.mapping_process:
+                    if self.mapping_process.poll() is not None:
+                        error_output = ""
+                        try:
+                            error_output = self.mapping_process.stdout.read() if self.mapping_process.stdout else self.translator.get('log.no_output', 'No output')
+                        except:
+                            pass
+                        self.add_log(f"❌ {self.translator.get('log.mapping_process_exited', 'Mapping process exited immediately with code')}: {self.mapping_process.returncode}")
+                        if error_output:
+                            self.add_log(f"{self.translator.get('log.output', 'Output')}: {error_output[:500]}")
+                        messagebox.showerror(
+                            self.translator.get('dialog.error', 'Error'),
+                            self.translator.get('message.mapping_exited_immediately', 'Mapping process exited immediately. Check log for details.')
+                        )
+                    self.mapping_process = None
                 return
             
             self.is_mapping_running = True
@@ -894,6 +1109,17 @@ class BagMappingInterface:
         # Tìm các file PCD (bỏ qua file merged nếu có)
         pcd_files = [f for f in pcd_dir.glob("*.pcd") if f.name not in ["merged_all.pcd", "merge_all_hba.pcd"]]
         return len(pcd_files) > 0
+
+    def _get_local_mac_no_colon(self) -> str:
+        """Lấy địa chỉ MAC (không dấu :) từ máy cục bộ."""
+        try:
+            mac_int = uuid.getnode()
+            if mac_int == 0:
+                return ""
+            return f"{mac_int:012x}"
+        except Exception as e:
+            self.add_log(f"⚠️ Cannot read local MAC: {e}")
+            return ""
     
     def start_upload(self):
         """Chạy full pipeline: Merge -> HBA -> SC -> Floorplan -> Upload"""
@@ -907,12 +1133,41 @@ class BagMappingInterface:
                     .replace('{path}', str(pcd_dir))
             )
             return
-        
+
+        map_name = (self.map_name_var.get() or "").strip()
+        vehicle_id = self._get_local_mac_no_colon()
+        if vehicle_id:
+            # Cập nhật UI hiển thị để người dùng biết ID được tự lấy
+            self.vehicle_info_var.set(vehicle_id)
+
+        if not map_name:
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                self.translator.get('dialog.map_name_required', 'Please enter Map Name before uploading.')
+            )
+            return
+
+        if not vehicle_id:
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                self.translator.get('dialog.vehicle_id_required', 'Cannot detect local MAC for Vehicle ID. Please check network interfaces.')
+            )
+            return
+
+        # Lưu lại để truyền vào thread upload
+        self.current_map_name = map_name
+        self.current_vehicle_id = vehicle_id
+        self.current_vehicle_input = vehicle_id
+
         self.btn_upload.config(state=tk.DISABLED)
         self.add_log(self.translator.get('log.pipeline_start', '🚀 Starting map processing and upload pipeline...'))
-        threading.Thread(target=self._run_upload_pipeline_thread, daemon=True).start()
+        threading.Thread(
+            target=self._run_upload_pipeline_thread,
+            args=(map_name, vehicle_id),
+            daemon=True
+        ).start()
     
-    def _run_upload_pipeline_thread(self):
+    def _run_upload_pipeline_thread(self, map_name: str, vehicle_id: str):
         """Thread thực hiện full pipeline và upload"""
         start_time = time.time()
         
@@ -924,7 +1179,7 @@ class BagMappingInterface:
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                 return
             
-            self.root.after(0, lambda: self.progress.config(value=20))
+            self.root.after(0, lambda: self.set_progress(20))
             
             # 2. HBA Optimize
             self.add_log(self.translator.get('log.step_hba', 'Step 2/6: Running HBA Optimize...'))
@@ -933,7 +1188,7 @@ class BagMappingInterface:
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                 return
             
-            self.root.after(0, lambda: self.progress.config(value=40))
+            self.root.after(0, lambda: self.set_progress(40))
             
             # 3. SC Tile
             self.add_log(self.translator.get('log.step_sc', 'Step 3/6: Running ScanContext Tiling...'))
@@ -942,7 +1197,7 @@ class BagMappingInterface:
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                 return
             
-            self.root.after(0, lambda: self.progress.config(value=60))
+            self.root.after(0, lambda: self.set_progress(60))
             
             # 4. Generate Floorplan
             self.add_log(self.translator.get('log.step_floorplan', 'Step 4/6: Generating floorplan...'))
@@ -951,7 +1206,7 @@ class BagMappingInterface:
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                 return
             
-            self.root.after(0, lambda: self.progress.config(value=80))
+            self.root.after(0, lambda: self.set_progress(80))
             
             # 5. Save QR codes to JSON
             self.add_log(self.translator.get('log.step_save_qr', 'Step 5/7: Saving QR codes...'))
@@ -961,7 +1216,7 @@ class BagMappingInterface:
             else:
                 self.add_log(self.translator.get('log.no_qr_codes_to_save', '⚠️ No QR codes to save'))
             
-            self.root.after(0, lambda: self.progress.config(value=75))
+            self.root.after(0, lambda: self.set_progress(75))
             
             # 6. Zip files
             self.add_log(self.translator.get('log.step_zip', 'Step 6/7: Compressing files (Zip)...'))
@@ -971,22 +1226,26 @@ class BagMappingInterface:
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                 return
             
-            self.root.after(0, lambda: self.progress.config(value=90))
+            self.root.after(0, lambda: self.set_progress(90))
             
             # 7. Upload to backend
             self.add_log(self.translator.get('log.step_upload', 'Step 7/7: Uploading to backend...'))
-            upload_success, upload_info = self._upload_map_to_backend(zip_path)
+            upload_success, upload_info = self._upload_map_to_backend(zip_path, map_name, vehicle_id)
             if upload_success:
                 if upload_info:
                     upload_msg = self.translator.get('log.upload_backend_success', '✅ Backend upload successful (upload_id: {upload_id})').replace('{upload_id}', str(upload_info))
                 else:
                     upload_msg = "✅ Backend upload successful"
                 self.add_log(upload_msg)
+                # Enable lại nút upload khi thành công
+                self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
             else:
                 fail_reason = upload_info or "Unknown error"
                 self.add_log(self.translator.get('log.upload_backend_failed', '⚠️ Backend upload failed: {reason}').replace('{reason}', str(fail_reason)))
+                # Enable lại nút upload khi thất bại để có thể thử lại
+                self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
             
-            self.root.after(0, lambda: self.progress.config(value=100))
+            self.root.after(0, lambda: self.set_progress(100))
             self.root.after(0, lambda: self.upload_stat.config(text="100% - Done"))
             
             duration = time.time() - start_time
@@ -1014,7 +1273,7 @@ class BagMappingInterface:
     
     def simulate_upload_progress(self, val):
         if val <= 100:
-            self.progress['value'] = val
+            self.set_progress(val)
             upload_text = self.translator.get('label.uploading', 'Uploading: {val}%').replace('{val}', str(val))
             self.upload_stat.config(text=upload_text)
             self.root.after(30, lambda: self.simulate_upload_progress(val + 2))
@@ -1063,6 +1322,10 @@ class BagMappingInterface:
         """Quét QR code từ một ảnh cụ thể (equirectangular format)"""
         if not self.qr_scanner:
             self.add_log(self.translator.get('log.qr_scanner_not_available', '⚠️ QR scanner is not available. Please install pyzbar and geometry_utils.'))
+            return []
+        
+        if cv2 is None:
+            self.add_log('⚠️ cv2 not available. Cannot scan QR codes.')
             return []
         
         try:
@@ -1174,11 +1437,125 @@ class BagMappingInterface:
         self.qr_listbox.see(tk.END)
 
     def add_log(self, message):
-        self.log_panel.config(state=tk.NORMAL)
+        """Thêm log message vào queue để update mượt hơn"""
         time_str = datetime.now().strftime("%H:%M:%S")
-        self.log_panel.insert(tk.END, f"[{time_str}] {message}\n")
-        self.log_panel.see(tk.END)
-        self.log_panel.config(state=tk.DISABLED)
+        log_entry = f"[{time_str}] {message}\n"
+        
+        with self.log_update_lock:
+            self.log_queue.append(log_entry)
+    
+    def _log_update_worker(self):
+        """Worker thread để batch update log panel mượt hơn"""
+        while self.log_update_thread_running:
+            try:
+                # Lấy batch log entries từ queue
+                batch = []
+                with self.log_update_lock:
+                    if self.log_queue:
+                        batch = self.log_queue[:self.log_batch_size]
+                        self.log_queue = self.log_queue[self.log_batch_size:]
+                
+                if batch:
+                    # Update UI trong main thread
+                    self.root.after(0, lambda: self._update_log_panel(batch))
+                
+                # Sleep ngắn để không chiếm CPU
+                time.sleep(0.05)  # 50ms = 20 updates/second
+            except Exception as e:
+                # Nếu có lỗi, log trực tiếp để không mất thông tin
+                try:
+                    self.root.after(0, lambda: self._update_log_panel_direct(f"Error in log worker: {e}\n"))
+                except:
+                    pass
+                time.sleep(0.1)
+    
+    def _update_log_panel(self, batch):
+        """Update log panel với batch entries"""
+        try:
+            self.log_panel.config(state=tk.NORMAL)
+            
+            # Insert tất cả entries trong batch
+            for entry in batch:
+                self.log_panel.insert(tk.END, entry)
+            
+            # Smooth scroll đến cuối
+            self.log_panel.see(tk.END)
+            
+            # Giới hạn số dòng để tránh memory leak (giữ tối đa 1000 dòng)
+            line_count = int(self.log_panel.index('end-1c').split('.')[0])
+            if line_count > 1000:
+                # Xóa 200 dòng đầu
+                self.log_panel.delete('1.0', '200.0')
+            
+            self.log_panel.config(state=tk.DISABLED)
+        except Exception as e:
+            # Fallback nếu có lỗi
+            print(f"Error updating log panel: {e}")
+    
+    def _update_log_panel_direct(self, message):
+        """Update log panel trực tiếp (fallback)"""
+        try:
+            self.log_panel.config(state=tk.NORMAL)
+            self.log_panel.insert(tk.END, message)
+            self.log_panel.see(tk.END)
+            self.log_panel.config(state=tk.DISABLED)
+        except:
+            pass
+    
+    def _progress_update_worker(self):
+        """Worker thread để animate progress bar mượt hơn"""
+        while self.log_update_thread_running:
+            try:
+                if self.progress_queue is not None:
+                    target_value, current_value = self.progress_queue
+                    
+                    # Tính toán giá trị mới với animation
+                    if abs(target_value - current_value) < self.progress_animation_speed:
+                        # Đã đạt target
+                        new_value = target_value
+                        self.progress_queue = None
+                    else:
+                        # Di chuyển về phía target
+                        if target_value > current_value:
+                            new_value = min(current_value + self.progress_animation_speed, target_value)
+                        else:
+                            new_value = max(current_value - self.progress_animation_speed, target_value)
+                        self.progress_queue = (target_value, new_value)
+                    
+                    # Update UI trong main thread
+                    self.root.after(0, lambda v=new_value: self._update_progress_bar(v))
+                
+                # Sleep ngắn để animation mượt
+                time.sleep(0.03)  # ~33 FPS cho animation
+            except Exception as e:
+                time.sleep(0.1)
+    
+    def _update_progress_bar(self, value):
+        """Update progress bar với giá trị mới"""
+        try:
+            self.progress['value'] = value
+            # Update status text
+            if value >= 100:
+                self.upload_stat.config(text=self.translator.get('label.upload_done', '100% - Done'))
+            elif value > 0:
+                self.upload_stat.config(text=self.translator.get('label.uploading', 'Uploading: {val}%').replace('{val}', str(int(value))))
+        except:
+            pass
+    
+    def set_progress(self, value):
+        """Set progress bar với smooth animation"""
+        try:
+            current_value = self.progress['value']
+            # Clamp value
+            value = max(0, min(100, value))
+            # Set vào queue để animate
+            self.progress_queue = (value, current_value)
+        except:
+            # Fallback: set trực tiếp
+            try:
+                self.progress['value'] = value
+            except:
+                pass
     
     def add_log_success(self, message_key, **kwargs):
         msg = self.translator.get(message_key, message_key)
@@ -1199,8 +1576,303 @@ class BagMappingInterface:
             self.add_log_success('message.default_config_selected', name=default_config.name)
         else:
             self.add_log_warning('message.default_config_not_found', name='mid360_equirectangular_stable.yaml')
+    
+    def _validate_config_file(self, config_path_obj):
+        """Validate YAML config file trước khi sử dụng"""
+        try:
+            import yaml
+        except ImportError:
+            # Nếu không có yaml, chỉ kiểm tra file tồn tại
+            self.add_log(self.translator.get('log.yaml_not_available', '⚠️ PyYAML not available, skipping config validation'))
+            return True
+        
+        try:
+            with open(config_path_obj, 'r', encoding='utf-8') as f:
+                config_data = yaml.safe_load(f)
+            
+            if config_data is None:
+                error_msg = self.translator.get('message.config_file_empty', 'Config file is empty or invalid YAML format')
+                self.add_log(f"❌ {error_msg}")
+                messagebox.showerror(
+                    self.translator.get('dialog.error', 'Error'),
+                    f"{error_msg}: {config_path_obj}"
+                )
+                return False
+            
+            # Kiểm tra các tham số quan trọng
+            required_keys = ['common', 'lidar', 'imu']
+            missing_keys = [key for key in required_keys if key not in config_data]
+            
+            if missing_keys:
+                error_msg = self.translator.get('message.config_missing_keys', 
+                    'Config file is missing required sections: {keys}').replace('{keys}', ', '.join(missing_keys))
+                self.add_log(f"⚠️ {error_msg}")
+                # Không block, chỉ cảnh báo
+                self.add_log(self.translator.get('log.config_validation_warning', 
+                    '⚠️ Config validation warning, but continuing...'))
+            
+            self.add_log(self.translator.get('log.config_validation_success', '✅ Config file validation passed'))
+            return True
+            
+        except yaml.YAMLError as e:
+            error_msg = self.translator.get('message.config_yaml_error', 
+                'Config file has invalid YAML syntax: {error}').replace('{error}', str(e))
+            self.add_log(f"❌ {error_msg}")
+            messagebox.showerror(
+                self.translator.get('dialog.error', 'Error'),
+                f"{error_msg}\n\nFile: {config_path_obj}"
+            )
+            return False
+        except Exception as e:
+            error_msg = self.translator.get('message.config_validation_error', 
+                'Error validating config file: {error}').replace('{error}', str(e))
+            self.add_log(f"⚠️ {error_msg}")
+            # Không block, chỉ cảnh báo
+            return True
+    
+    def _validate_config_parameters(self, config_path_obj):
+        """Validate các tham số quan trọng trong config để tránh crash"""
+        try:
+            import yaml
+        except ImportError:
+            return True
+        
+        try:
+            with open(config_path_obj, 'r', encoding='utf-8') as f:
+                config_data = yaml.safe_load(f)
+            
+            if not config_data:
+                return True
+            
+            errors = []
+            warnings = []
+            
+            # Kiểm tra common section
+            if 'common' in config_data:
+                common = config_data['common']
+                # Kiểm tra các tham số có thể gây crash nếu sai
+                if 'lidar_topic' in common:
+                    topic = common['lidar_topic']
+                    if not topic or not isinstance(topic, str):
+                        errors.append(self.translator.get('log.config_invalid_lidar_topic', 'Invalid lidar_topic in config'))
+                
+                if 'imu_topic' in common:
+                    topic = common['imu_topic']
+                    if not topic or not isinstance(topic, str):
+                        errors.append(self.translator.get('log.config_invalid_imu_topic', 'Invalid imu_topic in config'))
+            
+            # Kiểm tra lidar section
+            if 'lidar' in config_data:
+                lidar = config_data['lidar']
+                # Kiểm tra các tham số số học
+                numeric_params = ['scan_line', 'blind', 'fov_degree', 'min_ring', 'max_ring']
+                for param in numeric_params:
+                    if param in lidar:
+                        try:
+                            value = float(lidar[param])
+                            if value < 0 and param in ['scan_line', 'min_ring', 'max_ring']:
+                                warnings.append(self.translator.get('log.config_negative_value', 
+                                    f'Warning: {param} has negative value: {value}').replace('{param}', param).replace('{value}', str(value)))
+                        except (ValueError, TypeError):
+                            errors.append(self.translator.get('log.config_invalid_numeric', 
+                                f'Invalid numeric value for {param}').replace('{param}', param))
+            
+            # Kiểm tra imu section
+            if 'imu' in config_data:
+                imu = config_data['imu']
+                # Kiểm tra các tham số quan trọng
+                if 'acc_n' in imu:
+                    try:
+                        acc_n = float(imu['acc_n'])
+                        if acc_n <= 0:
+                            warnings.append(self.translator.get('log.config_invalid_acc_n', 
+                                'Warning: acc_n should be positive'))
+                    except (ValueError, TypeError):
+                        pass
+            
+            if errors:
+                error_msg = '\n'.join(errors)
+                self.add_log(f"❌ {self.translator.get('log.config_validation_errors', 'Config validation errors')}:")
+                for err in errors:
+                    self.add_log(f"   - {err}")
+                messagebox.showerror(
+                    self.translator.get('dialog.error', 'Error'),
+                    f"{self.translator.get('message.config_has_errors', 'Config file has errors that may cause crashes')}:\n\n{error_msg}"
+                )
+                return False
+            
+            if warnings:
+                self.add_log(f"⚠️ {self.translator.get('log.config_validation_warnings', 'Config validation warnings')}:")
+                for warn in warnings:
+                    self.add_log(f"   - {warn}")
+            
+            return True
+            
+        except Exception as e:
+            self.add_log(f"⚠️ {self.translator.get('log.config_parameter_validation_error', 'Error validating config parameters: {error}').replace('{error}', str(e))}")
+            # Không block, chỉ cảnh báo
+            return True
+    
+    def _check_system_resources(self):
+        """Kiểm tra system resources để tránh crash do thiếu tài nguyên"""
+        try:
+            import psutil
+        except ImportError:
+            # Nếu không có psutil, bỏ qua check
+            self.add_log(self.translator.get('log.psutil_not_available', '⚠️ psutil not available, skipping resource check'))
+            return True
+        
+        try:
+            # Kiểm tra memory
+            memory = psutil.virtual_memory()
+            memory_percent = memory.percent
+            available_gb = memory.available / (1024**3)
+            
+            if memory_percent > 90:
+                error_msg = self.translator.get('message.low_memory', 
+                    'System memory is very low ({percent}% used, {available:.1f}GB available). This may cause crashes.').replace('{percent}', str(memory_percent)).replace('{available:.1f}', f'{available_gb:.1f}')
+                self.add_log(f"⚠️ {error_msg}")
+                if not messagebox.askyesno(
+                    self.translator.get('dialog.warning', 'Warning'),
+                    f"{error_msg}\n\n{self.translator.get('message.continue_anyway', 'Continue anyway?')}"
+                ):
+                    return False
+            elif memory_percent > 75:
+                self.add_log(self.translator.get('log.memory_usage_high', 
+                    f'⚠️ Memory usage is high: {memory_percent:.1f}%').replace('{memory_percent:.1f}', f'{memory_percent:.1f}'))
+            
+            # Kiểm tra disk space
+            disk = psutil.disk_usage('/')
+            disk_percent = disk.percent
+            free_gb = disk.free / (1024**3)
+            
+            if disk_percent > 95:
+                error_msg = self.translator.get('message.low_disk_space', 
+                    'Disk space is very low ({percent}% used, {free:.1f}GB free). This may cause crashes.').replace('{percent}', str(disk_percent)).replace('{free:.1f}', f'{free_gb:.1f}')
+                self.add_log(f"❌ {error_msg}")
+                messagebox.showerror(
+                    self.translator.get('dialog.error', 'Error'),
+                    error_msg
+                )
+                return False
+            elif disk_percent > 85:
+                self.add_log(self.translator.get('log.disk_usage_high', 
+                    f'⚠️ Disk usage is high: {disk_percent:.1f}%').replace('{disk_percent:.1f}', f'{disk_percent:.1f}'))
+            
+            self.add_log(self.translator.get('log.resource_check_passed', 
+                f'✅ Resource check passed (Memory: {memory_percent:.1f}%, Disk: {disk_percent:.1f}%)').replace('{memory_percent:.1f}', f'{memory_percent:.1f}').replace('{disk_percent:.1f}', f'{disk_percent:.1f}'))
+            return True
+            
+        except Exception as e:
+            self.add_log(f"⚠️ {self.translator.get('log.resource_check_error', 'Error checking system resources: {error}').replace('{error}', str(e))}")
+            # Không block, chỉ cảnh báo
+            return True
+    
+    def _validate_bag_file(self):
+        """Kiểm tra bag file có chứa các topics cần thiết"""
+        if not self.bag_path:
+            return True
+        
+        try:
+            bag_path_obj = Path(self.bag_path)
+            if not bag_path_obj.exists():
+                return True
+            
+            self.add_log(self.translator.get('log.checking_bag_topics', '🔍 Checking bag file for required topics...'))
+            
+            # Kiểm tra bag info
+            ros2_setup = "/opt/ros/jazzy/setup.bash"
+            ws_setup = self.workspace_path / "install" / "setup.sh"
+            
+            if not ws_setup.exists():
+                # Không thể check, bỏ qua
+                return True
+            
+            cmd = f"source {ros2_setup} && source {ws_setup} && ros2 bag info {self.bag_path}"
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode != 0:
+                self.add_log(self.translator.get('log.cannot_check_bag', '⚠️ Cannot check bag info, continuing...'))
+                return True
+            
+            bag_output = result.stdout.lower()
+            
+            # Kiểm tra các topics cần thiết
+            required_topics = ['/livox/lidar', '/livox/imu', '/image_raw']
+            missing_topics = []
+            
+            for topic in required_topics:
+                # Kiểm tra cả với và không có leading slash
+                topic_variants = [topic, topic[1:], topic.replace('/', '_')]
+                if not any(variant in bag_output for variant in topic_variants):
+                    missing_topics.append(topic)
+            
+            if missing_topics:
+                error_msg = self.translator.get('message.bag_missing_topics', 
+                    'Bag file is missing required topics: {topics}\n\nThis may cause the mapping process to crash.').replace('{topics}', ', '.join(missing_topics))
+                self.add_log(f"❌ {error_msg}")
+                if not messagebox.askyesno(
+                    self.translator.get('dialog.warning', 'Warning'),
+                    f"{error_msg}\n\n{self.translator.get('message.continue_anyway', 'Continue anyway?')}"
+                ):
+                    return False
+            else:
+                self.add_log(self.translator.get('log.bag_topics_ok', '✅ All required topics found in bag file'))
+            
+            return True
+            
+        except subprocess.TimeoutExpired:
+            self.add_log(self.translator.get('log.bag_check_timeout', '⚠️ Bag check timeout, continuing...'))
+            return True
+        except Exception as e:
+            self.add_log(f"⚠️ {self.translator.get('log.bag_check_error', 'Error checking bag file: {error}').replace('{error}', str(e))}")
+            # Không block, chỉ cảnh báo
+            return True
+    
+    def _wait_for_process_health(self, max_wait_time=10):
+        """Đợi process khởi động và kiểm tra health"""
+        check_interval = 0.5
+        max_checks = int(max_wait_time / check_interval)
+        
+        for i in range(max_checks):
+            time.sleep(check_interval)
+            
+            if not self.mapping_process:
+                return False
+            
+            # Kiểm tra process có còn chạy không
+            if self.mapping_process.poll() is not None:
+                # Process đã dừng
+                return False
+            
+            # Kiểm tra output để tìm dấu hiệu khởi động thành công hoặc lỗi
+            try:
+                # Đọc một phần output nếu có
+                if hasattr(self.mapping_process, 'stdout') and self.mapping_process.stdout:
+                    # Không block, chỉ peek
+                    pass
+            except:
+                pass
+            
+            # Sau 3 giây đầu tiên, coi như process đã khởi động
+            if i >= 6:  # 3 seconds
+                return True
+        
+        # Kiểm tra lần cuối
+        if self.mapping_process and self.mapping_process.poll() is None:
+            return True
+        
+        return False
 
     def monitor_mapping_process(self):
+        """Theo dõi mapping process và phát hiện crash"""
         if not self.mapping_process:
             return
         
@@ -1210,13 +1882,116 @@ class BagMappingInterface:
                     break
                 if self.is_mapping_running:
                     line_lower = line.lower()
-                    if any(keyword in line_lower for keyword in ['error', 'warning', 'started', 'ready', 'failed']):
+                    # Log tất cả các dòng quan trọng
+                    if any(keyword in line_lower for keyword in ['error', 'warning', 'started', 'ready', 'failed', 'died', 'crash', 'segmentation', 'signal']):
                         self.add_log(f"[Mapping] {line.strip()}")
+                    
+                    # Phát hiện process crash
+                    if 'process has died' in line_lower or 'process died' in line_lower:
+                        self.add_log(f"❌ [Mapping] {line.strip()}")
+                        # Đợi một chút để process hoàn toàn dừng
+                        time.sleep(0.5)
+                        # Kiểm tra exit code
+                        if self.mapping_process.poll() is not None:
+                            exit_code = self.mapping_process.returncode
+                            self._handle_mapping_crash(exit_code, line)
+                            break
                 else:
                     break
+            
+            # Kiểm tra lại sau khi đọc hết output
+            if self.is_mapping_running and self.mapping_process:
+                if self.mapping_process.poll() is not None:
+                    exit_code = self.mapping_process.returncode
+                    # Chỉ xử lý như crash nếu không phải graceful shutdown
+                    if exit_code != 0 and not (self.is_stopping or exit_code == -15):
+                        self._handle_mapping_crash(exit_code, "Process exited unexpectedly")
+                        
         except Exception as e:
             if self.is_mapping_running:
                 self.add_log(f"⚠️ {self.translator.get('log.error_reading_mapping_output', 'Error reading mapping output')}: {e}")
+                # Kiểm tra xem process có còn chạy không
+                if self.mapping_process and self.mapping_process.poll() is not None:
+                    self._handle_mapping_crash(self.mapping_process.returncode, str(e))
+    
+    def _handle_mapping_crash(self, exit_code, error_line):
+        """Xử lý khi mapping process bị crash"""
+        if not self.is_mapping_running:
+            return
+        
+        # Kiểm tra nếu đang dừng từ STOP button (Signal 15 = SIGTERM)
+        # Signal 15 là graceful shutdown, không phải crash
+        if self.is_stopping or exit_code == -15:
+            # Đây là graceful shutdown từ STOP button, không phải crash
+            self.is_mapping_running = False
+            self.add_log(self.translator.get('log.mapping_stopped_by_user', '✅ Mapping process stopped by user'))
+            return
+        
+        self.is_mapping_running = False
+        
+        # Xác định loại lỗi dựa trên exit code
+        error_type = "Unknown error"
+        error_description = ""
+        
+        if exit_code == -11:
+            error_type = "Segmentation Fault (SIGSEGV)"
+            error_description = self.translator.get('log.crash_segmentation_fault', 
+                'The mapping process crashed due to a segmentation fault. This usually indicates:\n'
+                '- Memory access violation\n'
+                '- Invalid pointer dereference\n'
+                '- Stack overflow\n'
+                '- Corrupted memory\n\n'
+                'Possible solutions:\n'
+                '- Check config file parameters\n'
+                '- Verify sensor data topics are available\n'
+                '- Check system resources (memory, CPU)\n'
+                '- Rebuild the workspace')
+        elif exit_code == -6:
+            error_type = "Abort (SIGABRT)"
+            error_description = self.translator.get('log.crash_abort',
+                'The mapping process was aborted. This usually indicates:\n'
+                '- Assertion failure\n'
+                '- Fatal error in the code\n'
+                '- Resource allocation failure\n\n'
+                'Check the log above for more details.')
+        elif exit_code < 0:
+            error_type = f"Signal {abs(exit_code)}"
+            signal_num = abs(exit_code)
+            error_description = self.translator.get('log.crash_signal',
+                'The mapping process was terminated by signal {signal}.\nThis usually indicates a crash or abnormal termination.').replace('{signal}', str(signal_num))
+        else:
+            error_type = f"Exit code {exit_code}"
+            error_description = self.translator.get('log.crash_exit_code',
+                'The mapping process exited with code {code}.\nCheck the log above for error details.').replace('{code}', str(exit_code))
+        
+        # Log chi tiết
+        self.add_log("=" * 60)
+        self.add_log(f"❌ {self.translator.get('log.mapping_process_crashed', 'MAPPING PROCESS CRASHED')}")
+        self.add_log(f"   {self.translator.get('log.error_type', 'Error Type')}: {error_type}")
+        self.add_log(f"   {self.translator.get('log.exit_code', 'Exit Code')}: {exit_code}")
+        self.add_log(f"   {self.translator.get('log.error_line', 'Error Line')}: {error_line[:200]}")
+        self.add_log("=" * 60)
+        
+        # Cập nhật UI
+        self.root.after(0, lambda: self.status_label.config(
+            text=self.translator.get('label.status_crashed', 'Status: ❌ Crashed'),
+            foreground="red"
+        ))
+        self.root.after(0, lambda: self.btn_start.config(state=tk.NORMAL))
+        
+        # Dừng bag playback nếu đang chạy
+        if self.is_bag_playing:
+            self.add_log(self.translator.get('log.stopping_bag_due_to_crash', '⚠️ Stopping bag playback due to mapping crash...'))
+            self.cleanup_processes()
+        
+        # Hiển thị thông báo lỗi
+        self.root.after(0, lambda: messagebox.showerror(
+            self.translator.get('dialog.mapping_crashed_title', 'Mapping Process Crashed'),
+            f"{self.translator.get('dialog.mapping_crashed_message', 'The mapping process has crashed!')}\n\n"
+            f"{self.translator.get('dialog.error_type', 'Error Type')}: {error_type}\n"
+            f"{self.translator.get('dialog.exit_code', 'Exit Code')}: {exit_code}\n\n"
+            f"{error_description}"
+        ))
     
     def monitor_bag_process(self):
         """Theo dõi output của ros2 bag play"""
@@ -1236,6 +2011,11 @@ class BagMappingInterface:
             if self.is_bag_playing:
                 self.add_log(self.translator.get('log.bag_playback_finished', '✅ Bag playback finished'))
                 self.is_bag_playing = False
+                # Hiển thị thông báo khi bag playback kết thúc
+                self.root.after(0, lambda: messagebox.showinfo(
+                    self.translator.get('dialog.bag_playback_finished_title', 'Bag Playback Finished'),
+                    self.translator.get('dialog.bag_playback_finished_message', 'Bag playback has completed successfully!')
+                ))
         except Exception as e:
             if self.is_bag_playing:
                 self.add_log(self.translator.get('log.error_reading_bag', '⚠️ Error reading bag output: {error}').replace('{error}', str(e)))
@@ -1339,6 +2119,9 @@ class BagMappingInterface:
         self.qr_frame_count = 0
     
     def cleanup_processes(self):
+        # Đánh dấu đang dừng để tránh hiển thị dialog crash
+        self.is_stopping = True
+        
         # Dừng QR scanning subscriber trước
         self.stop_qr_scanning_subscriber()
         # Dừng bag play trước
@@ -1409,6 +2192,9 @@ class BagMappingInterface:
             self.add_log(self.translator.get('log.pcd_detected', '✅ PCD files detected, ready to upload'))
         else:
             self.upload_stat.config(text="Waiting for PCD files...")
+        
+        # Reset flag sau khi cleanup xong
+        self.is_stopping = False
     
     # --- PCD Processing Functions ---
     def merge_pcd_files(self, silent=False):
@@ -1645,11 +2431,16 @@ class BagMappingInterface:
             return False
     
     def _run_sc_core(self):
-        """Core logic của ScanContext tiling (đồng bộ) - sử dụng input từ hba_map"""
+        """Core logic của ScanContext tiling (đồng bộ) - sử dụng input từ hba_map với error handling tốt hơn"""
         hba_map_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "hba_map"
         merged_map_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "merged_map"
         sc_script = Path(__file__).parent.parent / "scripts" / "generate_fast_localization_map.py"
         output_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "fastloc_map"
+
+        # Kiểm tra script tồn tại
+        if not sc_script.exists():
+            self.add_log(self.translator.get('log.sc_script_not_found', '❌ ScanContext script not found: {path}').replace('{path}', str(sc_script)))
+            return False
 
         # Ưu tiên input từ hba_map, fallback về merged_map
         input_pcd = hba_map_dir / "merge_all_hba.pcd"
@@ -1660,37 +2451,222 @@ class BagMappingInterface:
                 self.add_log(self.translator.get('log.no_merged_pcd_found', '❌ No merged PCD files found'))
                 return False
 
+        # Validate input file
+        try:
+            file_size = input_pcd.stat().st_size
+            file_size_mb = file_size / (1024 * 1024)
+            
+            if file_size == 0:
+                self.add_log(self.translator.get('log.sc_input_empty', '❌ Input PCD file is empty'))
+                return False
+            
+            self.add_log(self.translator.get('log.sc_input_size', '📦 Input file size: {size:.2f} MB').replace('{size:.2f}', f'{file_size_mb:.2f}'))
+            
+            # Cảnh báo nếu file quá lớn (>1GB)
+            if file_size > 1024 * 1024 * 1024:
+                self.add_log(self.translator.get('log.sc_file_very_large', 
+                    '⚠️ Warning: Input file is very large ({size:.1f}GB). Processing may take a long time and use significant memory.').replace('{size:.1f}', f'{file_size_mb/1024:.1f}'))
+        except OSError as e:
+            self.add_log(self.translator.get('log.sc_cannot_read_input', '❌ Cannot read input file: {error}').replace('{error}', str(e)))
+            return False
+
+        # Kiểm tra memory trước khi chạy
+        try:
+            import psutil
+            memory = psutil.virtual_memory()
+            available_gb = memory.available / (1024**3)
+            
+            # Ước tính memory cần thiết: khoảng 3-5x file size
+            estimated_memory_gb = (file_size_mb / 1024) * 4
+            
+            if available_gb < estimated_memory_gb:
+                self.add_log(self.translator.get('log.sc_low_memory', 
+                    '⚠️ Warning: Available memory ({available:.1f}GB) may be insufficient for processing ({estimated:.1f}GB estimated).').replace('{available:.1f}', f'{available_gb:.1f}').replace('{estimated:.1f}', f'{estimated_memory_gb:.1f}'))
+        except ImportError:
+            # psutil không có, bỏ qua check
+            pass
+        except Exception as e:
+            self.add_log(f"⚠️ Warning: Cannot check memory: {e}")
+
         self.add_log("=" * 60)
         self.add_log(self.translator.get('log.sc_start', '🗺️ Preparing ScanContext map from {filename}...').replace('{filename}', input_pcd.name))
         self.add_log(f"📁 Input: {input_pcd.parent}")
         self.add_log(f"📁 Output: {output_dir}")
 
+        # Tạo output directory trước
         try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            self.add_log(self.translator.get('log.sc_cannot_create_output', '❌ Cannot create output directory: {error}').replace('{error}', str(e)))
+            return False
+
+        process = None
+        try:
+            # Tính toán timeout động: ít nhất 300s (5 phút), thêm 60s cho mỗi 100MB
+            base_timeout = 300
+            timeout_per_100mb = 60
+            dynamic_timeout = base_timeout + int((file_size_mb / 100) * timeout_per_100mb)
+            # Giới hạn timeout tối đa 3600s (1 giờ)
+            process_timeout = min(dynamic_timeout, 3600)
+            
+            self.add_log(self.translator.get('log.sc_timeout', '⏱️ Process timeout: {timeout}s').replace('{timeout}', str(process_timeout)))
+            
             cmd = (
                 f"python3 {sc_script} "
                 f"--input_pcd {input_pcd} "
                 f"--output_dir {output_dir} "
                 f"--strip_color --voxel_size 0.2 --tile_size 50.0"
             )
+            
+            self.add_log(self.translator.get('log.sc_running', '▶️ Running ScanContext script...'))
+            
             process = subprocess.Popen(
-                cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                cmd, 
+                shell=True, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True,
+                bufsize=1,
+                universal_newlines=True
             )
             
-            for line in iter(process.stdout.readline, ''):
-                if line:
-                    self.add_log(f"[ScanContext] {line.strip()}")
+            # Đọc output với timeout
+            output_lines = []
+            start_time = time.time()
             
-            process.wait()
+            while True:
+                # Kiểm tra timeout
+                elapsed = time.time() - start_time
+                if elapsed > process_timeout:
+                    self.add_log(self.translator.get('log.sc_timeout_reached', '❌ Process timeout reached ({timeout}s). Terminating...').replace('{timeout}', str(process_timeout)))
+                    try:
+                        if hasattr(os, 'setsid'):
+                            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                        else:
+                            process.terminate()
+                    except:
+                        pass
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            if hasattr(os, 'setsid'):
+                                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                            else:
+                                process.kill()
+                        except:
+                            pass
+                    return False
+                
+                # Đọc line với timeout ngắn
+                try:
+                    line = process.stdout.readline()
+                    if not line:
+                        # Process đã kết thúc
+                        break
+                    if line.strip():
+                        output_lines.append(line.strip())
+                        self.add_log(f"[ScanContext] {line.strip()}")
+                except Exception as e:
+                    self.add_log(f"⚠️ Error reading output: {e}")
+                    break
             
-            if process.returncode == 0:
+            # Đợi process kết thúc
+            try:
+                return_code = process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.add_log(self.translator.get('log.sc_process_hanging', '⚠️ Process seems to be hanging, forcing termination...'))
+                try:
+                    if hasattr(os, 'setsid'):
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    else:
+                        process.kill()
+                except:
+                    pass
+                return False
+            
+            # Kiểm tra exit code
+            if return_code == 0:
+                # Validate output
+                index_file = output_dir / "index.json"
+                if not index_file.exists():
+                    self.add_log(self.translator.get('log.sc_no_index_file', '⚠️ Process completed but index.json not found'))
+                    return False
+                
+                # Đếm số tile files - tiles được lưu trong thư mục con "pcd"
+                tiles_dir = output_dir / "pcd"
+                if tiles_dir.exists():
+                    tile_files = list(tiles_dir.glob("*.pcd"))
+                else:
+                    # Fallback: tìm trong output_dir trực tiếp (cho tương thích ngược)
+                    tile_files = list(output_dir.glob("*.pcd"))
+                
+                if len(tile_files) == 0:
+                    self.add_log(self.translator.get('log.sc_no_tiles', '⚠️ Process completed but no tile files found'))
+                    # Log thêm thông tin để debug
+                    if tiles_dir.exists():
+                        self.add_log(f"   Checked directory: {tiles_dir}")
+                        all_files = list(tiles_dir.glob("*"))
+                        if all_files:
+                            self.add_log(f"   Found {len(all_files)} files in pcd directory (but no .pcd files)")
+                    return False
+                
+                self.add_log("=" * 60)
                 self.add_log(self.translator.get('log.sc_success', '✅ ScanContext Tiling successful!'))
                 self.add_log(f"📁 Output: {output_dir}")
+                self.add_log(self.translator.get('log.sc_tiles_created', '📊 Tiles created: {count}').replace('{count}', str(len(tile_files))))
+                self.add_log("=" * 60)
                 return True
             else:
-                self.add_log(self.translator.get('log.sc_failed', '❌ Tiling failed with code {code}').replace('{code}', str(process.returncode)))
+                # Process failed
+                error_msg = self.translator.get('log.sc_failed', '❌ Tiling failed with code {code}').replace('{code}', str(return_code))
+                self.add_log(error_msg)
+                
+                # Log last few lines of output để debug
+                if output_lines:
+                    self.add_log(self.translator.get('log.sc_last_output', 'Last output lines:'))
+                    for line in output_lines[-10:]:
+                        self.add_log(f"   {line}")
+                
                 return False
+                
+        except subprocess.TimeoutExpired:
+            self.add_log(self.translator.get('log.sc_timeout_error', '❌ Process timeout'))
+            if process:
+                try:
+                    if hasattr(os, 'setsid'):
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    else:
+                        process.kill()
+                except:
+                    pass
+            return False
+        except KeyboardInterrupt:
+            self.add_log(self.translator.get('log.sc_interrupted', '⚠️ Process interrupted by user'))
+            if process:
+                try:
+                    if hasattr(os, 'setsid'):
+                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                    else:
+                        process.terminate()
+                except:
+                    pass
+            return False
         except Exception as e:
-            self.add_log(self.translator.get('log.sc_error', '❌ ScanContext error: {error}').replace('{error}', str(e)))
+            error_msg = self.translator.get('log.sc_error', '❌ ScanContext error: {error}').replace('{error}', str(e))
+            self.add_log(error_msg)
+            import traceback
+            self.add_log(f"   Details: {traceback.format_exc()[:500]}")
+            
+            # Cleanup process nếu còn chạy
+            if process:
+                try:
+                    if hasattr(os, 'setsid'):
+                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                    else:
+                        process.terminate()
+                except:
+                    pass
             return False
     
     def _generate_floorplan(self):
@@ -1901,50 +2877,284 @@ class BagMappingInterface:
             self.add_log(f"   Details: {traceback.format_exc()}")
             return None
     
-    def _upload_map_to_backend(self, zip_path: Path):
-        """Upload file zip map lên backend."""
+    def _upload_map_to_backend(self, zip_path: Path, map_name: str, vehicle_id: str):
+        """Upload file zip map lên backend với retry mechanism và error handling tốt hơn."""
         if not REQUESTS_AVAILABLE:
             msg = self.translator.get('log.upload_backend_requests_missing', 'Missing requests library. Install with: pip install requests')
             self.add_log(f"❌ {msg}")
             return False, msg
         
         zip_path = Path(zip_path)
+        
+        # Validate file tồn tại và có thể đọc được
         if not zip_path.exists():
             error_msg = self.translator.get('log.upload_backend_file_not_found', 'File not found: {path}').replace('{path}', str(zip_path))
+            self.add_log(f"❌ {error_msg}")
+            return False, error_msg
+        
+        # Kiểm tra file size để tránh upload file quá lớn hoặc rỗng
+        try:
+            file_size = zip_path.stat().st_size
+            file_size_mb = file_size / (1024 * 1024)
+            
+            if file_size == 0:
+                error_msg = self.translator.get('log.upload_file_empty', 'File is empty: {path}').replace('{path}', str(zip_path))
+                self.add_log(f"❌ {error_msg}")
+                return False, error_msg
+            
+            # Cảnh báo nếu file quá lớn (>500MB)
+            if file_size > 500 * 1024 * 1024:
+                self.add_log(self.translator.get('log.upload_file_large', 
+                    '⚠️ Warning: File is very large ({size:.1f}MB). Upload may take a long time.').replace('{size:.1f}', f'{file_size_mb:.1f}'))
+            
+            self.add_log(self.translator.get('log.upload_file_size', 
+                '📦 File size: {size:.2f} MB').replace('{size:.2f}', f'{file_size_mb:.2f}'))
+        except OSError as e:
+            error_msg = self.translator.get('log.upload_cannot_read_file', 
+                'Cannot read file: {error}').replace('{error}', str(e))
+            self.add_log(f"❌ {error_msg}")
             return False, error_msg
         
         upload_url = f"{self.backend_base_url.rstrip('/')}/api/v1/maps/upload"
         self.add_log(self.translator.get('log.upload_endpoint', '🌐 Endpoint: {url}').replace('{url}', upload_url))
+        self.add_log(f"📝 Metadata: map_name='{map_name}', vehicle_id='{vehicle_id}'")
         
+        # Tính toán timeout động: ít nhất 60s, thêm 30s cho mỗi 10MB
+        base_timeout = 60
+        timeout_per_10mb = 30
+        dynamic_timeout = base_timeout + int((file_size_mb / 10) * timeout_per_10mb)
+        # Giới hạn timeout tối đa 600s (10 phút) để tránh chờ quá lâu
+        upload_timeout = min(dynamic_timeout, 600)
+        self.add_log(self.translator.get('log.upload_timeout', 
+            '⏱️ Upload timeout: {timeout}s').replace('{timeout}', str(upload_timeout)))
+        
+        # Retry configuration
+        max_retries = 3
+        retry_delays = [2, 5, 10]  # Exponential backoff: 2s, 5s, 10s
+        
+        # Tạo session để reuse connection và cải thiện performance
+        session = None
         try:
-            with open(zip_path, "rb") as f:
-                files = {"file": (zip_path.name, f, "application/zip")}
-                response = requests.post(upload_url, files=files, timeout=120)
+            session = requests.Session()
+            # Tăng connection pool size
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=1,
+                pool_maxsize=1,
+                max_retries=0  # Tự quản lý retry
+            )
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
             
-            if response.status_code in (200, 201):
-                upload_id = None
+            # Retry loop
+            last_error = None
+            for attempt in range(max_retries):
+                if attempt > 0:
+                    delay = retry_delays[min(attempt - 1, len(retry_delays) - 1)]
+                    self.add_log(self.translator.get('log.upload_retry', 
+                        '🔄 Retrying upload (attempt {attempt}/{max}) after {delay}s...').replace('{attempt}', str(attempt + 1)).replace('{max}', str(max_retries)).replace('{delay}', str(delay)))
+                    time.sleep(delay)
+                
                 try:
-                    data = response.json()
-                    upload_id = data.get("upload_id") or data.get("uploadId")
-                except Exception:
-                    upload_id = None
-                return True, upload_id
+                    # Sử dụng streaming upload để tránh load toàn bộ file vào memory
+                    # Điều này giúp tránh crash với file lớn
+                    self.add_log(self.translator.get('log.upload_starting', 
+                        '📤 Starting upload (attempt {attempt}/{max})...').replace('{attempt}', str(attempt + 1)).replace('{max}', str(max_retries)))
+                    
+                    start_time = time.time()
+                    
+                    # Mở file với context manager để đảm bảo đóng đúng cách
+                    with open(zip_path, "rb") as f:
+                        files = {"file": (zip_path.name, f, "application/zip")}
+                        
+                        # Upload với timeout và streaming
+                        response = session.post(
+                            upload_url,
+                            data={
+                                "map_name": map_name,
+                                "vehicle_id": vehicle_id
+                            },
+                            files=files,
+                            timeout=(10, upload_timeout),  # (connect timeout, read timeout)
+                            stream=False  # False để đảm bảo upload hoàn tất
+                        )
+                    
+                    upload_duration = time.time() - start_time
+                    upload_speed_mbps = (file_size_mb / upload_duration) if upload_duration > 0 else 0
+                    
+                    self.add_log(self.translator.get('log.upload_completed', 
+                        '✅ Upload completed in {duration:.1f}s ({speed:.2f} MB/s)').replace('{duration:.1f}', f'{upload_duration:.1f}').replace('{speed:.2f}', f'{upload_speed_mbps:.2f}'))
+                    
+                    # Validate response
+                    if response.status_code in (200, 201):
+                        upload_id = None
+                        try:
+                            data = response.json()
+                            upload_id = data.get("upload_id") or data.get("uploadId") or data.get("id")
+                            
+                            if upload_id:
+                                self.add_log(self.translator.get('log.upload_success_with_id', 
+                                    '✅ Upload successful! Upload ID: {id}').replace('{id}', str(upload_id)))
+                            else:
+                                self.add_log(self.translator.get('log.upload_success_no_id', 
+                                    '✅ Upload successful! (No upload ID in response)'))
+                        except (ValueError, KeyError) as e:
+                            # Response không phải JSON hoặc không có upload_id
+                            self.add_log(self.translator.get('log.upload_success_invalid_response', 
+                                '⚠️ Upload successful but response format unexpected: {error}').replace('{error}', str(e)))
+                            upload_id = None
+                        
+                        return True, upload_id
+                    
+                    # Non-200 response - không retry cho client errors (4xx)
+                    if 400 <= response.status_code < 500:
+                        error_text = response.text.strip()[:500] if response.text else f"HTTP {response.status_code}"
+                        error_msg = self.translator.get('log.upload_client_error', 
+                            '❌ Client error (HTTP {code}): {error}').replace('{code}', str(response.status_code)).replace('{error}', error_text)
+                        self.add_log(error_msg)
+                        return False, error_text
+                    
+                    # Server errors (5xx) - có thể retry
+                    if 500 <= response.status_code < 600:
+                        error_text = response.text.strip()[:500] if response.text else f"HTTP {response.status_code}"
+                        last_error = f"Server error (HTTP {response.status_code}): {error_text}"
+                        self.add_log(f"⚠️ {last_error}")
+                        # Tiếp tục retry loop
+                        continue
+                    
+                    # Unknown status code
+                    error_text = response.text.strip()[:500] if response.text else f"HTTP {response.status_code}"
+                    last_error = f"Unexpected status code {response.status_code}: {error_text}"
+                    self.add_log(f"⚠️ {last_error}")
+                    # Tiếp tục retry loop
+                    continue
+                
+                except requests.exceptions.Timeout as e:
+                    last_error = self.translator.get('log.upload_timeout_error', 
+                        'Upload timeout after {timeout}s').replace('{timeout}', str(upload_timeout))
+                    self.add_log(f"⚠️ {last_error}")
+                    # Retry nếu chưa hết số lần thử
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return False, last_error
+                
+                except requests.exceptions.ConnectionError as e:
+                    last_error = self.translator.get('log.upload_connection_error', 
+                        'Connection error: {error}').replace('{error}', str(e))
+                    self.add_log(f"⚠️ {last_error}")
+                    # Retry nếu chưa hết số lần thử
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return False, last_error
+                
+                except requests.exceptions.RequestException as e:
+                    last_error = self.translator.get('log.upload_request_error', 
+                        'Request error: {error}').replace('{error}', str(e))
+                    self.add_log(f"⚠️ {last_error}")
+                    # Retry nếu chưa hết số lần thử
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return False, last_error
+                
+                except IOError as e:
+                    # File I/O error - không retry
+                    error_msg = self.translator.get('log.upload_io_error', 
+                        'File I/O error: {error}').replace('{error}', str(e))
+                    self.add_log(f"❌ {error_msg}")
+                    return False, error_msg
+                
+                except Exception as e:
+                    # Unexpected error
+                    error_msg = self.translator.get('log.upload_unexpected_error', 
+                        'Unexpected error: {error}').replace('{error}', str(e))
+                    self.add_log(f"❌ {error_msg}")
+                    import traceback
+                    self.add_log(f"   Details: {traceback.format_exc()[:500]}")
+                    # Retry nếu chưa hết số lần thử
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return False, error_msg
             
-            # Non-200 response
-            error_text = response.text.strip()[:200] if response.text else f"status {response.status_code}"
-            return False, error_text
+            # Tất cả retry đã thất bại
+            final_error = self.translator.get('log.upload_all_retries_failed', 
+                'All retry attempts failed. Last error: {error}').replace('{error}', str(last_error))
+            self.add_log(f"❌ {final_error}")
+            return False, last_error or "Unknown error"
         
-        except requests.exceptions.RequestException as e:
-            return False, str(e)
+        finally:
+            # Đảm bảo đóng session
+            if session:
+                try:
+                    session.close()
+                except:
+                    pass
     
     def stop_process(self):
+        # Đánh dấu đang dừng từ STOP button
+        self.is_stopping = True
         self.cleanup_processes()
         self.btn_start.config(state=tk.NORMAL)
-        self.progress['value'] = 0
-        self.status_label.config(text=self.translator.get('label.status_stopped', 'Status: Stopped'))
+        self.set_progress(0)
         self.add_log(self.translator.get('log.process_terminated', 'PROCESS: Mapping and Upload terminated.'))
+        # Flag sẽ được reset trong cleanup_processes()
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = BagMappingInterface(root)
-    root.mainloop()
+    app = None
+    try:
+        # Khởi tạo root window trước
+        root = tk.Tk()
+        
+        # Thử khởi tạo ứng dụng với error handling tốt hơn
+        try:
+            app = BagMappingInterface(root)
+        except Exception as e:
+            print(f"Error initializing BagMappingInterface: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Hiển thị error dialog nếu có thể
+            try:
+                import tkinter.messagebox as mb
+                mb.showerror(
+                    "Initialization Error",
+                    f"Failed to initialize application:\n\n{str(e)}\n\n"
+                    "Some features may be disabled. Check console for details."
+                )
+            except:
+                pass
+            
+            # Vẫn chạy mainloop để không crash hoàn toàn
+            # Nhưng ứng dụng có thể không hoạt động đầy đủ
+            root.destroy()
+            sys.exit(1)
+        
+        # Cleanup function khi đóng window
+        def on_closing():
+            if app:
+                app.log_update_thread_running = False
+            root.destroy()
+        
+        root.protocol("WM_DELETE_WINDOW", on_closing)
+        
+        # Chạy main loop với error handling
+        try:
+            root.mainloop()
+        except KeyboardInterrupt:
+            print("\nApplication interrupted by user")
+        except Exception as e:
+            print(f"Error in main loop: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # Cleanup threads
+            if app:
+                app.log_update_thread_running = False
+    
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

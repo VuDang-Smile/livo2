@@ -11,6 +11,12 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Always escalate to sudo/root if not already
+if [ "$EUID" -ne 0 ]; then
+    echo "[INFO] Requesting sudo privileges..."
+    exec sudo "$0" "$@"
+fi
+
 # Print functions
 print_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
@@ -195,18 +201,21 @@ update_hosts() {
     
     print_info "Updating /etc/hosts..."
     
-    # Remove old entries for backend.lidar.tm, frontend.lidar.tm and lidar.tm
+    # Remove old entries for backend.lidar.tm, frontend.lidar.tm, storage.lidar.tm and lidar.tm
     sed -i '/backend\.lidar\.tm/d' /etc/hosts
     sed -i '/frontend\.lidar\.tm/d' /etc/hosts
+    sed -i '/storage\.lidar\.tm/d' /etc/hosts
     sed -i '/lidar\.tm/d' /etc/hosts
     
     # Add new entries for both domains pointing to same IP
     echo "$ip    frontend.lidar.tm" >> /etc/hosts
     echo "$ip    backend.lidar.tm" >> /etc/hosts
+    echo "$ip    storage.lidar.tm" >> /etc/hosts
     
     print_success "Updated /etc/hosts:"
     print_info "  frontend.lidar.tm -> $ip"
     print_info "  backend.lidar.tm -> $ip"
+    print_info "  storage.lidar.tm -> $ip"
 }
 
 # Main function

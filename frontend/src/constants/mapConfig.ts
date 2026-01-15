@@ -1,9 +1,14 @@
+import {
+  MAP_FLOORPLAN_IMAGE_URLS,
+  MAP_FLOORPLAN_METADATA_URL,
+} from '../config/dataSources';
 /**
  * Configuration for 2D map
  * Includes URL of map image and world bounds for coordinate mapping
  */
 
-export const MAP_2D_IMAGE_URL = '/2Dmap.png';
+// Ảnh 2D mặc định dùng view top từ floorplan thực tế
+export const MAP_2D_IMAGE_URL = MAP_FLOORPLAN_IMAGE_URLS.top;
 
 /**
  * World bounds for mapping coordinates from 3D world space to 2D canvas
@@ -32,37 +37,56 @@ export function getBackendUrl(): string {
 }
 
 /**
- * Build URL for map image based on upload_id and view
+ * Get MQTT WebSocket URL based on current hostname
  */
-export function getMapImageUrl(uploadId: string, view: 'top' | 'side_x' | 'side_y'): string {
-  const backendUrl = getBackendUrl();
-  return `${backendUrl}/maps/${uploadId}/images/${view}`;
+export function getMQTTWebSocketUrl(): string {
+  const { protocol, host } = window.location;
+
+  // Use secure WebSocket when running over HTTPS, otherwise use plain WS.
+  const wsProtocol = protocol === 'https:' ? 'wss' : 'ws';
+
+  // Always connect to the same host as the frontend (domain hoặc IP),
+  // đi qua nginx reverse proxy tại đường dẫn /mqtt.
+  // Ví dụ:
+  //   http://frontend.lidar.tm -> ws://frontend.lidar.tm/mqtt
+  //   https://frontend.lidar.tm -> wss://frontend.lidar.tm/mqtt
+  //   http://192.168.x.x -> ws://192.168.x.x/mqtt
+  return `${wsProtocol}://${host}/mqtt`;
+}
+
+/**
+ * Build URL for map image based on view
+ * Sử dụng URL thực tế từ storage (uploadId hiện tại không dùng)
+ */
+export function getMapImageUrl(uploadId: string | undefined, view: 'top' | 'side_x' | 'side_y'): string {
+  return MAP_FLOORPLAN_IMAGE_URLS[view];
 }
 
 /**
  * Build URL for map metadata JSON
+ * Sử dụng URL thực tế từ storage
  */
 export function getMapMetadataUrl(uploadId: string): string {
-  const backendUrl = getBackendUrl();
-  return `${backendUrl}/maps/${uploadId}/metadata`;
+  return MAP_FLOORPLAN_METADATA_URL;
 }
 
 /**
  * Get current map from backend
+ * @deprecated hiện tại sử dụng metadata/floorplan từ storage.lidar.tm
  */
-export async function getCurrentMap(): Promise<any> {
-  const backendUrl = getBackendUrl();
-  const response = await fetch(`${backendUrl}/maps/current`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to get current map: ${response.statusText}`);
-  }
-  
-  return await response.json();
-}
+// export async function getCurrentMap(): Promise<any> {
+//   const backendUrl = getBackendUrl();
+//   const response = await fetch(`${backendUrl}/maps/current`, {
+//     method: 'GET',
+//     headers: {
+//       'Content-Type': 'application/json',
+//     },
+//   });
+//   
+//   if (!response.ok) {
+//     throw new Error(`Failed to get current map: ${response.statusText}`);
+//   }
+//   
+//   return await response.json();
+// }
 
