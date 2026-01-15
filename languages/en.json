@@ -105,7 +105,11 @@
         "continue_anyway": "Continue anyway?",
         "low_memory": "System memory is very low ({percent}% used, {available:.1f}GB available). This may cause crashes.",
         "low_disk_space": "Disk space is very low ({percent}% used, {free:.1f}GB free). This may cause crashes.",
-        "bag_missing_topics": "Bag file is missing required topics: {topics}\n\nThis may cause the mapping process to crash."
+        "bag_missing_topics": "Bag file is missing required topics: {topics}\n\nThis may cause the mapping process to crash.",
+        "please_enter_display_name": "Please enter a Display Name",
+        "registered_successfully": "Registered '{name}' successfully!",
+        "registration_error": "Status: {status_code}\n{response_text}",
+        "connection_error": "Connection error to {endpoint}:\n{error}"
     },
     "button": {
         "cancel": "Cancel",
@@ -450,6 +454,7 @@
         "mapping_crashed_title": "Mapping Process Crashed",
         "mapping_crashed_message": "The mapping process has crashed!",
         "error_type": "Error Type",
-        "exit_code": "Exit Code"
+        "exit_code": "Exit Code",
+        "connection_error": "Connection Error"
     }
 }

@@ -105,7 +105,11 @@
         "continue_anyway": "それでも続行しますか？",
         "low_memory": "システムメモリが非常に低いです（{percent}%使用中、{available:.1f}GB利用可能）。クラッシュの原因となる可能性があります。",
         "low_disk_space": "ディスク容量が非常に低いです（{percent}%使用中、{free:.1f}GB空き）。クラッシュの原因となる可能性があります。",
-        "bag_missing_topics": "バッグファイルに必要なトピックがありません: {topics}\n\nこれによりマッピングプロセスがクラッシュする可能性があります。"
+        "bag_missing_topics": "バッグファイルに必要なトピックがありません: {topics}\n\nこれによりマッピングプロセスがクラッシュする可能性があります。",
+        "please_enter_display_name": "表示名を入力してください",
+        "registered_successfully": "'{name}' の登録が成功しました！",
+        "registration_error": "ステータス: {status_code}\n{response_text}",
+        "connection_error": "{endpoint} への接続エラー:\n{error}"
     },
     "button": {
         "cancel": "キャンセル",
@@ -455,6 +459,7 @@
         "mapping_crashed_title": "マッピングプロセスクラッシュ",
         "mapping_crashed_message": "マッピングプロセスがクラッシュしました！",
         "error_type": "エラータイプ",
-        "exit_code": "終了コード"
+        "exit_code": "終了コード",
+        "connection_error": "接続エラー"
     }
 }
