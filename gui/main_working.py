@@ -1699,7 +1699,6 @@ class WorkerInterface:
                 self.log(self.translator.get('log.stopping_theta_driver', '🛑 Stopping Theta driver...'))
                 if hasattr(self.theta_driver, 'stop_all'):
                     self.theta_driver.stop_all()
-                    self.log(self.translator.get('log.theta_driver_stopped', '✅ Theta driver stopped'))
                 else:
                     # Fallback: kill process trực tiếp
                     if hasattr(self.theta_driver, 'theta_driver_process') and \
@@ -1710,7 +1709,58 @@ class WorkerInterface:
                         except:
                             if self.theta_driver.theta_driver_process:
                                 self.theta_driver.theta_driver_process.kill()
-                        self.log(self.translator.get('log.theta_driver_stopped', '✅ Theta driver stopped'))
+                    
+                    # Kill camera_info_publisher nếu có
+                    if hasattr(self.theta_driver, 'camera_info_publisher_process') and \
+                       self.theta_driver.camera_info_publisher_process:
+                        try:
+                            self.theta_driver.camera_info_publisher_process.terminate()
+                            self.theta_driver.camera_info_publisher_process.wait(timeout=3)
+                        except:
+                            if self.theta_driver.camera_info_publisher_process:
+                                self.theta_driver.camera_info_publisher_process.kill()
+                
+                # Kill các ROS node của theta driver bằng pkill và ros2 node kill
+                self.log(self.translator.get('log.killing_theta_nodes', '🔍 Killing theta driver ROS nodes...'))
+                try:
+                    # Kill bằng pkill
+                    subprocess.run(
+                        ['pkill', '-f', 'theta_driver_node'],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=3
+                    )
+                    
+                    subprocess.run(
+                        ['pkill', '-f', 'camera_info_publisher_node'],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=3
+                    )
+                    
+                    # Kill bằng ros2 node kill (nếu có ROS2 environment)
+                    try:
+                        ros2_setup = "/opt/ros/jazzy/setup.bash"
+                        ws_setup = str(self.workspace_path / "install" / "setup.sh")
+                        
+                        if os.path.exists(ros2_setup) and os.path.exists(ws_setup):
+                            kill_cmd = f"source {ros2_setup} && source {ws_setup} && ros2 node list | grep -E 'theta_driver|camera_info_publisher' | xargs -r ros2 node kill"
+                            subprocess.run(
+                                kill_cmd,
+                                shell=True,
+                                executable="/bin/bash",
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                timeout=5
+                            )
+                    except:
+                        pass  # Ignore nếu không có ROS2 environment
+                    
+                    self.log(self.translator.get('log.theta_nodes_killed', '✅ All theta driver nodes killed'))
+                except Exception as e:
+                    self.log(f"⚠️ Error killing theta nodes: {e}")
+                
+                self.log(self.translator.get('log.theta_driver_stopped', '✅ Theta driver stopped'))
             except Exception as e:
                 self.log(f"⚠️ Error stopping Theta driver: {e}")
         
