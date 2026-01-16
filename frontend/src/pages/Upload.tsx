@@ -17,8 +17,9 @@ import { useMapInfo } from '../hooks/api/useMapInfo';
 import { useQRCodes } from '../hooks/api/useQRCodes';
 import { MapMetadata, CoordinateSystemConfig } from '../types/mapMetadata';
 import { transformPoseToPixel, pixelToWorld } from '../utils/coordinateTransform';
-import { getPCDRotation, transformWorldToScene } from '../utils/coordinateTransformer';
+import { getPCDRotation, transformWorldToScene, transformSceneToWorld } from '../utils/coordinateTransformer';
 import { MAP_FLOORPLAN_METADATA_URL } from '../config/dataSources';
+import { extract2DFrom3DScene, convert2DTo3DScene, convert2DTo3DObject, extract2DFrom3DWorld } from '../utils/qrCoordinateHelper';
 
 // Component cho đường hầm (copy từ VehicleMap)
 const Tunnel: React.FC = () => {
@@ -1024,30 +1025,75 @@ const Upload: React.FC = () => {
   const handleMapPositionPick = (pos: [number, number]) => {
     if (!pickingRowId) return;
 
+    // pos is in world coordinates (from pixelToWorld conversion)
+    // Get surface from existing data if available
+    let surface: 'floor' | 'ceiling' | 'left' | 'right' = 'floor';
+    
+    // Check if we're editing an existing row
+    const editingRow = editingRows.find(r => r.tempId === pickingRowId);
+    if (editingRow && editingRow.surface) {
+      surface = editingRow.surface;
+    }
+    
+    // Check if we're editing an existing QR code
+    const editingQR = editingExistingQRCodes.get(pickingRowId);
+    if (editingQR && editingQR.surface) {
+      surface = editingQR.surface;
+    }
+    
+    // Convert 2D world position to 3D scene coordinates (our standard)
+    const position3D = convert2DTo3DScene(pos, surface, mapMetadata, 'top');
+
     // Kiểm tra xem pickingRowId có trong editingRows không
     const isEditingRow = editingRows.some(r => r.tempId === pickingRowId);
     if (isEditingRow) {
       handleEditRowChange(pickingRowId, 'position', pos);
+      // Update position3D and surface information
+      setEditingRows(rows => rows.map(row => row.tempId === pickingRowId ? {
+        ...row,
+        surface,
+        position3D
+      } : row));
       return;
     }
 
     // Kiểm tra xem pickingRowId có trong editingExistingQRCodes không
     if (editingExistingQRCodes.has(pickingRowId)) {
       handleUpdateQRPosition(pickingRowId, pos);
+      // Update position3D and surface information
+      setEditingExistingQRCodes(prev => {
+        const next = new Map(prev);
+        const current = next.get(pickingRowId);
+        if (current) {
+          next.set(pickingRowId, {
+            ...current,
+            surface,
+            position3D
+          });
+        }
+        return next;
+      });
+      // Also update previewQRCodes to show it immediately
+      setPreviewQRCodes(qrs => qrs.map(qr => qr.id === pickingRowId ? {
+        ...qr,
+        surface,
+        position3D
+      } : qr));
       return;
     }
   };
 
   const handleMap3DPositionPick = (pos: [number, number, number], surface: 'floor' | 'ceiling' | 'left' | 'right') => {
-    console.log(`🎯 handleMap3DPositionPick called with:`, pos, `surface: ${surface}`, `pickingRowId: ${pickingRowId}`);
+    console.log(`🎯 handleMap3DPositionPick called with (scene coords):`, pos, `surface: ${surface}`, `pickingRowId: ${pickingRowId}`);
 
     if (!pickingRowId) {
       console.log('⚠️ pickingRowId is null');
       return;
     }
 
-    // Convert 3D position to 2D (X, Z plane)
-    const pos2D: [number, number] = [pos[0], pos[2]];
+    // pos is already in scene coordinates (Three.js) - this is our standard
+    // Extract 2D position from 3D scene coordinates (convert scene -> world -> 2D)
+    const pos2D: [number, number] = extract2DFrom3DScene(pos, mapMetadata, 'top');
     console.log(`🎯 Converted to 2D: [${pos2D[0].toFixed(2)}, ${pos2D[1].toFixed(2)}] on surface: ${surface}`);
 
     // Kiểm tra xem pickingRowId có trong editingRows không
@@ -1057,11 +1103,11 @@ const Upload: React.FC = () => {
     if (isEditingRow) {
       console.log(`✅ Updating editing row ${pickingRowId}`);
       handleEditRowChange(pickingRowId, 'position', pos2D);
-      // Update position3D and surface information
+      // Update position3D and surface information (use scene coordinates as standard)
       setEditingRows(rows => rows.map(row => row.tempId === pickingRowId ? {
         ...row,
         surface,
-        position3D: pos
+        position3D: pos // Store scene coordinates directly
       } : row));
       return;
     }
@@ -1073,7 +1119,7 @@ const Upload: React.FC = () => {
     if (isExistingQR) {
       console.log(`✅ Updating existing QR ${pickingRowId}`);
       handleUpdateQRPosition(pickingRowId, pos2D);
-      // Update position3D and surface information
+      // Update position3D and surface information (use scene coordinates as standard)
       setEditingExistingQRCodes(prev => {
         const next = new Map(prev);
         const current = next.get(pickingRowId);
@@ -1081,7 +1127,7 @@ const Upload: React.FC = () => {
           next.set(pickingRowId, {
             ...current,
             surface,
-            position3D: pos
+            position3D: pos // Store scene coordinates directly
           });
         }
         return next;
@@ -1090,7 +1136,7 @@ const Upload: React.FC = () => {
       setPreviewQRCodes(qrs => qrs.map(qr => qr.id === pickingRowId ? {
         ...qr,
         surface,
-        position3D: pos
+        position3D: pos // Store scene coordinates directly
       } : qr));
       return;
     }
@@ -1298,7 +1344,20 @@ const Upload: React.FC = () => {
     // Load QR codes from API (already fetched by useQRCodes hook)
     // Refresh QR codes when loading ZIP to ensure latest data
     if (apiQRCodes.length > 0) {
-      setPreviewQRCodes(apiQRCodes);
+      // Convert QR codes from API (world coordinates) to scene coordinates (our standard)
+      const coordinateConfig = mapMetadata?.coordinate_system;
+      const convertedQRCodes = apiQRCodes.map(qr => {
+        if (qr.position3D) {
+          // Convert world coordinates to scene coordinates
+          const scenePos3D = transformWorldToScene(qr.position3D, coordinateConfig);
+          return {
+            ...qr,
+            position3D: scenePos3D
+          };
+        }
+        return qr;
+      });
+      setPreviewQRCodes(convertedQRCodes);
     } else if (!isLoadingQRCodes && !qrCodesError) {
       // If no QR codes and not loading, try to refetch
       refetchQRCodes();
@@ -1306,7 +1365,7 @@ const Upload: React.FC = () => {
 
     // Map info is now loaded automatically via useMapInfo hook
     // No need to manually set it here
-  }, [apiQRCodes, isLoadingQRCodes, qrCodesError, refetchQRCodes]);
+  }, [apiQRCodes, isLoadingQRCodes, qrCodesError, refetchQRCodes, mapMetadata]);
 
   const loadLastZip = useCallback(() => {
     if (isLoadingLastZip) return; // Tránh race/đúp click
@@ -1360,9 +1419,22 @@ const Upload: React.FC = () => {
   // Auto-sync QR codes from API when available (only if previewQRCodes is empty)
   useEffect(() => {
     if (apiQRCodes.length > 0 && previewQRCodes.length === 0 && !isLoadingQRCodes) {
-      setPreviewQRCodes(apiQRCodes);
+      // Convert QR codes from API (world coordinates) to scene coordinates (our standard)
+      const coordinateConfig = mapMetadata?.coordinate_system;
+      const convertedQRCodes = apiQRCodes.map(qr => {
+        if (qr.position3D) {
+          // Convert world coordinates to scene coordinates
+          const scenePos3D = transformWorldToScene(qr.position3D, coordinateConfig);
+          return {
+            ...qr,
+            position3D: scenePos3D
+          };
+        }
+        return qr;
+      });
+      setPreviewQRCodes(convertedQRCodes);
     }
-  }, [apiQRCodes, previewQRCodes.length, isLoadingQRCodes]);
+  }, [apiQRCodes, previewQRCodes.length, isLoadingQRCodes, mapMetadata]);
 
   useEffect(() => {
     if (pickingRowId) {
@@ -1378,37 +1450,6 @@ const Upload: React.FC = () => {
     const pins: ManualPin[] = [];
 
     const viewMeta = mapMetadata?.views?.top;
-    const projection = viewMeta?.projection.world_axes;
-    const toPosition3D = (pair: [number, number]): { x: number; y: number; z: number } => {
-      const base = { x: 0, y: 0, z: 0 };
-      if (!projection) {
-        return { x: pair[0], y: 0, z: pair[1] };
-      }
-      const setAxis = (axis: 'X' | 'Y' | 'Z', val: number) => {
-        switch (axis) {
-          case 'X': base.x = val; break;
-          case 'Y': base.y = val; break;
-          case 'Z': base.z = val; break;
-          default: break;
-        }
-      };
-      setAxis(projection.horizontal, pair[0]);
-      setAxis(projection.vertical, pair[1]);
-      return base;
-    };
-
-    const extractPair = (pos3d: { x: number; y: number; z: number }): [number, number] => {
-      if (!projection) return [pos3d.x, pos3d.z];
-      const getAxis = (axis: 'X' | 'Y' | 'Z') => {
-        switch (axis) {
-          case 'X': return pos3d.x;
-          case 'Y': return pos3d.y;
-          case 'Z': return pos3d.z;
-          default: return 0;
-        }
-      };
-      return [getAxis(projection.horizontal), getAxis(projection.vertical)];
-    };
 
     const buildPin = (id: string, label: string | undefined, worldPair: [number, number], position3D?: { x: number; y: number; z: number }, isDraft = false, isActive = false): ManualPin => {
       let pixelPosition: [number, number] | undefined;
@@ -1422,7 +1463,7 @@ const Upload: React.FC = () => {
             orientation: { x: 0, y: 0, z: 0, w: 1 },
           }
           : {
-            position: toPosition3D(worldPair),
+            position: convert2DTo3DObject(worldPair, 'floor', mapMetadata, 'top'),
             orientation: { x: 0, y: 0, z: 0, w: 1 },
           };
         const pixel = transformPoseToPixel(pose, mapMetadata!, 'top', process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEBUG_LOGS === '1');
@@ -1449,26 +1490,40 @@ const Upload: React.FC = () => {
     previewQRCodes
       .filter(qr => !deletedQRCodeIds.has(qr.id))
       .forEach(qr => {
-        const pos3d = qr.position3D
+        // position3D is now in scene coordinates (our standard)
+        // If not available, convert from 2D world position to scene coordinates
+        const scenePos3d = qr.position3D
           ? { x: qr.position3D[0], y: qr.position3D[1], z: qr.position3D[2] }
-          : { x: qr.position[0], y: 0, z: qr.position[1] };
+          : convert2DTo3DObject(qr.position, qr.surface || 'floor', mapMetadata, 'top');
 
         // Kiểm tra xem QR này có đang được chỉnh sửa không
         const editedQR = editingExistingQRCodes.get(qr.id);
-        const worldPair = editedQR ? editedQR.position : extractPair(pos3d);
+        
+        // Extract 2D world position from scene coordinates
+        const worldPair = editedQR 
+          ? editedQR.position 
+          : extract2DFrom3DScene([scenePos3d.x, scenePos3d.y, scenePos3d.z], mapMetadata, 'top');
         const isBeingEdited = !!editedQR;
 
-        // Use edited 3D position if available, otherwise original 3D position
+        // Use edited 3D position if available (in scene coordinates), otherwise original
         const effectivePos3D = editedQR && editedQR.position3D ?
           { x: editedQR.position3D[0], y: editedQR.position3D[1], z: editedQR.position3D[2] } :
-          (editedQR ? toPosition3D(editedQR.position) : pos3d);
+          (editedQR ? convert2DTo3DObject(editedQR.position, editedQR.surface || 'floor', mapMetadata, 'top') : scenePos3d);
+        
+        // Convert scene coordinates to world coordinates for transformPoseToPixel
+        const coordinateConfig = mapMetadata?.coordinate_system;
+        const worldPos3D = transformSceneToWorld(
+          [effectivePos3D.x, effectivePos3D.y, effectivePos3D.z],
+          coordinateConfig
+        );
+        const worldPos3DObject = { x: worldPos3D[0], y: worldPos3D[1], z: worldPos3D[2] };
 
         pins.push(
           buildPin(
             qr.id,
             qr.code,
             worldPair,
-            effectivePos3D,
+            worldPos3DObject, // Use world coordinates for transformPoseToPixel
             false,
             isBeingEdited || pickingRowId === qr.id
           )
@@ -1483,14 +1538,25 @@ const Upload: React.FC = () => {
         ? `TM:${String(parseInt(row.codeIndex, 10)).padStart(3, '0')}`
         : undefined;
 
+      // row.position3D is in scene coordinates (our standard)
+      const scenePos3D = row.position3D
+        ? { x: row.position3D[0], y: row.position3D[1], z: row.position3D[2] }
+        : convert2DTo3DObject(row.position, row.surface || 'floor', mapMetadata, 'top');
+      
+      // Convert scene coordinates to world coordinates for transformPoseToPixel
+      const coordinateConfig = mapMetadata?.coordinate_system;
+      const worldPos3D = transformSceneToWorld(
+        [scenePos3D.x, scenePos3D.y, scenePos3D.z],
+        coordinateConfig
+      );
+      const worldPos3DObject = { x: worldPos3D[0], y: worldPos3D[1], z: worldPos3D[2] };
+
       pins.push(
         buildPin(
           row.tempId,
           normalizedIndex,
           row.position,
-          row.position3D
-            ? { x: row.position3D[0], y: row.position3D[1], z: row.position3D[2] }
-            : toPosition3D(row.position),
+          worldPos3DObject, // Use world coordinates for transformPoseToPixel
           true,
           row.tempId === pickingRowId
         )
@@ -1503,17 +1569,24 @@ const Upload: React.FC = () => {
   // Convert 2D QR pins to 3D markers for 3D view
   const qrMarkers3D = useMemo<Array<{ position: [number, number, number]; id: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>>(() => {
     const markers: Array<{ position: [number, number, number]; id: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }> = [];
+    const coordinateConfig = mapMetadata?.coordinate_system;
 
     // Add saved QR codes
     previewQRCodes
       .filter(qr => !deletedQRCodeIds.has(qr.id))
       .forEach(qr => {
-        const pos3d = qr.position3D || [qr.position[0], 0, qr.position[1]] as [number, number, number];
+        const surface = qr.surface || 'floor';
+        // position3D is now in scene coordinates (our standard)
+        // If not available, convert from 2D world position to scene coordinates
+        const scenePos3d: [number, number, number] = qr.position3D 
+          ? qr.position3D
+          : convert2DTo3DScene(qr.position, surface, mapMetadata, 'top');
+        
         markers.push({
-          position: pos3d,
+          position: scenePos3d, // Use scene coordinates directly
           id: qr.id,
           isActive: pickingRowId === qr.id,
-          surface: qr.surface || 'floor'
+          surface
         });
       });
 
@@ -1522,12 +1595,14 @@ const Upload: React.FC = () => {
       const [x, z] = row.position;
       if (isNaN(x) || isNaN(z)) return;
 
-      const pos3d: [number, number, number] = row.position3D
+      const surface = row.surface || 'floor';
+      // row.position3D is in scene coordinates (our standard)
+      const scenePos3d: [number, number, number] = row.position3D
         ? row.position3D
-        : [x, row.surface === 'ceiling' ? 8 : (row.surface === 'left' || row.surface === 'right') ? 3 : -2, z];
+        : convert2DTo3DScene(row.position, surface, mapMetadata, 'top');
 
       markers.push({
-        position: pos3d,
+        position: scenePos3d, // Use scene coordinates directly
         id: row.tempId,
         isActive: row.tempId === pickingRowId,
         surface: row.surface || 'floor'
@@ -1536,7 +1611,7 @@ const Upload: React.FC = () => {
 
     console.log(`📍 qrMarkers3D updated: ${markers.length} markers`, markers);
     return markers;
-  }, [previewQRCodes, editingRows, deletedQRCodeIds, pickingRowId]);
+  }, [previewQRCodes, editingRows, deletedQRCodeIds, pickingRowId, mapMetadata]);
 
   return (
     <div className="space-y-6">
