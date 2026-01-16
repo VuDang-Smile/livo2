@@ -1813,7 +1813,7 @@ const Upload: React.FC = () => {
         {/* PCD & Image Preview */}
         <div className="lg:col-span-2 space-y-6">
           {/* Toggle Buttons for 2D/3D Preview */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 h-[70vh] min-h-[400px] flex flex-col">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 h-[78vh] min-h-[520px] flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900">
                 {previewMode === '2d' ? t('upload_image_preview_title') : t('upload_pcd_preview_title')}
@@ -1939,7 +1939,7 @@ const Upload: React.FC = () => {
         </div>
 
         {/* QRCode list */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 h-[70vh] min-h-[400px] flex flex-col">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 h-[78vh] min-h-[520px] flex flex-col">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-gray-900">
               {t('upload_qr_list_title')}
