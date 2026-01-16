@@ -1806,14 +1806,14 @@ const Upload: React.FC = () => {
         </div>
       </div>
       {/* Introduction Card */}
-      <IntroCard />
+      {/* <IntroCard /> */}
 
       {/* Section 2 & 3: Preview PCD/Image + QR codes */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* PCD & Image Preview */}
         <div className="lg:col-span-2 space-y-6">
           {/* Toggle Buttons for 2D/3D Preview */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 h-[70vh] min-h-[400px] flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900">
                 {previewMode === '2d' ? t('upload_image_preview_title') : t('upload_pcd_preview_title')}
@@ -1868,9 +1868,7 @@ const Upload: React.FC = () => {
             {previewMode === '2d' && (
               <div
                 ref={mapCardRef}
-                className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative`}
-                // Commented out: 2D picking ring - no longer used
-                // className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative ${isPickingPosition ? 'ring-2 ring-blue-500 z-50' : ''}`}
+                className={`flex-1 border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative`}
               >
                 <Image2DPreview
                   vehicles={previewVehicles}
@@ -1904,7 +1902,7 @@ const Upload: React.FC = () => {
 
             {/* 3D Preview */}
             {previewMode === '3d' && (
-              <div className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative ${isPickingPosition3D ? 'ring-2 ring-blue-500 z-50' : ''}`}>
+              <div className={`flex-1 border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative ${isPickingPosition3D ? 'ring-2 ring-blue-500 z-50' : ''}`}>
                 <Canvas
                   camera={{ position: [0, 10, 20], fov: 60 }}
                   style={{ height: '100%' }}
@@ -1941,7 +1939,7 @@ const Upload: React.FC = () => {
         </div>
 
         {/* QRCode list */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 h-[70vh] min-h-[400px] flex flex-col">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-gray-900">
               {t('upload_qr_list_title')}
@@ -1980,7 +1978,7 @@ const Upload: React.FC = () => {
               </div>
             </div>
           )}
-          <div className="border border-gray-200 rounded-lg overflow-hidden">
+          <div className="border border-gray-200 rounded-lg overflow-auto flex-1">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
