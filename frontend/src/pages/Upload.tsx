@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, TransformControls } from '@react-three/drei';
+import { OrbitControls, TransformControls, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { Edit, Trash2, Grid3x3, ImageIcon, Maximize2, X, CheckCircle2, XCircle, Info, AlertCircle } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -200,11 +200,12 @@ const PreviewMarker3D: React.FC<{
 const QRMarker3D: React.FC<{
   position: [number, number, number];
   id: string;
+  label?: string;
   isActive?: boolean;
   surface?: 'floor' | 'ceiling' | 'left' | 'right';
   onSelect?: (id: string) => void;
   onMount?: (id: string, mesh: THREE.Mesh | null) => void;
-}> = ({ position, id, isActive = false, surface = 'floor', onSelect, onMount }) => {
+}> = ({ position, id, label, isActive = false, surface = 'floor', onSelect, onMount }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
   // Calculate rotation based on surface
@@ -283,6 +284,21 @@ const QRMarker3D: React.FC<{
         distance={3}
         color={isActive ? '#3b82f6' : '#93c5fd'}
       />
+
+      {/* Label text above the marker */}
+      {label && (
+        <Text
+          position={[0, 1.5, 0]}
+          fontSize={0.5}
+          color={isActive ? '#3b82f6' : '#ffffff'}
+          anchorX="center"
+          anchorY="middle"
+          outlineWidth={0.02}
+          outlineColor="#000000"
+        >
+          {label}
+        </Text>
+      )}
     </group>
   );
 };
@@ -403,7 +419,7 @@ const PCDPreview3D: React.FC<{
   pcdUrl?: string | null;
   mapMetadata?: MapMetadata | null;
   isPickingMode?: boolean;
-  qrMarkers?: Array<{ position: [number, number, number]; id: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>;
+  qrMarkers?: Array<{ position: [number, number, number]; id: string; label?: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>;
   onPositionPick?: (position: [number, number, number], surface: 'floor' | 'ceiling' | 'left' | 'right') => void;
   previewPosition?: [number, number, number] | null;
   onPreviewPositionUpdate?: (position: [number, number, number] | null) => void;
@@ -458,6 +474,7 @@ const PCDPreview3D: React.FC<{
           key={marker.id}
           position={marker.position}
           id={marker.id}
+          label={marker.label}
           isActive={marker.isActive}
           surface={marker.surface || 'floor'}
         />
@@ -875,7 +892,7 @@ const Upload: React.FC = () => {
   const [editingRows, setEditingRows] = useState<EditingRow[]>([]);
   const [nextTempId, setNextTempId] = useState<number>(1);
   // State để chuyển đổi giữa 2D và 3D preview
-  const [previewMode, setPreviewMode] = useState<'2d' | '3d'>('2d');
+  const [previewMode, setPreviewMode] = useState<'2d' | '3d'>('3d');
   // State để fullscreen preview
   const [isFullscreenPreview, setIsFullscreenPreview] = useState(false);
   // State để track preview position saat picking
@@ -1704,8 +1721,8 @@ const Upload: React.FC = () => {
   }, [previewQRCodes, editingRows, editingExistingQRCodes, deletedQRCodeIds, pickingRowId, mapMetadata]);
 
   // Convert 2D QR pins to 3D markers for 3D view
-  const qrMarkers3D = useMemo<Array<{ position: [number, number, number]; id: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>>(() => {
-    const markers: Array<{ position: [number, number, number]; id: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }> = [];
+  const qrMarkers3D = useMemo<Array<{ position: [number, number, number]; id: string; label?: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>>(() => {
+    const markers: Array<{ position: [number, number, number]; id: string; label?: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }> = [];
     const coordinateConfig = mapMetadata?.coordinate_system;
 
     // Add saved QR codes
@@ -1719,9 +1736,13 @@ const Upload: React.FC = () => {
           ? qr.position3D
           : convert2DTo3DScene(qr.position, surface, mapMetadata, 'top');
         
+        // Get label from QR code
+        const label = qr.code;
+        
         markers.push({
           position: scenePos3d, // Use scene coordinates directly
           id: qr.id,
+          label,
           isActive: pickingRowId === qr.id,
           surface
         });
@@ -1738,9 +1759,15 @@ const Upload: React.FC = () => {
         ? row.position3D
         : convert2DTo3DScene(row.position, surface, mapMetadata, 'top');
 
+      // Get label from codeIndex if available
+      const label = row.codeIndex && /^\d+$/.test(row.codeIndex)
+        ? `TM:${String(parseInt(row.codeIndex, 10)).padStart(3, '0')}`
+        : undefined;
+
       markers.push({
         position: scenePos3d, // Use scene coordinates directly
         id: row.tempId,
+        label,
         isActive: row.tempId === pickingRowId,
         surface: row.surface || 'floor'
       });
