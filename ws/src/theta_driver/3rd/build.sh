@@ -29,7 +29,9 @@ while [ $# -gt 0 ]; do
         *)
             echo "Unknown argument: $1"
             echo ""
-            read -p "Press Enter to exit..."
+            if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+                read -p "Press Enter to exit..."
+            fi
             exit 2
             ;;
     esac
@@ -48,14 +50,18 @@ echo "Install prefix: $INSTALL_PREFIX"
 if [ ! -d "$LIBUVC_THETA_DIR" ]; then
     echo "Error: libuvc-theta directory not found at: $LIBUVC_THETA_DIR"
     echo ""
-    read -p "Press Enter to exit..."
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        read -p "Press Enter to exit..."
+    fi
     exit 1
 fi
 
 if [ ! -d "$LIBUVC_THETA_SAMPLE_DIR" ]; then
     echo "Error: libuvc-theta-sample directory not found at: $LIBUVC_THETA_SAMPLE_DIR"
     echo ""
-    read -p "Press Enter to exit..."
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        read -p "Press Enter to exit..."
+    fi
     exit 1
 fi
 
@@ -67,7 +73,9 @@ if ! command -v cmake &> /dev/null; then
     echo "Error: CMake not found. Please install cmake first."
     echo "  sudo apt update && sudo apt install -y cmake"
     echo ""
-    read -p "Press Enter to exit..."
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        read -p "Press Enter to exit..."
+    fi
     exit 1
 else
     echo "✓ CMake found: $(cmake --version | head -n1)"
@@ -78,7 +86,9 @@ if ! command -v make &> /dev/null; then
     echo "Error: Make not found. Please install build-essential first."
     echo "  sudo apt update && sudo apt install -y build-essential"
     echo ""
-    read -p "Press Enter to exit..."
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        read -p "Press Enter to exit..."
+    fi
     exit 1
 else
     echo "✓ Make found: $(make --version | head -n1)"
@@ -89,7 +99,9 @@ if ! command -v pkg-config &> /dev/null; then
     echo "Error: pkg-config not found. Please install pkg-config first."
     echo "  sudo apt update && sudo apt install -y pkg-config"
     echo ""
-    read -p "Press Enter to exit..."
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        read -p "Press Enter to exit..."
+    fi
     exit 1
 else
     echo "✓ pkg-config found: $(pkg-config --version)"
@@ -199,7 +211,9 @@ else
             echo "Error: gstreamer-app-1.0 not found via pkg-config."
             echo "  Please install: sudo apt install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev"
             echo ""
-            read -p "Press Enter to exit..."
+            if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+                read -p "Press Enter to exit..."
+            fi
             exit 1
         else
             echo "✓ gstreamer-app-1.0 found"
@@ -212,7 +226,9 @@ else
             echo "  This usually means libuvc-theta was not installed correctly."
             echo "  Please check the libuvc-theta installation above."
             echo ""
-            read -p "Press Enter to exit..."
+            if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+                read -p "Press Enter to exit..."
+            fi
             exit 1
         else
             echo "✓ libuvc found via pkg-config"
@@ -234,7 +250,9 @@ else
             echo "Error: Build failed with exit code $BUILD_EXIT_CODE"
             echo "Please check the error messages above."
             echo ""
-            read -p "Press Enter to exit..."
+            if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+                read -p "Press Enter to exit..."
+            fi
             exit 1
         fi
         
@@ -323,7 +341,9 @@ if [ "$VERIFY_SUCCESS" = true ]; then
     fi
     echo "=== Build completed successfully ==="
     echo ""
-    read -p "Press Enter to exit..."
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        read -p "Press Enter to exit..."
+    fi
     exit 0
 else
     echo "❌ BUILD RESULT: FAILED"
@@ -335,6 +355,8 @@ else
     echo "Please check the build process above."
     echo "=== Build failed ==="
     echo ""
-    read -p "Press Enter to exit..."
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        read -p "Press Enter to exit..."
+    fi
     exit 1
 fi

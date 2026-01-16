@@ -131,7 +131,7 @@ run_step() {
 }
 
 # Function to handle script that requires Enter press
-# This function runs script and automatically provides Enter when script succeeds
+# This function runs script and automatically skips "Press Enter" prompts via SKIP_EXIT_PROMPT
 run_step_with_auto_continue() {
     local step_name=$1
     local script_path=$2
@@ -157,29 +157,26 @@ run_step_with_auto_continue() {
     print_info "Running: ${script_path}"
     echo ""
     
-    # Run script with automatic Enter input for "Press Enter" prompts
-    # Use yes command to provide continuous empty input
-    # The scripts use "read -p" or "read -r" which will consume input from stdin
+    # Export SKIP_EXIT_PROMPT to skip "Press Enter to exit" prompts in child scripts
+    export SKIP_EXIT_PROMPT=1
+    
+    # Run script and capture exit code
+    # Scripts will check SKIP_EXIT_PROMPT and skip the "Press Enter" prompt
     local exit_code=0
     
-    # Use yes "" to provide continuous newlines for "Press Enter" prompts
     # Use timeout to prevent script from hanging indefinitely
     if command -v timeout >/dev/null 2>&1; then
-        # Use timeout with yes command to provide input
-        # yes "" generates infinite empty lines, timeout prevents hanging
-        # Run script and capture exit code properly
-        yes "" | timeout 3600 bash "${script_path}" 2>&1
-        exit_code=${PIPESTATUS[1]}
+        timeout 3600 bash "${script_path}" 2>&1
+        exit_code=$?
         # Check if timeout occurred (exit code 124)
         if [ $exit_code -eq 124 ]; then
             print_error "Script timed out after 1 hour"
             exit_code=1
         fi
     else
-        # Fallback: run without timeout, use yes to provide input
-        # Note: This may hang if script waits for input indefinitely
-        yes "" | bash "${script_path}" 2>&1
-        exit_code=${PIPESTATUS[1]}
+        # Fallback: run without timeout
+        bash "${script_path}" 2>&1
+        exit_code=$?
     fi
     
     # Check exit code
@@ -328,13 +325,14 @@ main() {
         chmod +x "${FIND_BACKEND_SCRIPT}"
         print_info "Running: ${FIND_BACKEND_SCRIPT}"
         echo ""
+        # Export SKIP_EXIT_PROMPT to skip "Press Enter to exit" prompts
+        export SKIP_EXIT_PROMPT=1
         # Run find_backend_lan.sh - it will request sudo itself
-        # Use yes to provide Enter input for "Press Enter to exit" prompts
-        if yes "" | bash "${FIND_BACKEND_SCRIPT}" 2>&1; then
+        if bash "${FIND_BACKEND_SCRIPT}" 2>&1; then
             print_success "LAN Backend Discovery completed successfully!"
             echo ""
         else
-            local exit_code=${PIPESTATUS[1]}
+            local exit_code=$?
             print_warning "LAN Backend Discovery completed with exit code: ${exit_code}"
             print_info "You can run this manually later with: sudo ./dependencies/find_backend_lan.sh"
             echo ""
