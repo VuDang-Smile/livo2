@@ -9,7 +9,7 @@ from app.config import settings
 from app.services.database_service import database_service
 from app.services.mqtt_service import mqtt_service
 from app.services.vehicle_status_service import vehicle_status_service
-from app.api import upload, vehicle, storage
+from app.api import upload, vehicle, qrcode
 
 # Configure logging
 logging.basicConfig(
@@ -140,7 +140,7 @@ app = FastAPI(
 # Include routers
 app.include_router(upload.router, prefix="/api/v1")
 app.include_router(vehicle.router, prefix="/api/v1")
-app.include_router(storage.router, prefix="/api/v1")
+app.include_router(qrcode.router, prefix="/api/v1")
 
 
 # Health check endpoints
