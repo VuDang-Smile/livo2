@@ -5,7 +5,6 @@ import * as THREE from 'three';
 import { Edit, Trash2, Grid3x3, ImageIcon, Maximize2, X, CheckCircle2, XCircle, Info, AlertCircle } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import type { VehicleCanvasPosition } from '../types/vehicle';
-import { MapInfo } from '../types/mapInfo';
 import { QRCodeInfo } from '../types/qrCode';
 import { EditingRow, ManualPin } from '../types/upload';
 import PCDMap from '../components/PCDMap';
@@ -13,7 +12,6 @@ import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { useMapImage } from '../hooks/useMapImage';
 import { MAP_2D_IMAGE_URL } from '../constants/mapConfig';
 import { getVehicle2DPosition } from '../utils/vehicle2DHelper';
-import { useMapInfo } from '../hooks/api/useMapInfo';
 import { useQRCodes } from '../hooks/api/useQRCodes';
 import { MapMetadata, CoordinateSystemConfig } from '../types/mapMetadata';
 import { transformPoseToPixel, pixelToWorld } from '../utils/coordinateTransform';
@@ -433,8 +431,6 @@ const PCDPreview3D: React.FC<{
         enableZoom={true}
         enableRotate={true}
         maxPolarAngle={Math.PI / 2}
-        minDistance={10}
-        maxDistance={200}
       />
 
       {/* Background color */}
@@ -766,117 +762,25 @@ const Image2DPreview: React.FC<{
   );
 };
 
-// Utility function: Format file size
-const formatFileSize = (bytes: number): string => {
-  if (bytes === 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-};
-
-// Utility function: Format datetime from YYYY-MM-DD HH:mm:ss to dd/MM/yyyy HH:mm:ss
-const formatDateTime = (dateTimeStr: string): string => {
-  try {
-    const [datePart, timePart] = dateTimeStr.split(' ');
-    const [year, month, day] = datePart.split('-');
-    return `${day}/${month}/${year} ${timePart || ''}`.trim();
-  } catch (error) {
-    return dateTimeStr; // Return original if parsing fails
-  }
-};
-
-// Component hiển thị thông tin map (info card style)
-const MapInfoCard: React.FC<{
-  mapInfo: MapInfo | null;
-  isLoading?: boolean;
-  error?: string | null;
-}> = ({ mapInfo, isLoading = false, error = null }) => {
+// Component hiển thị giới thiệu về màn hình QR Mapper
+const IntroCard: React.FC = () => {
   const { t } = useLanguage();
 
-  // Loading state
-  if (isLoading) {
-    return (
-      <div className="bg-blue-50 border-l-4 border-blue-500 rounded-md p-4">
-        <div className="flex items-start">
-          <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-blue-500 mt-0.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </div>
-          <div className="ml-3 flex-1">
-            <h3 className="text-sm font-medium text-blue-800 mb-3">
-              {t('map_info_title')}
-            </h3>
-            <p className="text-xs text-blue-600">{t('loading') || 'Loading...'}</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Error state
-  if (error) {
-    return (
-      <div className="bg-red-50 border-l-4 border-red-500 rounded-md p-4">
-        <div className="flex items-start">
-          <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-red-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div className="ml-3 flex-1">
-            <h3 className="text-sm font-medium text-red-800 mb-2">
-              {t('map_info_title')}
-            </h3>
-            <p className="text-xs text-red-700">
-              {t('error_loading_map_info') || 'Error loading map information'}: {error}
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // No data state
-  if (!mapInfo) {
-    return null;
-  }
-
-  // Success state - display map info
   return (
-    <div className="bg-blue-50 border-l-4 border-blue-500 rounded-md p-4">
+    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 rounded-md p-5 shadow-sm">
       <div className="flex items-start">
         <div className="flex-shrink-0">
-          <svg className="h-5 w-5 text-blue-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="h-6 w-6 text-blue-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </div>
-        <div className="ml-3 flex-1">
-          <h3 className="text-sm font-medium text-blue-800 mb-3">
-            {t('map_info_title')}
+        <div className="ml-4 flex-1">
+          <h3 className="text-base font-semibold text-blue-900 mb-2">
+            {t('upload_intro_title')}
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-xs text-blue-700">
-            <div>
-              <span className="font-medium">{t('map_name')}:</span>
-              <span className="ml-2">{mapInfo.name}</span>
-            </div>
-            <div>
-              <span className="font-medium">{t('map_created_at')}:</span>
-              <span className="ml-2">{formatDateTime(mapInfo.createdAt)}</span>
-            </div>
-            <div>
-              <span className="font-medium">{t('map_uploaded_by')}:</span>
-              <span className="ml-2">{mapInfo.uploadedBy}</span>
-            </div>
-            <div>
-              <span className="font-medium">{t('map_uploaded_at')}:</span>
-              <span className="ml-2">{formatDateTime(mapInfo.uploadedAt)}</span>
-            </div>
-            <div>
-              <span className="font-medium">{t('map_file_size')}:</span>
-              <span className="ml-2">{formatFileSize(mapInfo.fileSize)}</span>
-            </div>
-          </div>
+          <p className="text-sm text-blue-800 leading-relaxed">
+            {t('upload_intro_content')}
+          </p>
         </div>
       </div>
     </div>
@@ -923,8 +827,6 @@ const Upload: React.FC = () => {
   const [mapMetadata, setMapMetadata] = useState<MapMetadata | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState<boolean>(false);
   const [mapMetadataError, setMapMetadataError] = useState<string | null>(null);
-  // Fetch map info from storage using hook
-  const { mapInfo, isLoading: isLoadingMapInfo, error: mapInfoError } = useMapInfo();
   // Fetch QR codes from storage using hook
   const { qrCodes: apiQRCodes, isLoading: isLoadingQRCodes, error: qrCodesError, refetch: refetchQRCodes } = useQRCodes();
   // State quản lý các QR code đang được chỉnh sửa (từ previewQRCodes)
@@ -1903,12 +1805,8 @@ const Upload: React.FC = () => {
           )}
         </div>
       </div>
-      {/* Map Info Card */}
-      <MapInfoCard
-        mapInfo={mapInfo}
-        isLoading={isLoadingMapInfo}
-        error={mapInfoError}
-      />
+      {/* Introduction Card */}
+      <IntroCard />
 
       {/* Section 2 & 3: Preview PCD/Image + QR codes */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
