@@ -2,9 +2,11 @@
 import json
 import logging
 from typing import Optional, Dict, Any
-from datetime import datetime
+
 import paho.mqtt.client as mqtt
+
 from app.config import settings
+from app.utils.time import isoformat_utc
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +94,8 @@ class MQTTService:
         topic = f"{settings.MQTT_TOPIC_PREFIX}/{event}"
         payload = {
             "event": event,
-            "timestamp": datetime.utcnow().isoformat(),
+            # Canonical UTC ISO8601 timestamp with timezone
+            "timestamp": isoformat_utc(),
             **data
         }
         return self.publish(topic, payload)
@@ -104,7 +107,8 @@ class MQTTService:
             "event": "vehicle.pose.update",
             "vehicle_id": vehicle_id,
             "pose": pose,
-            "timestamp": datetime.utcnow().isoformat()
+            # Canonical UTC ISO8601 timestamp for the pose event
+            "timestamp": isoformat_utc()
         }
         return self.publish(topic, payload)
     

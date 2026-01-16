@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useMQTT } from '../../contexts/MQTTContext';
 import { useVehicleService } from '../api/useVehicleService';
-import { VehicleMarker3D } from '../../types/vehicle';
+import { VehicleMarker3D, ApiVehicle } from '../../types/vehicle';
 import { UseVehicleMarkers3DResult } from '../../types/monitoring';
 import { useMQTTPositionHandler } from '../shared/useMQTTPositionHandler';
 
@@ -25,7 +25,7 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Store vehicles from API for merging with MQTT updates
-  const [apiVehicles, setApiVehicles] = useState<Map<string, any>>(new Map());
+  const [apiVehicles, setApiVehicles] = useState<Map<string, ApiVehicle>>(new Map());
   
   const { lastPositionUpdate, lastVehicleStatus } = useMQTT();
   const { extractPose, isExcludedVehicle } = useMQTTPositionHandler();
@@ -41,11 +41,11 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
       const vehicles = await vehicleService.getVehicles();
       
       // Store all vehicles from API for merging
-      const vehiclesMap = new Map<string, any>();
+      const vehiclesMap = new Map<string, ApiVehicle>();
       const markers: VehicleMarker3D[] = [];
       
-      (Array.isArray(vehicles) ? vehicles : []).forEach((v: any) => {
-        const vehicleId = v.vehicle_id || String(v._id || v.id);
+      (Array.isArray(vehicles) ? vehicles : []).forEach((v: ApiVehicle) => {
+        const vehicleId = v.vehicle_id;
         
         // Skip excluded vehicles
         if (isExcludedVehicle(vehicleId)) {
@@ -56,25 +56,18 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
         vehiclesMap.set(vehicleId, v);
         
         // Create marker for all vehicles (even without position) to show in sidebar
-        let position: [number, number, number];
+        let position: [number, number, number] = [0, 0, 0];
         let orientation: [number, number, number, number] | undefined;
         let showOrientation = false;
 
-        if (v.current_pose?.position) {
-          const pos = v.current_pose.position;
+        if (v.latest_pose?.position) {
+          const pos = v.latest_pose.position;
           position = [pos.x, pos.y, pos.z];
-          if (v.current_pose.orientation) {
-            const orient = v.current_pose.orientation;
+          if (v.latest_pose.orientation) {
+            const orient = v.latest_pose.orientation;
             orientation = [orient.w, orient.x, orient.y, orient.z];
             showOrientation = true;
           }
-        } else if (v.current_position) {
-          const pos = v.current_position;
-          position = [pos.x, pos.y, pos.z];
-        } else {
-          // Vehicle exists in DB but has no position - use default position
-          // This ensures all vehicles from API are visible in sidebar
-          position = [0, 0, 0];
         }
 
         // Determine color based on status: green for online, red for offline
@@ -88,7 +81,8 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
           showOrientation,
           status: vehicleStatus,
           name: v.name || vehicleId,
-          type: v.vehicle_type || v.type || 'worker'
+          vehicleType: v.vehicle_type,
+          vehicleCategory: v.vehicle_category
         });
       });
       
@@ -157,7 +151,8 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
         showOrientation: positionData.showOrientation,
         status: 'online', // Position update means vehicle is online
         name: apiVehicle?.name || existingMarker?.name || vehicleId,
-        type: apiVehicle?.vehicle_type || apiVehicle?.type || existingMarker?.type || 'worker'
+        vehicleType: apiVehicle?.vehicle_type || existingMarker?.vehicleType || 'worker',
+        vehicleCategory: apiVehicle?.vehicle_category || existingMarker?.vehicleCategory
       };
       
       next.set(vehicleId, newMarker);
@@ -207,21 +202,18 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
         // Marker doesn't exist but coming online - create from API data
         const apiVehicle = apiVehicles.get(vehicleId);
         if (apiVehicle) {
-          let position: [number, number, number];
+          let position: [number, number, number] = [0, 0, 0];
           let orientation: [number, number, number, number] | undefined;
           let showOrientation = false;
 
-          if (apiVehicle.current_pose?.position) {
-            const pos = apiVehicle.current_pose.position;
+          if (apiVehicle.latest_pose?.position) {
+            const pos = apiVehicle.latest_pose.position;
             position = [pos.x, pos.y, pos.z];
-            if (apiVehicle.current_pose.orientation) {
-              const orient = apiVehicle.current_pose.orientation;
+            if (apiVehicle.latest_pose.orientation) {
+              const orient = apiVehicle.latest_pose.orientation;
               orientation = [orient.w, orient.x, orient.y, orient.z];
               showOrientation = true;
             }
-          } else if (apiVehicle.current_position) {
-            const pos = apiVehicle.current_position;
-            position = [pos.x, pos.y, pos.z];
           } else {
             // Use default position if no position data
             position = [0, 0, 0];
@@ -238,7 +230,8 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
             showOrientation,
             status: 'online',
             name: apiVehicle.name || vehicleId,
-            type: apiVehicle.vehicle_type || apiVehicle.type || 'worker'
+            vehicleType: apiVehicle.vehicle_type,
+            vehicleCategory: apiVehicle.vehicle_category
           };
           
           if (DEBUG) {

@@ -3,16 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useVehicleService } from '../hooks/api/useVehicleService';
-import { ApiVehicle } from '../types/vehicle';
-
-interface Vehicle {
-  id: string;
-  licensePlate: string;
-  driver: string;
-  vehicleType: string;
-  mission: string;
-  status: 'online' | 'offline';
-}
+import { ApiVehicle, VehicleFormData } from '../types/vehicle';
 
 const Vehicles: React.FC = () => {
   const { t } = useLanguage();
@@ -20,7 +11,7 @@ const Vehicles: React.FC = () => {
   const navigate = useNavigate();
   const vehicleService = useVehicleService();
   
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [vehicles, setVehicles] = useState<VehicleFormData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,15 +30,15 @@ const Vehicles: React.FC = () => {
         const apiVehicles = await vehicleService.getVehicles();
         
         // Map ApiVehicle to Vehicle UI format
-        const mappedVehicles: Vehicle[] = apiVehicles.map((apiVehicle: ApiVehicle) => {
-          const metadata = apiVehicle.metadata || {};
+        const mappedVehicles: VehicleFormData[] = apiVehicles.map((apiVehicle: ApiVehicle) => {
+          const metadata = (apiVehicle.metadata as any) || {};
           return {
             id: apiVehicle.vehicle_id,
             licensePlate: metadata.licensePlate || apiVehicle.vehicle_id,
             driver: metadata.driver || apiVehicle.name || t('not_given') || 'N/A',
-            vehicleType: apiVehicle.vehicle_type || apiVehicle.type || t('not_given') || 'N/A',
+            vehicleType: apiVehicle.vehicle_type || t('not_given') || 'N/A',
             mission: metadata.mission || apiVehicle.description || t('not_given') || 'N/A',
-            status: apiVehicle.status || 'offline'
+            status: apiVehicle.status || 'offline',
           };
         });
         

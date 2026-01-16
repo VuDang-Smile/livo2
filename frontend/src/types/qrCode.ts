@@ -16,6 +16,10 @@ export interface QRCodeInfo {
    * Vị trí 3D gốc từ data source (x, y, z) để transform chính xác bằng metadata
    */
   position3D?: [number, number, number];
+  /**
+   * Surface mà QR code được gắn vào (tunnel surface: floor, ceiling, left, right)
+   */
+  surface?: 'floor' | 'ceiling' | 'left' | 'right';
   isManual?: boolean; // Đánh dấu QR code được thêm thủ công
 }
 

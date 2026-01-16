@@ -320,33 +320,25 @@ main() {
     print_info "This step will help you find and configure the backend server in your LAN."
     print_info "It will scan the network and update /etc/hosts with frontend.lidar.tm and backend.lidar.tm"
     echo ""
-    read -p "Do you want to run LAN Backend Discovery now? (y/N): " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        if [ ! -f "${FIND_BACKEND_SCRIPT}" ]; then
-            print_error "Script not found: ${FIND_BACKEND_SCRIPT}"
-            OVERALL_SUCCESS=false
-            FAILED_STEPS+=("LAN Backend Discovery (script not found)")
-        else
-            chmod +x "${FIND_BACKEND_SCRIPT}"
-            print_info "Running: ${FIND_BACKEND_SCRIPT}"
-            echo ""
-            # Run find_backend_lan.sh - it will request sudo itself
-            # Use yes to provide Enter input for "Press Enter to exit" prompts
-            if yes "" | bash "${FIND_BACKEND_SCRIPT}" 2>&1; then
-                print_success "LAN Backend Discovery completed successfully!"
-                echo ""
-            else
-                local exit_code=${PIPESTATUS[1]}
-                print_warning "LAN Backend Discovery completed with exit code: ${exit_code}"
-                print_info "You can run this manually later with: sudo ./dependencies/find_backend_lan.sh"
-                echo ""
-            fi
-        fi
+    if [ ! -f "${FIND_BACKEND_SCRIPT}" ]; then
+        print_error "Script not found: ${FIND_BACKEND_SCRIPT}"
+        OVERALL_SUCCESS=false
+        FAILED_STEPS+=("LAN Backend Discovery (script not found)")
     else
-        print_info "Skipping LAN Backend Discovery setup."
-        print_info "You can run it manually later with: sudo ./dependencies/find_backend_lan.sh"
+        chmod +x "${FIND_BACKEND_SCRIPT}"
+        print_info "Running: ${FIND_BACKEND_SCRIPT}"
         echo ""
+        # Run find_backend_lan.sh - it will request sudo itself
+        # Use yes to provide Enter input for "Press Enter to exit" prompts
+        if yes "" | bash "${FIND_BACKEND_SCRIPT}" 2>&1; then
+            print_success "LAN Backend Discovery completed successfully!"
+            echo ""
+        else
+            local exit_code=${PIPESTATUS[1]}
+            print_warning "LAN Backend Discovery completed with exit code: ${exit_code}"
+            print_info "You can run this manually later with: sudo ./dependencies/find_backend_lan.sh"
+            echo ""
+        fi
     fi
     
     # Final summary

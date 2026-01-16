@@ -2,15 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useVehicleService } from '../hooks/api/useVehicleService';
-
-interface Vehicle {
-  id: string;
-  licensePlate: string;
-  driver: string;
-  vehicleType: string;
-  mission: string;
-  status: string;
-}
+import type { VehicleFormData, ApiVehicle } from '../types/vehicle';
 
 const EditVehicle: React.FC = () => {
   const navigate = useNavigate();
@@ -18,7 +10,7 @@ const EditVehicle: React.FC = () => {
   const { t } = useLanguage();
   const vehicleService = useVehicleService();
   
-  const [formData, setFormData] = useState<Vehicle>({
+  const [formData, setFormData] = useState<VehicleFormData>({
     id: '',
     licensePlate: '',
     driver: '',
@@ -72,15 +64,15 @@ const EditVehicle: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const apiVehicle = await vehicleService.getVehicleById(id);
+        const apiVehicle: ApiVehicle = await vehicleService.getVehicleById(id);
         
         // Map ApiVehicle to Vehicle form format
-        const metadata = apiVehicle.metadata || {};
+        const metadata = (apiVehicle.metadata as any) || {};
         setFormData({
           id: apiVehicle.vehicle_id,
           licensePlate: metadata.licensePlate || apiVehicle.vehicle_id,
           driver: metadata.driver || apiVehicle.name || '',
-          vehicleType: apiVehicle.vehicle_type || apiVehicle.type || '',
+          vehicleType: apiVehicle.vehicle_type || '',
           mission: metadata.mission || apiVehicle.description || '',
           status: apiVehicle.status || 'online'
         });

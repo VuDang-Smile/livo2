@@ -1,16 +1,16 @@
 /**
  * Vehicle Service
- * 
+ *
  * Chức năng: Quản lý các API calls liên quan đến vehicles
- * - Lấy danh sách vehicles (có thể filter theo type và status - client-side filtering)
+ * - Lấy danh sách vehicles
  * - Lấy thông tin vehicle theo ID
- * - Cập nhật vehicle status
- * 
+ * - Cập nhật vehicle status / info
+ *
  * Sử dụng: Trong các hook và component cần tương tác với vehicles
  * API Base: /api/v1/vehicles
  */
 
-import { ApiVehicle } from '../../types/vehicle';
+import { ApiVehicle, VehicleApi, VehiclesListApiResponse } from '../../types/vehicle';
 
 export interface FetchVehiclesParams {
   type?: 'scanner' | 'worker';
@@ -43,9 +43,9 @@ export class VehicleService {
   }
 
   /**
-   * Lấy danh sách vehicles với optional filters
-   * Backend trả về VehiclesListResponse: { vehicles: VehicleListItem[], total: number }
-   * 
+   * Lấy danh sách vehicles với optional filters.
+   * Backend trả về VehiclesListResponse: { vehicles: VehicleListItem[], total: number }.
+   *
    * Lưu ý: Backend hiện tại không hỗ trợ query parameters để filter.
    * Các query params sẽ bị ignore và API trả về tất cả vehicles.
    * Filter sẽ được thực hiện ở client side sau khi nhận dữ liệu.
@@ -59,44 +59,41 @@ export class VehicleService {
     
     const query = queryParams.toString();
     const endpoint = `/api/v1/vehicles${query ? `/?${query}` : ''}`;
-    
-    // Backend trả về VehiclesListResponse format
-    const response = await this.makeRequest<{ vehicles: any[]; total: number }>(endpoint);
-    
-    // Transform backend response to ApiVehicle format
-    let vehicles: ApiVehicle[] = response.vehicles.map((vehicle: any) => {
-      // Map latest_pose to current_pose format for compatibility
-      const current_pose = vehicle.latest_pose ? {
-        frame_id: 'map',
-        position: vehicle.latest_pose.position,
-        orientation: vehicle.latest_pose.orientation,
-        timestamp: vehicle.latest_pose.timestamp
-      } : undefined;
 
-      // Extract metadata fields if they exist
-      const metadata = vehicle.metadata || {};
-      
-      // Backend status là online/offline, giữ nguyên không cần map
-      const status = vehicle.status?.toLowerCase() === 'online' ? 'online' : 'offline';
-      
+    // Backend trả về VehiclesListResponse format
+    const response = await this.makeRequest<VehiclesListApiResponse>(endpoint);
+
+    // Transform backend response to ApiVehicle (VehicleApi) format
+    let vehicles: ApiVehicle[] = response.vehicles.map((vehicle: VehicleApi) => {
+      const status: 'online' | 'offline' =
+        vehicle.status?.toLowerCase() === 'online' ? 'online' : 'offline';
+
+      const latest_pose = vehicle.latest_pose
+        ? {
+            position: vehicle.latest_pose.position,
+            orientation: vehicle.latest_pose.orientation,
+            timestamp: vehicle.latest_pose.timestamp,
+          }
+        : undefined;
+
       return {
         vehicle_id: vehicle.vehicle_id,
         name: vehicle.name,
         description: vehicle.description,
-        type: vehicle.vehicle_type || 'worker',
-        type_category: vehicle.vehicle_type,
-        status: status as 'online' | 'offline',
-        current_pose,
-        metadata,
+        vehicle_type: vehicle.vehicle_type,
+        vehicle_category: vehicle.vehicle_category,
+        status,
+        metadata: vehicle.metadata,
+        latest_pose,
         created_at: vehicle.created_at,
-        updated_at: vehicle.updated_at || vehicle.latest_pose?.timestamp
-      } as ApiVehicle;
+        updated_at: vehicle.updated_at ?? vehicle.latest_pose?.timestamp,
+      };
     });
 
     // Client-side filtering vì backend không hỗ trợ query params
     if (params?.type) {
       vehicles = vehicles.filter((v: ApiVehicle) => 
-        (v.vehicle_type || v.type || '').toLowerCase() === params.type?.toLowerCase()
+        (v.vehicle_type || '').toLowerCase() === params.type?.toLowerCase()
       );
     }
     if (params?.status) {
@@ -113,31 +110,31 @@ export class VehicleService {
    * Backend trả về VehicleResponse format
    */
   async getVehicleById(vehicleId: string): Promise<ApiVehicle> {
-    const vehicle = await this.makeRequest<any>(`/api/v1/vehicles/${vehicleId}`);
-    
-    // Map latest_pose to current_pose format for compatibility
-    const current_pose = vehicle.latest_pose ? {
-      frame_id: 'map',
-      position: vehicle.latest_pose.position,
-      orientation: vehicle.latest_pose.orientation,
-      timestamp: vehicle.latest_pose.timestamp
-    } : undefined;
+    const vehicle = await this.makeRequest<VehicleApi>(`/api/v1/vehicles/${vehicleId}`);
 
-    // Backend status là online/offline, giữ nguyên không cần map
-    const status = vehicle.status?.toLowerCase() === 'online' ? 'online' : 'offline';
+    const status: 'online' | 'offline' =
+      vehicle.status?.toLowerCase() === 'online' ? 'online' : 'offline';
+
+    const latest_pose = vehicle.latest_pose
+      ? {
+          position: vehicle.latest_pose.position,
+          orientation: vehicle.latest_pose.orientation,
+          timestamp: vehicle.latest_pose.timestamp,
+        }
+      : undefined;
 
     return {
       vehicle_id: vehicle.vehicle_id,
       name: vehicle.name,
       description: vehicle.description,
-      type: vehicle.vehicle_type || 'worker',
-      type_category: vehicle.vehicle_type,
-      status: status as 'online' | 'offline',
-      current_pose,
-      metadata: vehicle.metadata || {},
+      vehicle_type: vehicle.vehicle_type,
+      vehicle_category: vehicle.vehicle_category,
+      status,
+      metadata: vehicle.metadata ?? {},
+      latest_pose,
       created_at: vehicle.created_at,
-      updated_at: vehicle.updated_at || vehicle.latest_pose?.timestamp
-    } as ApiVehicle;
+      updated_at: vehicle.updated_at ?? vehicle.latest_pose?.timestamp,
+    };
   }
 
   /**

@@ -9,7 +9,7 @@ import { PCDClipControls } from '../components/PCDClipControls';
 import { PointCloudBounds } from '../components/PCDMap';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { MapMetadata } from '../types/mapMetadata';
-import { Vehicle } from '../types/vehicleMap2D';
+import { MapVehicle } from '../types/vehicle';
 import VehicleStatusCard from '../components/vehicleMap/VehicleStatusCard';
 
 // Component chính cho trang
@@ -117,47 +117,65 @@ const VehicleMap: React.FC = () => {
     };
   }, []);
 
-  // Get vehicles for display based on view mode
-  const displayVehicles: Vehicle[] = useMemo(() => {
+  /**
+   * Merge vehicles từ nhiều nguồn để hiển thị trên map.
+   * 
+   * Strategy merge cho 2D mode:
+   * 1. Base data từ API (mapVehicles từ useVehicleMap2D):
+   *    - Chứa tất cả vehicles từ database với thông tin cơ bản (name, type, category)
+   *    - Position có thể cũ hoặc không có
+   * 
+   * 2. Real-time updates từ MQTT (markers2D từ useVehiclePose2D):
+   *    - Position được transform từ 3D pose → 2D pixel coordinates
+   *    - Timestamp mới nhất từ MQTT
+   *    - Overwrite position/timestamp của vehicles cùng ID
+   * 
+   * Kết quả: Danh sách vehicles đầy đủ từ API, với position real-time từ MQTT khi có.
+   */
+  const displayVehicles: MapVehicle[] = useMemo(() => {
     if (viewMode === '2D') {
-      // Merge vehicles from useVehiclePose2D (markers2D) and useVehicleMap2D (mapVehicles)
-      // This ensures we show all vehicles from API even if markers2D is empty
-      const vehiclesFromMarkers = markers2D.map(marker => ({
+      // Transform markers2D (VehicleMarker2D) → MapVehicle format
+      const vehiclesFromMarkers: MapVehicle[] = markers2D.map(marker => ({
         id: marker.id,
         name: marker.name || marker.label || marker.id,
-        type: marker.type,
-        status: marker.status || 'online' as const,
-        position: { 
-          x: marker.position[0], 
-          y: marker.position[1], 
-          z: marker.position[2] 
+        vehicleType: marker.vehicleType,
+        vehicleCategory: marker.vehicleCategory,
+        status: marker.status || 'online',
+        position: {
+          x: marker.position[0],
+          y: marker.position[1],
+          z: marker.position[2],
         },
         timestamp: marker.lastUpdate.toISOString(),
+        source: 'mqtt' as const, // Markers từ MQTT pose updates
       }));
       
-      // Merge with vehicles from useVehicleMap2D (from API)
-      const vehiclesMap = new Map<string, Vehicle>();
+      // Merge strategy: API base + MQTT real-time overwrite
+      const vehiclesMap = new Map<string, MapVehicle>();
       
-      // Add vehicles from mapVehicles first (from API)
+      // Step 1: Add all vehicles from API (base data - có thể thiếu position mới nhất)
       mapVehicles.forEach(vehicle => {
         vehiclesMap.set(vehicle.id, vehicle);
       });
       
-      // Then add/update with vehicles from markers2D (may have updated positions from MQTT)
+      // Step 2: Overwrite với real-time data từ MQTT (nếu có)
+      // Vehicles từ markers2D có position mới nhất từ MQTT, nên overwrite để ưu tiên real-time
       vehiclesFromMarkers.forEach(vehicle => {
-        vehiclesMap.set(vehicle.id, vehicle);
+        vehiclesMap.set(vehicle.id, vehicle); // Overwrite: MQTT data ưu tiên hơn API
       });
       
       return Array.from(vehiclesMap.values());
     } else {
       // Convert 3D markers to display format
-      return markers3D.map(marker => ({
+      return markers3D.map<MapVehicle>(marker => ({
         id: marker.id,
         name: marker.name || marker.id,
-        type: marker.type,
-        status: marker.status || 'online' as const,
+        vehicleType: marker.vehicleType,
+        vehicleCategory: marker.vehicleCategory,
+        status: marker.status || 'online',
         position: { x: marker.position[0], y: marker.position[1], z: marker.position[2] },
         timestamp: new Date().toISOString(),
+        source: 'mqtt' as const, // 3D markers cũng từ MQTT
       }));
     }
   }, [viewMode, markers2D, markers3D, mapVehicles]);
@@ -184,7 +202,7 @@ const VehicleMap: React.FC = () => {
     
     // Apply vehicle type filter
     if (filters.vehicleType !== 'all') {
-      result = result.filter(vehicle => (vehicle.type || 'unknown') === filters.vehicleType);
+      result = result.filter(vehicle => (vehicle.vehicleType || 'unknown') === filters.vehicleType);
     }
     
     return result;
@@ -219,7 +237,7 @@ const VehicleMap: React.FC = () => {
 
   const getUniqueValues = (key: 'status' | 'vehicleType') => {
     const values = displayVehicles.map(v =>
-      key === 'status' ? v.status : (v.type || 'unknown')
+      key === 'status' ? v.status : (v.vehicleType || 'unknown')
     );
     return ['all', ...Array.from(new Set(values))];
   };
@@ -512,7 +530,7 @@ const VehicleMap: React.FC = () => {
                         <div className="text-sm text-gray-600 space-y-1">
                           <p>
                             <span className="font-medium">{t('type_label')}</span>{' '}
-                            {vehicle.type || t('vehicle_type_unknown')}
+                            {vehicle.vehicleType || t('vehicle_type_unknown')}
                           </p>
                           <p><span className="font-medium">{t('status_label_short')}</span> 
                             <span className={`ml-1 ${

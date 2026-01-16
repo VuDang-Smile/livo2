@@ -9,7 +9,7 @@
  */
 
 import { MapInfo, MapInfoApiResponse } from '../../types/mapInfo';
-import { formatISOToDisplay } from '../../utils/dateFormatters';
+import { formatISOToLocalDisplay } from '../../utils/dateFormatters';
 
 export class MapInfoService {
   constructor(private metadataUrl: string) {
@@ -66,14 +66,14 @@ export class MapInfoService {
       throw new Error('Invalid size_bytes: must be a number');
     }
 
-    const nowFormatted = formatISOToDisplay(new Date().toISOString());
+    const nowFormatted = formatISOToLocalDisplay(new Date().toISOString());
 
     return {
       id: data.vehicle_id || 'unknown',
       name: data.map_name || 'Unknown Map',
-      createdAt: data.created_at ? formatISOToDisplay(data.created_at) : nowFormatted,
+      createdAt: data.created_at ? formatISOToLocalDisplay(data.created_at) : nowFormatted,
       uploadedBy: data.vehicle_name || 'Unknown',
-      uploadedAt: data.uploaded_at ? formatISOToDisplay(data.uploaded_at) : nowFormatted,
+      uploadedAt: data.uploaded_at ? formatISOToLocalDisplay(data.uploaded_at) : nowFormatted,
       fileSize: data.size_bytes || 0,
     };
   }
