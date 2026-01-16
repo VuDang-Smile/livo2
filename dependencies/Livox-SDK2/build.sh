@@ -46,7 +46,9 @@ if ls "$INSTALL_PREFIX"/lib/liblivox_lidar_sdk_* >/dev/null 2>&1; then
     echo "✅ STATUS: Livox-SDK2 already installed - No need to rebuild"
     echo "=== Script completed successfully ==="
     echo ""
-    read -p "Press Enter to exit..."
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        read -p "Press Enter to exit..."
+    fi
     exit 0
 fi
 
@@ -150,7 +152,9 @@ if [ "$VERIFY_SUCCESS" = true ]; then
     echo "Livox-SDK2 is ready to use at: $INSTALL_PREFIX"
     echo "=== Build completed successfully ==="
     echo ""
-    read -p "Press Enter to exit..."
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        read -p "Press Enter to exit..."
+    fi
     exit 0
 else
     echo "❌ VERIFY RESULT: FAILED"
@@ -162,6 +166,8 @@ else
     echo "Please check the build and installation process."
     echo "=== Build failed ==="
     echo ""
-    read -p "Press Enter to exit..."
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        read -p "Press Enter to exit..."
+    fi
     exit 1
 fi
