@@ -13,7 +13,7 @@ export const PCD_SOURCE_URL =
  * URL metadata JSON cho floorplan 2D (top/side_x)
  */
 export const MAP_FLOORPLAN_METADATA_URL =
-  'http://storage.lidar.tm/floorplan_2d/merge_all_rotated_metadata.json';
+  'http://storage.lidar.tm/floorplan_2d/merged_all_rotated_metadata.json';
 
 /**
  * URL metadata JSON cho thông tin bản đồ hiện tại (map info)
@@ -34,8 +34,8 @@ export const MAP_FLOORPLAN_IMAGE_URLS: Record<
   'top' | 'side_x',
   string
 > = {
-  top: 'http://storage.lidar.tm/floorplan_2d/merge_all_rotated_top.png',
-  side_x: 'http://storage.lidar.tm/floorplan_2d/merge_all_rotated_side_x.png',
+  top: 'http://storage.lidar.tm/floorplan_2d/merged_all_rotated_top.png',
+  side_x: 'http://storage.lidar.tm/floorplan_2d/merged_all_rotated_side_x.png',
 };
 
 /**

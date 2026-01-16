@@ -257,9 +257,9 @@ def pcd_to_2_views(
         invert_colors=invert_colors,
     )
 
-    # ===== View SIDE_X (YZ, trục chiếu: X) =====
+    # ===== View SIDE_X (XZ, trục chiếu: Y) – đổi sang chiếu theo trục Y cho đúng side_y =====
     side_x_data = _make_occupancy_image(
-        u=y,
+        u=x,
         v=z,
         resolution=resolution,
         border_margin=border_margin,
@@ -342,20 +342,20 @@ def pcd_to_2_views(
             "side_x": {
                 "id": "side_x",
                 "projection": {
-                    "axis": "X",
-                    "plane": "YZ",
+                    "axis": "Y",
+                    "plane": "XZ",
                     "world_axes": {
-                        "horizontal": "Y",
+                        "horizontal": "X",
                         "vertical": "Z",
                     },
                     "image_axes": {
-                        "x_direction": "+Y",
+                        "x_direction": "+X",
                         "y_direction": "-Z",
                     },
                 },
                 "bounds": {
                     "world": {
-                        "Y": {
+                        "X": {
                             "min": float(side_x_data["bounds_world"]["u_min"]),
                             "max": float(side_x_data["bounds_world"]["u_max"]),
                         },
@@ -373,8 +373,8 @@ def pcd_to_2_views(
                 "orientation": {
                     "source_frame": "base_link",
                     "forward_vector_in_body": [1.0, 0.0, 0.0],
-                    "plane": "YZ",
-                    "world_u_axis": "Y",
+                    "plane": "XZ",
+                    "world_u_axis": "X",
                     "world_v_axis": "Z",
                     "image_mapping": {
                         "u_to_image_x": 1.0,
