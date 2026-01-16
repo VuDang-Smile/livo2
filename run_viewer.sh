@@ -1,61 +1,61 @@
 #!/bin/bash
-# Script helper để chạy Theta Viewer GUI
+# Script helper to run Theta Viewer GUI
 
-# Lấy đường dẫn script
+# Get script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Source ROS2
 if [ -f /opt/ros/jazzy/setup.bash ]; then
     source /opt/ros/jazzy/setup.bash
 else
-    echo "Cảnh báo: Không tìm thấy ROS2 Jazzy tại /opt/ros/jazzy/setup.bash"
-    echo "Vui lòng cài đặt ROS2 Jazzy hoặc điều chỉnh đường dẫn"
+    echo "Warning: ROS2 Jazzy not found at /opt/ros/jazzy/setup.bash"
+    echo "Please install ROS2 Jazzy or adjust the path"
 fi
 
-# Source drive_ws (cho livox_ros_driver2)
+# Source drive_ws (for livox_ros_driver2)
 if [ -f "$SCRIPT_DIR/dependencies/drive_ws/install/setup.sh" ]; then
     source "$SCRIPT_DIR/dependencies/drive_ws/install/setup.sh"
-    echo "Đã source dependencies/drive_ws/install/setup.sh (livox_ros_driver2)"
+    echo "Sourced dependencies/drive_ws/install/setup.sh (livox_ros_driver2)"
 else
-    echo "Cảnh báo: Không tìm thấy dependencies/drive_ws/install/setup.sh"
-    echo "Vui lòng build drive_ws trước"
+    echo "Warning: dependencies/drive_ws/install/setup.sh not found"
+    echo "Please build drive_ws first"
 fi
 
-# Source ws (cho các packages khác như livox_msg_converter, theta_driver)
+# Source ws (for other packages like livox_msg_converter, theta_driver)
 if [ -f "$SCRIPT_DIR/ws/install/setup.sh" ]; then
     source "$SCRIPT_DIR/ws/install/setup.sh"
-    echo "Đã source ws/install/setup.sh (các packages khác)"
+    echo "Sourced ws/install/setup.sh (other packages)"
 else
-    echo "Cảnh báo: Không tìm thấy ws/install/setup.sh"
-    echo "Vui lòng build workspace trước:"
+    echo "Warning: ws/install/setup.sh not found"
+    echo "Please build workspace first:"
     echo "  cd $SCRIPT_DIR/ws"
     echo "  colcon build --packages-select livox_msg_converter theta_driver --symlink-install"
 fi
 
-# Activate virtual environment nếu có (không bắt buộc)
+# Activate virtual environment if available (optional)
 GUI_DIR="$SCRIPT_DIR/gui"
 if [ -d "$GUI_DIR/venv" ]; then
-    echo "Đang activate virtual environment..."
+    echo "Activating virtual environment..."
     source "$GUI_DIR/venv/bin/activate"
 else
-    echo "Không dùng virtual environment, sử dụng system Python"
-    echo "Nếu chưa cài dependencies, chạy: ./install_dependencies.sh"
+    echo "Not using virtual environment, using system Python"
+    echo "If dependencies are not installed, run: ./install_dependencies.sh"
 fi
 
-# Fix Qt plugin issue với OpenCV
-# Unset hoặc clean QT_PLUGIN_PATH để tránh xung đột với OpenCV Qt plugins
+# Fix Qt plugin issue with OpenCV
+# Unset or clean QT_PLUGIN_PATH to avoid conflicts with OpenCV Qt plugins
 if [ -n "$QT_PLUGIN_PATH" ]; then
-    # Loại bỏ các path chứa cv2 hoặc opencv
+    # Remove paths containing cv2 or opencv
     export QT_PLUGIN_PATH=$(echo "$QT_PLUGIN_PATH" | tr ':' '\n' | grep -v cv2 | grep -v -i opencv | tr '\n' ':' | sed 's/:$//')
     if [ -z "$QT_PLUGIN_PATH" ]; then
         unset QT_PLUGIN_PATH
     fi
 fi
 
-# Set QT_QPA_PLATFORM_PLUGIN_PATH để tránh load Qt plugins từ OpenCV
+# Set QT_QPA_PLATFORM_PLUGIN_PATH to avoid loading Qt plugins from OpenCV
 export QT_QPA_PLATFORM_PLUGIN_PATH=""
 
-# Chạy GUI
+# Run GUI
 cd "$GUI_DIR"
 python3 theta_viewer.py
 
