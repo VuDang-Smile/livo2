@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, TransformControls } from '@react-three/drei';
+import { OrbitControls, TransformControls, Text } from '@react-three/drei';
 import * as THREE from 'three';
-import { Edit, Trash2, Grid3x3, ImageIcon, Maximize2, X } from 'lucide-react';
+import { Edit, Trash2, Grid3x3, ImageIcon, Maximize2, X, CheckCircle2, XCircle, Info, AlertCircle } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import type { VehicleCanvasPosition } from '../types/vehicle';
 import { MapInfo } from '../types/mapInfo';
@@ -17,8 +17,10 @@ import { useMapInfo } from '../hooks/api/useMapInfo';
 import { useQRCodes } from '../hooks/api/useQRCodes';
 import { MapMetadata, CoordinateSystemConfig } from '../types/mapMetadata';
 import { transformPoseToPixel, pixelToWorld } from '../utils/coordinateTransform';
-import { getPCDRotation, transformWorldToScene } from '../utils/coordinateTransformer';
+import { getPCDRotation, transformWorldToScene, transformSceneToWorld } from '../utils/coordinateTransformer';
 import { MAP_FLOORPLAN_METADATA_URL } from '../config/dataSources';
+import { BACKEND_API_BASE } from '../constants/apiConfig';
+import { extract2DFrom3DScene, convert2DTo3DScene, convert2DTo3DObject, extract2DFrom3DWorld } from '../utils/qrCoordinateHelper';
 
 // Component cho đường hầm (copy từ VehicleMap)
 const Tunnel: React.FC = () => {
@@ -29,25 +31,25 @@ const Tunnel: React.FC = () => {
         <planeGeometry args={[200, 100]} />
         <meshStandardMaterial color="#2c3e50" />
       </mesh>
-      
+
       {/* Trần đường hầm */}
       <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 8, 0]}>
         <planeGeometry args={[200, 100]} />
         <meshStandardMaterial color="#34495e" />
       </mesh>
-      
+
       {/* Tường trái */}
       <mesh position={[-50, 3, 0]}>
         <boxGeometry args={[2, 10, 100]} />
         <meshStandardMaterial color="#7f8c8d" />
       </mesh>
-      
+
       {/* Tường phải */}
       <mesh position={[50, 3, 0]}>
         <boxGeometry args={[2, 10, 100]} />
         <meshStandardMaterial color="#7f8c8d" />
       </mesh>
-      
+
       {/* Đèn chiếu sáng */}
       {Array.from({ length: 10 }, (_, i) => (
         <group key={i} position={[0, 6, -45 + i * 10]}>
@@ -63,8 +65,8 @@ const Tunnel: React.FC = () => {
 };
 
 // Component cho phương tiện (copy từ VehicleMap) - đã chuẩn hóa theo hệ trục
-const Vehicle: React.FC<{ 
-  vehicle: VehicleCanvasPosition; 
+const Vehicle: React.FC<{
+  vehicle: VehicleCanvasPosition;
   coordinateConfig?: CoordinateSystemConfig;
 }> = ({ vehicle, coordinateConfig }) => {
   const meshRef = useRef<THREE.Mesh>(null);
@@ -73,7 +75,7 @@ const Vehicle: React.FC<{
     vehicle.position,
     coordinateConfig
   );
-  
+
   // Animation cho phương tiện
   useFrame((state) => {
     if (meshRef.current) {
@@ -82,17 +84,17 @@ const Vehicle: React.FC<{
     }
   });
 
-const getVehicleColor = (status?: string) => {
-  switch (status) {
+  const getVehicleColor = (status?: string) => {
+    switch (status) {
       case 'online': return '#27ae60';
       case 'offline': return '#e74c3c';
       default: return '#95a5a6';
     }
   };
 
-const getVehicleGeometry = (vehicleType?: string) => {
-  const type = vehicleType || 'default';
-  switch (type) {
+  const getVehicleGeometry = (vehicleType?: string) => {
+    const type = vehicleType || 'default';
+    switch (type) {
       case 'Xe đào hầm TBM':
         // Cylinder: bán kính 0.7m, chiều cao 1.4m (giảm 30% so với kích thước thực tế)
         return <cylinderGeometry args={[0.7, 0.7, 1.4, 8]} />;
@@ -116,20 +118,20 @@ const getVehicleGeometry = (vehicleType?: string) => {
       {/* Phương tiện */}
       <mesh ref={meshRef}>
         {getVehicleGeometry(vehicle.vehicleType)}
-        <meshStandardMaterial 
+        <meshStandardMaterial
           color={getVehicleColor(vehicle.status)}
           emissive={getVehicleColor(vehicle.status)}
           emissiveIntensity={0.2}
         />
       </mesh>
-      
+
       {/* Đèn phát sáng cho phương tiện đang hoạt động */}
       {vehicle.status === 'online' && (
-        <pointLight 
-          position={[0, 2, 0]} 
-          intensity={0.3} 
-          distance={10} 
-          color={getVehicleColor(vehicle.status)} 
+        <pointLight
+          position={[0, 2, 0]}
+          intensity={0.3}
+          distance={10}
+          color={getVehicleColor(vehicle.status)}
         />
       )}
     </group>
@@ -172,7 +174,7 @@ const PreviewMarker3D: React.FC<{
           opacity={0.7}
         />
       </mesh>
-      
+
       {/* Preview ring */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
         <torusGeometry args={[0.4, 0.05, 8, 32]} />
@@ -182,7 +184,7 @@ const PreviewMarker3D: React.FC<{
           emissiveIntensity={0.8}
         />
       </mesh>
-      
+
       {/* Preview light */}
       <pointLight
         position={[0, 0, 0]}
@@ -198,16 +200,17 @@ const PreviewMarker3D: React.FC<{
 const QRMarker3D: React.FC<{
   position: [number, number, number];
   id: string;
+  label?: string;
   isActive?: boolean;
   surface?: 'floor' | 'ceiling' | 'left' | 'right';
   onSelect?: (id: string) => void;
   onMount?: (id: string, mesh: THREE.Mesh | null) => void;
-}> = ({ position, id, isActive = false, surface = 'floor', onSelect, onMount }) => {
+}> = ({ position, id, label, isActive = false, surface = 'floor', onSelect, onMount }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
   // Calculate rotation based on surface
   const getRotation = (): [number, number, number] => {
-    switch(surface) {
+    switch (surface) {
       case 'floor':
         return [0, 0, 0];
       case 'ceiling':
@@ -245,12 +248,12 @@ const QRMarker3D: React.FC<{
 
   return (
     <group position={position} rotation={rotation}>
-      {/* Square marker for QR code */}
+      {/* Cube marker for QR code */}
       <mesh
         ref={meshRef}
         onPointerDown={(e) => { e.stopPropagation(); onSelect?.(id); }}
       >
-        <boxGeometry args={[1, 1, 0.15]} />
+        <boxGeometry args={[1.2, 1.2, 1.2]} />
         <meshStandardMaterial
           color={isActive ? '#3b82f6' : '#93c5fd'}
           emissive={isActive ? '#1e40af' : '#60a5fa'}
@@ -258,22 +261,22 @@ const QRMarker3D: React.FC<{
           wireframe={false}
         />
       </mesh>
-      
+
       {/* Glow effect for active marker */}
       {isActive && (
         <mesh>
-          <boxGeometry args={[1.2, 1.2, 0.2]} />
+          <boxGeometry args={[1.4, 1.4, 1.4]} />
           <meshStandardMaterial
             color="#3b82f6"
             emissive="#1e40af"
             emissiveIntensity={0.4}
             transparent={true}
-            opacity={0.3}
+            opacity={0.18}
             wireframe={true}
           />
         </mesh>
       )}
-      
+
       {/* Point light for visual feedback */}
       <pointLight
         position={[0, 0, 0.5]}
@@ -281,6 +284,21 @@ const QRMarker3D: React.FC<{
         distance={3}
         color={isActive ? '#3b82f6' : '#93c5fd'}
       />
+
+      {/* Label text above the marker */}
+      {label && (
+        <Text
+          position={[0, 1.5, 0]}
+          fontSize={0.5}
+          color={isActive ? '#3b82f6' : '#ffffff'}
+          anchorX="center"
+          anchorY="middle"
+          outlineWidth={0.02}
+          outlineColor="#000000"
+        >
+          {label}
+        </Text>
+      )}
     </group>
   );
 };
@@ -342,22 +360,8 @@ const ClickHandler3D: React.FC<{
 
       const surface = detectTunnelSurface(point, normal);
 
-      let finalPosition: [number, number, number];
-
-      switch(surface) {
-        case 'floor':
-          finalPosition = [point.x, -2, point.z];
-          break;
-        case 'ceiling':
-          finalPosition = [point.x, 8, point.z];
-          break;
-        case 'left':
-          finalPosition = [-50, point.y, point.z];
-          break;
-        case 'right':
-          finalPosition = [50, point.y, point.z];
-          break;
-      }
+      // Use the exact intersection point
+      const finalPosition: [number, number, number] = [point.x, point.y, point.z];
 
       return { position: finalPosition, surface };
     }
@@ -375,11 +379,11 @@ const ClickHandler3D: React.FC<{
     };
 
     const handleDoubleClick = (event: MouseEvent) => {
-      console.log('🖱️ dblclick event fired', { 
-        isPickingMode: isPickingModeRef.current, 
-        hasCallback: !!onPositionClickRef.current 
+      console.log('🖱️ dblclick event fired', {
+        isPickingMode: isPickingModeRef.current,
+        hasCallback: !!onPositionClickRef.current
       });
-      
+
       if (!isPickingModeRef.current || !onPositionClickRef.current) {
         return;
       }
@@ -410,12 +414,12 @@ const ClickHandler3D: React.FC<{
 };
 
 // Component cho bản đồ 3D Preview
-const PCDPreview3D: React.FC<{ 
+const PCDPreview3D: React.FC<{
   vehicles: VehicleCanvasPosition[];
   pcdUrl?: string | null;
   mapMetadata?: MapMetadata | null;
   isPickingMode?: boolean;
-  qrMarkers?: Array<{ position: [number, number, number]; id: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>;
+  qrMarkers?: Array<{ position: [number, number, number]; id: string; label?: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>;
   onPositionPick?: (position: [number, number, number], surface: 'floor' | 'ceiling' | 'left' | 'right') => void;
   previewPosition?: [number, number, number] | null;
   onPreviewPositionUpdate?: (position: [number, number, number] | null) => void;
@@ -424,7 +428,7 @@ const PCDPreview3D: React.FC<{
   return (
     <>
       {/* Camera controls */}
-      <OrbitControls 
+      <OrbitControls
         enablePan={true}
         enableZoom={true}
         enableRotate={true}
@@ -432,18 +436,18 @@ const PCDPreview3D: React.FC<{
         minDistance={10}
         maxDistance={200}
       />
-      
+
       {/* Background color */}
       <color attach="background" args={['#000000']} />
-      
+
       {/* Lighting */}
       <ambientLight intensity={0.4} />
       <directionalLight position={[10, 10, 5]} intensity={0.8} />
-      
+
       {/* Tunnel / PCD map */}
       {pcdUrl ? (
         <Suspense fallback={null}>
-          <PCDMap 
+          <PCDMap
             url={pcdUrl}
             // Đơn vị: mét (scale = 1)
             scale={1}
@@ -454,45 +458,46 @@ const PCDPreview3D: React.FC<{
       ) : (
         <Tunnel />
       )}
-      
+
       {/* Vehicles */}
       {vehicles.map((vehicle) => (
-        <Vehicle 
-          key={vehicle.id} 
+        <Vehicle
+          key={vehicle.id}
           vehicle={vehicle}
           coordinateConfig={coordinateConfig}
         />
       ))}
-      
+
       {/* QR Code Markers */}
       {qrMarkers.map((marker) => (
         <QRMarker3D
           key={marker.id}
           position={marker.position}
           id={marker.id}
+          label={marker.label}
           isActive={marker.isActive}
           surface={marker.surface || 'floor'}
         />
       ))}
-      
+
       {/* Preview Marker - shows where QR code will be placed */}
       {isPickingMode && previewPosition && <PreviewMarker3D position={previewPosition} />}
-      
+
       {/* Grid helper */}
       <gridHelper args={[200, 20, '#34495e', '#2c3e50']} />
-      
+
       {/* Click handler for picking positions - always render but only listens when isPickingMode is true */}
-      <ClickHandler3D 
-        onPositionClick={onPositionPick} 
+      <ClickHandler3D
+        onPositionClick={onPositionPick}
         onPreviewPositionUpdate={onPreviewPositionUpdate}
-        isPickingMode={isPickingMode} 
+        isPickingMode={isPickingMode}
       />
     </>
   );
 };
 
 // Component cho bản đồ 2D Preview
-const Image2DPreview: React.FC<{ 
+const Image2DPreview: React.FC<{
   vehicles: VehicleCanvasPosition[];
   qrPins?: ManualPin[];
   picking?: boolean;
@@ -503,7 +508,7 @@ const Image2DPreview: React.FC<{
   const { t } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
-  
+
   // Load map image với proper cleanup
   const { image: mapImage, error: imageError } = useMapImage(MAP_2D_IMAGE_URL);
 
@@ -608,31 +613,31 @@ const Image2DPreview: React.FC<{
       };
     };
 
-    // Draw vehicles
-    vehicles.forEach(vehicle => {
-      const { x, y } = getVehicle2DPosition(vehicle, canvas.width, canvas.height);
-      
-      let color = '#95a5a6';
-      switch (vehicle.status) {
-        case 'online': color = '#27ae60'; break;
-        case 'offline': color = '#e74c3c'; break;
-      }
+    // Commented out: Draw vehicles - no longer displayed on 2D map
+    // vehicles.forEach(vehicle => {
+    //   const { x, y } = getVehicle2DPosition(vehicle, canvas.width, canvas.height);
 
-      ctx.beginPath();
-      ctx.arc(x, y, 8, 0, 2 * Math.PI);
-      ctx.fillStyle = color;
-      ctx.fill();
-      
-      ctx.strokeStyle = '#2c3e50';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+    //   let color = '#95a5a6';
+    //   switch (vehicle.status) {
+    //     case 'online': color = '#27ae60'; break;
+    //     case 'offline': color = '#e74c3c'; break;
+    //   }
 
-      ctx.fillStyle = '#2c3e50';
-      ctx.font = '12px Arial';
-      ctx.textAlign = 'center';
-      const label = vehicle.licensePlate || vehicle.id;
-      ctx.fillText(label, x, y - 15);
-    });
+    //   ctx.beginPath();
+    //   ctx.arc(x, y, 8, 0, 2 * Math.PI);
+    //   ctx.fillStyle = color;
+    //   ctx.fill();
+
+    //   ctx.strokeStyle = '#2c3e50';
+    //   ctx.lineWidth = 2;
+    //   ctx.stroke();
+
+    //   ctx.fillStyle = '#2c3e50';
+    //   ctx.font = '12px Arial';
+    //   ctx.textAlign = 'center';
+    //   const label = vehicle.licensePlate || vehicle.id;
+    //   ctx.fillText(label, x, y - 15);
+    // });
 
     // Draw QR pins (existing + drafting)
     qrPins.forEach(pin => {
@@ -673,7 +678,9 @@ const Image2DPreview: React.FC<{
         ctx.fillText(pin.label, x, y - 12);
       }
     });
-  }, [vehicles, qrPins, canvasSize, mapImage, imageError]);
+  }, [qrPins, canvasSize, mapImage, imageError]);
+  // Commented out: vehicles dependency removed - vehicles no longer displayed on 2D map
+  // }, [vehicles, qrPins, canvasSize, mapImage, imageError]);
 
   const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!picking || !onPick) return;
@@ -740,9 +747,9 @@ const Image2DPreview: React.FC<{
         className={`w-full h-full ${picking ? 'cursor-crosshair' : 'cursor-default'}`}
         onClick={handleCanvasClick}
       />
-      
-      {/* Legend for 2D map */}
-      <div className="absolute bottom-4 left-4 bg-white bg-opacity-90 p-3 rounded-lg shadow-sm border">
+
+      {/* Commented out: Legend for 2D map - vehicles no longer displayed */}
+      {/* <div className="absolute bottom-4 left-4 bg-white bg-opacity-90 p-3 rounded-lg shadow-sm border">
         <div className="text-sm font-medium text-gray-700 mb-2">{t('legend')}</div>
         <div className="space-y-1">
           <div className="flex items-center space-x-2">
@@ -754,7 +761,7 @@ const Image2DPreview: React.FC<{
             <span className="text-xs text-gray-600">{t('offline')}</span>
           </div>
         </div>
-      </div>
+      </div> */}
     </div>
   );
 };
@@ -779,9 +786,9 @@ const formatDateTime = (dateTimeStr: string): string => {
 };
 
 // Component hiển thị thông tin map (info card style)
-const MapInfoCard: React.FC<{ 
-  mapInfo: MapInfo | null; 
-  isLoading?: boolean; 
+const MapInfoCard: React.FC<{
+  mapInfo: MapInfo | null;
+  isLoading?: boolean;
   error?: string | null;
 }> = ({ mapInfo, isLoading = false, error = null }) => {
   const { t } = useLanguage();
@@ -819,7 +826,7 @@ const MapInfoCard: React.FC<{
           </div>
           <div className="ml-3 flex-1">
             <h3 className="text-sm font-medium text-red-800 mb-2">
-              {t('map_info_title')} 
+              {t('map_info_title')}
             </h3>
             <p className="text-xs text-red-700">
               {t('error_loading_map_info') || 'Error loading map information'}: {error}
@@ -887,19 +894,31 @@ const Upload: React.FC = () => {
   const [editingRows, setEditingRows] = useState<EditingRow[]>([]);
   const [nextTempId, setNextTempId] = useState<number>(1);
   // State để chuyển đổi giữa 2D và 3D preview
-  const [previewMode, setPreviewMode] = useState<'2d' | '3d'>('2d');
+  const [previewMode, setPreviewMode] = useState<'2d' | '3d'>('3d');
   // State để fullscreen preview
   const [isFullscreenPreview, setIsFullscreenPreview] = useState(false);
   // State để track preview position saat picking
   const [previewPickPosition, setPreviewPickPosition] = useState<[number, number, number] | null>(null);
   const didAutoLoadRef = useRef(false);
   const [isLoadingLastZip, setIsLoadingLastZip] = useState(false);
-  const [isPickingPosition, setIsPickingPosition] = useState(false);
+  // Commented out: 2D picking functionality - no longer used
+  // const [isPickingPosition, setIsPickingPosition] = useState(false);
+  const [isPickingPosition] = useState(false); // Keep for compatibility but always false
   const [isPickingPosition3D, setIsPickingPosition3D] = useState(false);
   const [pickingRowId, setPickingRowId] = useState<string | null>(null);
   const mapCardRef = useRef<HTMLDivElement>(null);
   const [pcdUrl, setPcdUrl] = useState<string | null>(null);
   const pcdObjectUrlRef = useRef<string | null>(null);
+  // Enhanced toast notifications
+  type Toast = { id: string; message: string; type?: 'success' | 'error' | 'info'; timeout?: number };
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const addToast = (message: string, type: Toast['type'] = 'info', timeout = 4000) => {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts(s => [...s, { id, message, type, timeout }]);
+    setTimeout(() => {
+      setToasts(s => s.filter(t => t.id !== id));
+    }, timeout);
+  };
   // Map metadata (floorplan)
   const [mapMetadata, setMapMetadata] = useState<MapMetadata | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState<boolean>(false);
@@ -913,6 +932,8 @@ const Upload: React.FC = () => {
     id: string;
     code: string;
     position: [number, number];
+    position3D?: [number, number, number];
+    surface?: 'floor' | 'ceiling' | 'left' | 'right';
     originalPosition: [number, number];
     errors?: {
       position?: string;
@@ -961,12 +982,12 @@ const Upload: React.FC = () => {
     if (!codeIndex || codeIndex.trim() === '') {
       return { isValid: false, error: t('upload_qr_index_invalid') };
     }
-    
+
     // Kiểm tra xem tất cả ký tự có phải là số không
     if (!/^\d+$/.test(codeIndex)) {
       return { isValid: false, error: t('upload_qr_index_invalid') };
     }
-    
+
     const indexNum = parseInt(codeIndex, 10);
     if (isNaN(indexNum) || indexNum < 0 || indexNum > 999) {
       return { isValid: false, error: t('upload_qr_index_invalid') };
@@ -976,8 +997,8 @@ const Upload: React.FC = () => {
     const normalizedIndex = String(indexNum).padStart(3, '0');
     const code = `TM:${normalizedIndex}`;
 
-    // Kiểm tra trùng với các QR code đã lưu
-    const existsInSaved = previewQRCodes.some(qr => qr.code === code);
+    // Kiểm tra trùng với các QR code đã lưu (bỏ qua những QR đã tạm xóa)
+    const existsInSaved = previewQRCodes.some(qr => qr.code === code && !deletedQRCodeIds.has(qr.id));
     if (existsInSaved) {
       return { isValid: false, error: t('upload_qr_index_duplicate') };
     }
@@ -1014,7 +1035,8 @@ const Upload: React.FC = () => {
 
   const stopPicking = () => {
     console.log('🛑 stopPicking called');
-    setIsPickingPosition(false);
+    // Commented out: 2D picking functionality - no longer used
+    // setIsPickingPosition(false);
     setIsPickingPosition3D(false);
     setPickingRowId(null);
   };
@@ -1022,67 +1044,140 @@ const Upload: React.FC = () => {
   const startPicking = (id: string, mode: '2d' | '3d' = '2d') => {
     console.log(`🎯 startPicking called: id=${id}, mode=${mode}`);
     setPickingRowId(id);
-    if (mode === '2d') {
-      setIsPickingPosition(true);
-      setIsPickingPosition3D(false);
-      console.log('✅ Enabled 2D picking mode');
-    } else {
-      setIsPickingPosition(false);
+    // Commented out: 2D picking functionality - no longer used, always use 3D
+    // if (mode === '2d') {
+    //   setIsPickingPosition(true);
+    //   setIsPickingPosition3D(false);
+    //   console.log('✅ Enabled 2D picking mode');
+    // } else {
       setIsPickingPosition3D(true);
       console.log('✅ Enabled 3D picking mode');
-    }
+    // }
   };
 
-  const handleMapPositionPick = (pos: [number, number]) => {
-    if (!pickingRowId) return;
+  // Commented out: 2D picking functionality - no longer used
+  // const handleMapPositionPick = (pos: [number, number]) => {
+  //   if (!pickingRowId) return;
+
+  //   // pos is in world coordinates (from pixelToWorld conversion)
+  //   // Get surface from existing data if available
+  //   let surface: 'floor' | 'ceiling' | 'left' | 'right' = 'floor';
     
-    // Kiểm tra xem pickingRowId có trong editingRows không
-    const isEditingRow = editingRows.some(r => r.tempId === pickingRowId);
-    if (isEditingRow) {
-      handleEditRowChange(pickingRowId, 'position', pos);
-      return;
-    }
+  //   // Check if we're editing an existing row
+  //   const editingRow = editingRows.find(r => r.tempId === pickingRowId);
+  //   if (editingRow && editingRow.surface) {
+  //     surface = editingRow.surface;
+  //   }
     
-    // Kiểm tra xem pickingRowId có trong editingExistingQRCodes không
-    if (editingExistingQRCodes.has(pickingRowId)) {
-      handleUpdateQRPosition(pickingRowId, pos);
-      return;
-    }
+  //   // Check if we're editing an existing QR code
+  //   const editingQR = editingExistingQRCodes.get(pickingRowId);
+  //   if (editingQR && editingQR.surface) {
+  //     surface = editingQR.surface;
+  //   }
+    
+  //   // Convert 2D world position to 3D scene coordinates (our standard)
+  //   const position3D = convert2DTo3DScene(pos, surface, mapMetadata, 'top');
+
+  //   // Kiểm tra xem pickingRowId có trong editingRows không
+  //   const isEditingRow = editingRows.some(r => r.tempId === pickingRowId);
+  //   if (isEditingRow) {
+  //     handleEditRowChange(pickingRowId, 'position', pos);
+  //     // Update position3D and surface information
+  //     setEditingRows(rows => rows.map(row => row.tempId === pickingRowId ? {
+  //       ...row,
+  //       surface,
+  //       position3D
+  //     } : row));
+  //     return;
+  //   }
+
+  //   // Kiểm tra xem pickingRowId có trong editingExistingQRCodes không
+  //   if (editingExistingQRCodes.has(pickingRowId)) {
+  //     handleUpdateQRPosition(pickingRowId, pos);
+  //     // Update position3D and surface information
+  //     setEditingExistingQRCodes(prev => {
+  //       const next = new Map(prev);
+  //       const current = next.get(pickingRowId);
+  //       if (current) {
+  //         next.set(pickingRowId, {
+  //           ...current,
+  //           surface,
+  //           position3D
+  //         });
+  //       }
+  //       return next;
+  //     });
+  //     // Also update previewQRCodes to show it immediately
+  //     setPreviewQRCodes(qrs => qrs.map(qr => qr.id === pickingRowId ? {
+  //       ...qr,
+  //       surface,
+  //       position3D
+  //     } : qr));
+  //     return;
+  //   }
+  // };
+  
+  // Placeholder function to prevent errors
+  const handleMapPositionPick = (_pos: [number, number]) => {
+    // 2D picking is disabled - this function is kept for compatibility
+    return;
   };
 
   const handleMap3DPositionPick = (pos: [number, number, number], surface: 'floor' | 'ceiling' | 'left' | 'right') => {
-    console.log(`🎯 handleMap3DPositionPick called with:`, pos, `surface: ${surface}`, `pickingRowId: ${pickingRowId}`);
-    
+    console.log(`🎯 handleMap3DPositionPick called with (scene coords):`, pos, `surface: ${surface}`, `pickingRowId: ${pickingRowId}`);
+
     if (!pickingRowId) {
       console.log('⚠️ pickingRowId is null');
       return;
     }
 
-    // Convert 3D position to 2D (X, Z plane)
-    const pos2D: [number, number] = [pos[0], pos[2]];
+    // pos is already in scene coordinates (Three.js) - this is our standard
+    // Extract 2D position from 3D scene coordinates (convert scene -> world -> 2D)
+    const pos2D: [number, number] = extract2DFrom3DScene(pos, mapMetadata, 'top');
     console.log(`🎯 Converted to 2D: [${pos2D[0].toFixed(2)}, ${pos2D[1].toFixed(2)}] on surface: ${surface}`);
 
     // Kiểm tra xem pickingRowId có trong editingRows không
     const isEditingRow = editingRows.some(r => r.tempId === pickingRowId);
     console.log(`🎯 isEditingRow: ${isEditingRow}`);
-    
+
     if (isEditingRow) {
       console.log(`✅ Updating editing row ${pickingRowId}`);
       handleEditRowChange(pickingRowId, 'position', pos2D);
-      // Update surface information
-      setEditingRows(rows => rows.map(row => row.tempId === pickingRowId ? { ...row, surface } : row));
+      // Update position3D and surface information (use scene coordinates as standard)
+      setEditingRows(rows => rows.map(row => row.tempId === pickingRowId ? {
+        ...row,
+        surface,
+        position3D: pos // Store scene coordinates directly
+      } : row));
       return;
     }
 
     // Kiểm tra xem pickingRowId có trong editingExistingQRCodes không
     const isExistingQR = editingExistingQRCodes.has(pickingRowId);
     console.log(`🎯 isExistingQR: ${isExistingQR}`);
-    
+
     if (isExistingQR) {
       console.log(`✅ Updating existing QR ${pickingRowId}`);
       handleUpdateQRPosition(pickingRowId, pos2D);
-      // Update surface information
-      setPreviewQRCodes(qrs => qrs.map(qr => qr.id === pickingRowId ? { ...qr, surface } : qr));
+      // Update position3D and surface information (use scene coordinates as standard)
+      setEditingExistingQRCodes(prev => {
+        const next = new Map(prev);
+        const current = next.get(pickingRowId);
+        if (current) {
+          next.set(pickingRowId, {
+            ...current,
+            surface,
+            position3D: pos // Store scene coordinates directly
+          });
+        }
+        return next;
+      });
+      // Also update previewQRCodes to show it immediately (optimistic update logic might handle this but ensuring consistent view)
+      setPreviewQRCodes(qrs => qrs.map(qr => qr.id === pickingRowId ? {
+        ...qr,
+        surface,
+        position3D: pos // Store scene coordinates directly
+      } : qr));
       return;
     }
 
@@ -1143,7 +1238,7 @@ const Upload: React.FC = () => {
 
       // Kiểm tra trùng lặp ngay trong batch đang save
       const currentNormalized = batchNormalizedIndices[idx];
-      const isDuplicateInBatch = currentNormalized !== null && 
+      const isDuplicateInBatch = currentNormalized !== null &&
         batchNormalizedIndices.some((otherIndex, otherIdx) => otherIdx !== idx && otherIndex === currentNormalized);
 
       let codeError = codeValidation.isValid ? undefined : codeValidation.error;
@@ -1174,25 +1269,71 @@ const Upload: React.FC = () => {
       id: `qr-${Date.now()}-${Math.random()}`,
       code: `TM:${row.normalizedIndex || String(parseInt(row.codeIndex, 10)).padStart(3, '0')}`,
       position: row.position,
+      position3D: row.position3D, // Giữ nguyên position3D (bao gồm Z coordinate)
+      surface: row.surface, // Giữ nguyên surface information
       isManual: true,
     }));
 
     setPreviewQRCodes(prev => [...prev, ...newQRCodes]);
     setEditingRows([]);
     stopPicking();
+    // Prepare payload and send to backend
+    (async () => {
+      try {
+        const payload: { [key: string]: number[] } = {};
+        const coordinateConfig = mapMetadata?.coordinate_system;
+        newQRCodes.forEach(qr => {
+          // Use position3D if available (in scene coordinates), convert to world coordinates for backend
+          let coords3d: [number, number, number];
+          if (qr.position3D) {
+            // Convert from scene coordinates to world coordinates
+            coords3d = transformSceneToWorld(qr.position3D, coordinateConfig);
+          } else {
+            // Fallback: convert 2D to 3D scene, then to world
+            const scenePos3D = convert2DTo3DScene(qr.position, qr.surface || 'floor', mapMetadata, 'top');
+            coords3d = transformSceneToWorld(scenePos3D, coordinateConfig);
+          }
+          payload[qr.code] = coords3d;
+        });
+
+        if (Object.keys(payload).length === 0) return;
+
+        const res = await fetch(`${BACKEND_API_BASE}/qrcodes`, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          const txt = await res.text();
+          console.error('Failed to save QR codes', txt);
+          addToast(t('upload_qr_save_failed') || `Failed to save QR codes (${res.status})`, 'error');
+        } else {
+          console.log('QR codes saved successfully');
+          addToast(t('upload_qr_save_success') || 'QR codes saved', 'success');
+        }
+      } catch (err) {
+        console.error('Error while saving QR codes', err);
+      }
+    })();
   };
 
   // Handler: Bắt đầu chỉnh sửa QR code
   const handleStartEditQR = (qrId: string) => {
     const qr = previewQRCodes.find(q => q.id === qrId);
     if (!qr) return;
-    
+
     setEditingExistingQRCodes(prev => {
       const newMap = new Map(prev);
       newMap.set(qrId, {
         id: qr.id,
         code: qr.code,
         position: [...qr.position] as [number, number],
+        position3D: qr.position3D ? [...qr.position3D] as [number, number, number] : undefined,
+        surface: qr.surface,
         originalPosition: [...qr.position] as [number, number],
         errors: {}
       });
@@ -1206,7 +1347,7 @@ const Upload: React.FC = () => {
       const newMap = new Map(prev);
       const existing = newMap.get(qrId);
       if (!existing) return prev;
-      
+
       const [x, y] = position;
       const errors = {
         ...existing.errors,
@@ -1214,7 +1355,7 @@ const Upload: React.FC = () => {
           ? t('upload_qr_position_invalid')
           : undefined
       };
-      
+
       newMap.set(qrId, { ...existing, position, errors });
       return newMap;
     });
@@ -1224,25 +1365,70 @@ const Upload: React.FC = () => {
   const handleSaveQRChanges = (qrId: string) => {
     const editedQR = editingExistingQRCodes.get(qrId);
     if (!editedQR) return;
-    
+
     // Validate trước khi lưu
     if (editedQR.errors?.position) return;
-    
-    setPreviewQRCodes(prev => prev.map(qr => 
-      qr.id === qrId 
-        ? { ...qr, position: editedQR.position }
+
+    setPreviewQRCodes(prev => prev.map(qr =>
+      qr.id === qrId
+        ? {
+          ...qr,
+          position: editedQR.position,
+          position3D: editedQR.position3D,
+          surface: editedQR.surface
+        }
         : qr
     ));
-    
+
     setEditingExistingQRCodes(prev => {
       const newMap = new Map(prev);
       newMap.delete(qrId);
       return newMap;
     });
-    
+
     if (pickingRowId === qrId) {
       stopPicking();
     }
+
+    // Send updated single QR to backend
+    (async () => {
+      try {
+        const code = editedQR.code;
+        const coordinateConfig = mapMetadata?.coordinate_system;
+        // Use position3D if available (in scene coordinates), convert to world coordinates for backend
+        let coords3d: [number, number, number];
+        if (editedQR.position3D) {
+          // Convert from scene coordinates to world coordinates
+          coords3d = transformSceneToWorld(editedQR.position3D, coordinateConfig);
+        } else {
+          // Fallback: convert 2D to 3D scene, then to world
+          const scenePos3D = convert2DTo3DScene(editedQR.position, editedQR.surface || 'floor', mapMetadata, 'top');
+          coords3d = transformSceneToWorld(scenePos3D, coordinateConfig);
+        }
+        const payload: { [key: string]: number[] } = {};
+        payload[code] = coords3d;
+
+        const res = await fetch(`${BACKEND_API_BASE}/qrcodes`, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          const txt = await res.text();
+          console.error('Failed to save QR change', txt);
+          addToast(t('upload_qr_save_failed') || 'Failed to save QR change', 'error');
+        } else {
+          console.log('QR change saved successfully');
+          addToast(t('upload_qr_save_success') || 'QR change saved', 'success');
+        }
+      } catch (err) {
+        console.error('Error while saving QR change', err);
+      }
+    })();
   };
 
   // Handler: Hủy chỉnh sửa
@@ -1252,7 +1438,7 @@ const Upload: React.FC = () => {
       newMap.delete(qrId);
       return newMap;
     });
-    
+
     if (pickingRowId === qrId) {
       stopPicking();
     }
@@ -1261,13 +1447,55 @@ const Upload: React.FC = () => {
   // Handler: Xóa QR code
   const handleDeleteQR = (qrId: string) => {
     if (!window.confirm(t('upload_qr_delete_confirm'))) return;
-    
+
     // Nếu đang chỉnh sửa, hủy chỉnh sửa trước
     if (editingExistingQRCodes.has(qrId)) {
       handleCancelEditQR(qrId);
     }
-    
+
+    // Optimistically mark deleted in UI
     setDeletedQRCodeIds(prev => new Set(prev).add(qrId));
+
+    // Find code string for API call
+    const qr = previewQRCodes.find(q => q.id === qrId);
+    if (!qr) return;
+
+    (async () => {
+      try {
+        const code = qr.code; // e.g. 'TM:0002'
+        const encoded = encodeURIComponent(code);
+        const res = await fetch(`${BACKEND_API_BASE}/qrcodes/${encoded}`, {
+          method: 'DELETE',
+          headers: {
+            Accept: 'application/json',
+          },
+        });
+
+        if (!res.ok) {
+          const txt = await res.text();
+          console.error('Failed to delete QR code', txt);
+          addToast(t('upload_qr_delete_failed') || 'Failed to delete QR code', 'error');
+          // Revert optimistic deletion
+          setDeletedQRCodeIds(prev => {
+            const next = new Set(prev);
+            next.delete(qrId);
+            return next;
+          });
+        } else {
+          console.log('QR code deleted successfully');
+          addToast(t('upload_qr_delete_success') || 'QR code deleted', 'success');
+          // Optionally refetch QR codes from API
+          refetchQRCodes();
+        }
+      } catch (err) {
+        console.error('Error while deleting QR code', err);
+        setDeletedQRCodeIds(prev => {
+          const next = new Set(prev);
+          next.delete(qrId);
+          return next;
+        });
+      }
+    })();
   };
 
   const handleLastZipLoad = useCallback(() => {
@@ -1282,7 +1510,20 @@ const Upload: React.FC = () => {
     // Load QR codes from API (already fetched by useQRCodes hook)
     // Refresh QR codes when loading ZIP to ensure latest data
     if (apiQRCodes.length > 0) {
-      setPreviewQRCodes(apiQRCodes);
+      // Convert QR codes from API (world coordinates) to scene coordinates (our standard)
+      const coordinateConfig = mapMetadata?.coordinate_system;
+      const convertedQRCodes = apiQRCodes.map(qr => {
+        if (qr.position3D) {
+          // Convert world coordinates to scene coordinates
+          const scenePos3D = transformWorldToScene(qr.position3D, coordinateConfig);
+          return {
+            ...qr,
+            position3D: scenePos3D
+          };
+        }
+        return qr;
+      });
+      setPreviewQRCodes(convertedQRCodes);
     } else if (!isLoadingQRCodes && !qrCodesError) {
       // If no QR codes and not loading, try to refetch
       refetchQRCodes();
@@ -1290,7 +1531,7 @@ const Upload: React.FC = () => {
 
     // Map info is now loaded automatically via useMapInfo hook
     // No need to manually set it here
-  }, [apiQRCodes, isLoadingQRCodes, qrCodesError, refetchQRCodes]);
+  }, [apiQRCodes, isLoadingQRCodes, qrCodesError, refetchQRCodes, mapMetadata]);
 
   const loadLastZip = useCallback(() => {
     if (isLoadingLastZip) return; // Tránh race/đúp click
@@ -1334,19 +1575,33 @@ const Upload: React.FC = () => {
     fetchMapMetadata();
   }, [fetchMapMetadata]);
 
-  useEffect(() => {
-    document.body.style.overflow = isPickingPosition ? 'hidden' : '';
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [isPickingPosition]);
+  // Commented out: 2D picking functionality - no longer used
+  // useEffect(() => {
+  //   document.body.style.overflow = isPickingPosition ? 'hidden' : '';
+  //   return () => {
+  //     document.body.style.overflow = '';
+  //   };
+  // }, [isPickingPosition]);
 
   // Auto-sync QR codes from API when available (only if previewQRCodes is empty)
   useEffect(() => {
     if (apiQRCodes.length > 0 && previewQRCodes.length === 0 && !isLoadingQRCodes) {
-      setPreviewQRCodes(apiQRCodes);
+      // Convert QR codes from API (world coordinates) to scene coordinates (our standard)
+      const coordinateConfig = mapMetadata?.coordinate_system;
+      const convertedQRCodes = apiQRCodes.map(qr => {
+        if (qr.position3D) {
+          // Convert world coordinates to scene coordinates
+          const scenePos3D = transformWorldToScene(qr.position3D, coordinateConfig);
+          return {
+            ...qr,
+            position3D: scenePos3D
+          };
+        }
+        return qr;
+      });
+      setPreviewQRCodes(convertedQRCodes);
     }
-  }, [apiQRCodes, previewQRCodes.length, isLoadingQRCodes]);
+  }, [apiQRCodes, previewQRCodes.length, isLoadingQRCodes, mapMetadata]);
 
   useEffect(() => {
     if (pickingRowId) {
@@ -1362,37 +1617,6 @@ const Upload: React.FC = () => {
     const pins: ManualPin[] = [];
 
     const viewMeta = mapMetadata?.views?.top;
-    const projection = viewMeta?.projection.world_axes;
-    const toPosition3D = (pair: [number, number]): { x: number; y: number; z: number } => {
-      const base = { x: 0, y: 0, z: 0 };
-      if (!projection) {
-        return { x: pair[0], y: 0, z: pair[1] };
-      }
-      const setAxis = (axis: 'X' | 'Y' | 'Z', val: number) => {
-        switch (axis) {
-          case 'X': base.x = val; break;
-          case 'Y': base.y = val; break;
-          case 'Z': base.z = val; break;
-          default: break;
-        }
-      };
-      setAxis(projection.horizontal, pair[0]);
-      setAxis(projection.vertical, pair[1]);
-      return base;
-    };
-
-    const extractPair = (pos3d: { x: number; y: number; z: number }): [number, number] => {
-      if (!projection) return [pos3d.x, pos3d.z];
-      const getAxis = (axis: 'X' | 'Y' | 'Z') => {
-        switch (axis) {
-          case 'X': return pos3d.x;
-          case 'Y': return pos3d.y;
-          case 'Z': return pos3d.z;
-          default: return 0;
-        }
-      };
-      return [getAxis(projection.horizontal), getAxis(projection.vertical)];
-    };
 
     const buildPin = (id: string, label: string | undefined, worldPair: [number, number], position3D?: { x: number; y: number; z: number }, isDraft = false, isActive = false): ManualPin => {
       let pixelPosition: [number, number] | undefined;
@@ -1402,13 +1626,13 @@ const Upload: React.FC = () => {
       if (viewMeta) {
         const pose = position3D
           ? {
-              position: position3D,
-              orientation: { x: 0, y: 0, z: 0, w: 1 },
-            }
+            position: position3D,
+            orientation: { x: 0, y: 0, z: 0, w: 1 },
+          }
           : {
-              position: toPosition3D(worldPair),
-              orientation: { x: 0, y: 0, z: 0, w: 1 },
-            };
+            position: convert2DTo3DObject(worldPair, 'floor', mapMetadata, 'top'),
+            orientation: { x: 0, y: 0, z: 0, w: 1 },
+          };
         const pixel = transformPoseToPixel(pose, mapMetadata!, 'top', process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEBUG_LOGS === '1');
         if (pixel) {
           pixelPosition = [pixel.pixel_x, pixel.pixel_y];
@@ -1433,21 +1657,40 @@ const Upload: React.FC = () => {
     previewQRCodes
       .filter(qr => !deletedQRCodeIds.has(qr.id))
       .forEach(qr => {
-        const pos3d = qr.position3D
+        // position3D is now in scene coordinates (our standard)
+        // If not available, convert from 2D world position to scene coordinates
+        const scenePos3d = qr.position3D
           ? { x: qr.position3D[0], y: qr.position3D[1], z: qr.position3D[2] }
-          : { x: qr.position[0], y: 0, z: qr.position[1] };
+          : convert2DTo3DObject(qr.position, qr.surface || 'floor', mapMetadata, 'top');
 
         // Kiểm tra xem QR này có đang được chỉnh sửa không
         const editedQR = editingExistingQRCodes.get(qr.id);
-        const worldPair = editedQR ? editedQR.position : extractPair(pos3d);
+        
+        // Extract 2D world position from scene coordinates
+        const worldPair = editedQR 
+          ? editedQR.position 
+          : extract2DFrom3DScene([scenePos3d.x, scenePos3d.y, scenePos3d.z], mapMetadata, 'top');
         const isBeingEdited = !!editedQR;
+
+        // Use edited 3D position if available (in scene coordinates), otherwise original
+        const effectivePos3D = editedQR && editedQR.position3D ?
+          { x: editedQR.position3D[0], y: editedQR.position3D[1], z: editedQR.position3D[2] } :
+          (editedQR ? convert2DTo3DObject(editedQR.position, editedQR.surface || 'floor', mapMetadata, 'top') : scenePos3d);
+        
+        // Convert scene coordinates to world coordinates for transformPoseToPixel
+        const coordinateConfig = mapMetadata?.coordinate_system;
+        const worldPos3D = transformSceneToWorld(
+          [effectivePos3D.x, effectivePos3D.y, effectivePos3D.z],
+          coordinateConfig
+        );
+        const worldPos3DObject = { x: worldPos3D[0], y: worldPos3D[1], z: worldPos3D[2] };
 
         pins.push(
           buildPin(
             qr.id,
             qr.code,
             worldPair,
-            editedQR ? toPosition3D(editedQR.position) : pos3d,
+            worldPos3DObject, // Use world coordinates for transformPoseToPixel
             false,
             isBeingEdited || pickingRowId === qr.id
           )
@@ -1462,35 +1705,59 @@ const Upload: React.FC = () => {
         ? `TM:${String(parseInt(row.codeIndex, 10)).padStart(3, '0')}`
         : undefined;
 
+      // row.position3D is in scene coordinates (our standard)
+      const scenePos3D = row.position3D
+        ? { x: row.position3D[0], y: row.position3D[1], z: row.position3D[2] }
+        : convert2DTo3DObject(row.position, row.surface || 'floor', mapMetadata, 'top');
+      
+      // Convert scene coordinates to world coordinates for transformPoseToPixel
+      const coordinateConfig = mapMetadata?.coordinate_system;
+      const worldPos3D = transformSceneToWorld(
+        [scenePos3D.x, scenePos3D.y, scenePos3D.z],
+        coordinateConfig
+      );
+      const worldPos3DObject = { x: worldPos3D[0], y: worldPos3D[1], z: worldPos3D[2] };
+
       pins.push(
         buildPin(
           row.tempId,
           normalizedIndex,
           row.position,
-          toPosition3D(row.position),
+          worldPos3DObject, // Use world coordinates for transformPoseToPixel
           true,
           row.tempId === pickingRowId
         )
       );
     });
-    
+
     return pins;
   }, [previewQRCodes, editingRows, editingExistingQRCodes, deletedQRCodeIds, pickingRowId, mapMetadata]);
 
   // Convert 2D QR pins to 3D markers for 3D view
-  const qrMarkers3D = useMemo<Array<{ position: [number, number, number]; id: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>>(() => {
-    const markers: Array<{ position: [number, number, number]; id: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }> = [];
+  const qrMarkers3D = useMemo<Array<{ position: [number, number, number]; id: string; label?: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>>(() => {
+    const markers: Array<{ position: [number, number, number]; id: string; label?: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }> = [];
+    const coordinateConfig = mapMetadata?.coordinate_system;
 
     // Add saved QR codes
     previewQRCodes
       .filter(qr => !deletedQRCodeIds.has(qr.id))
       .forEach(qr => {
-        const pos3d = qr.position3D || [qr.position[0], 0, qr.position[1]] as [number, number, number];
+        const surface = qr.surface || 'floor';
+        // position3D is now in scene coordinates (our standard)
+        // If not available, convert from 2D world position to scene coordinates
+        const scenePos3d: [number, number, number] = qr.position3D 
+          ? qr.position3D
+          : convert2DTo3DScene(qr.position, surface, mapMetadata, 'top');
+        
+        // Get label from QR code
+        const label = qr.code;
+        
         markers.push({
-          position: pos3d,
+          position: scenePos3d, // Use scene coordinates directly
           id: qr.id,
+          label,
           isActive: pickingRowId === qr.id,
-          surface: qr.surface || 'floor'
+          surface
         });
       });
 
@@ -1498,9 +1765,22 @@ const Upload: React.FC = () => {
     editingRows.forEach(row => {
       const [x, z] = row.position;
       if (isNaN(x) || isNaN(z)) return;
+
+      const surface = row.surface || 'floor';
+      // row.position3D is in scene coordinates (our standard)
+      const scenePos3d: [number, number, number] = row.position3D
+        ? row.position3D
+        : convert2DTo3DScene(row.position, surface, mapMetadata, 'top');
+
+      // Get label from codeIndex if available
+      const label = row.codeIndex && /^\d+$/.test(row.codeIndex)
+        ? `TM:${String(parseInt(row.codeIndex, 10)).padStart(3, '0')}`
+        : undefined;
+
       markers.push({
-        position: [x, row.surface === 'ceiling' ? 8 : (row.surface === 'left' || row.surface === 'right') ? 3 : -2, z],
+        position: scenePos3d, // Use scene coordinates directly
         id: row.tempId,
+        label,
         isActive: row.tempId === pickingRowId,
         surface: row.surface || 'floor'
       });
@@ -1508,11 +1788,83 @@ const Upload: React.FC = () => {
 
     console.log(`📍 qrMarkers3D updated: ${markers.length} markers`, markers);
     return markers;
-  }, [previewQRCodes, editingRows, deletedQRCodeIds, pickingRowId]);
+  }, [previewQRCodes, editingRows, deletedQRCodeIds, pickingRowId, mapMetadata]);
 
   return (
     <div className="space-y-6">
-      {isPickingPosition && (
+      {/* Enhanced Toast container */}
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-3 pointer-events-none">
+        {toasts.map((tst, index) => {
+          const getToastStyles = () => {
+            switch (tst.type) {
+              case 'success':
+                return 'bg-white border-l-4 border-green-500 text-green-800 shadow-lg';
+              case 'error':
+                return 'bg-white border-l-4 border-red-500 text-red-800 shadow-lg';
+              case 'info':
+              default:
+                return 'bg-white border-l-4 border-blue-500 text-blue-800 shadow-lg';
+            }
+          };
+
+          const getIcon = () => {
+            switch (tst.type) {
+              case 'success':
+                return <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />;
+              case 'error':
+                return <XCircle className="w-5 h-5 text-red-500 flex-shrink-0" />;
+              case 'info':
+              default:
+                return <Info className="w-5 h-5 text-blue-500 flex-shrink-0" />;
+            }
+          };
+
+          return (
+            <div
+              key={tst.id}
+              className={`
+                ${getToastStyles()}
+                px-4 py-3 rounded-lg
+                min-w-[300px] max-w-[400px]
+                flex items-start gap-3
+                pointer-events-auto
+                animate-in slide-in-from-right-full
+                transition-all duration-300 ease-in-out
+                backdrop-blur-sm
+              `}
+              style={{
+                animation: `slideInRight 0.3s ease-out ${index * 0.1}s both`,
+              }}
+            >
+              {getIcon()}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium leading-5">{tst.message}</p>
+              </div>
+              <button
+                onClick={() => setToasts(s => s.filter(t => t.id !== tst.id))}
+                className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <style>{`
+        @keyframes slideInRight {
+          from {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+      `}</style>
+      {/* Commented out: 2D picking overlay - no longer used */}
+      {/* {isPickingPosition && (
         <>
           <div className="fixed inset-0 bg-black/40 backdrop-blur-[1px] z-40 pointer-events-auto" />
           <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
@@ -1521,7 +1873,7 @@ const Upload: React.FC = () => {
             </div>
           </div>
         </>
-      )}
+      )} */}
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
@@ -1552,10 +1904,10 @@ const Upload: React.FC = () => {
         </div>
       </div>
       {/* Map Info Card */}
-      <MapInfoCard 
-        mapInfo={mapInfo} 
-        isLoading={isLoadingMapInfo} 
-        error={mapInfoError} 
+      <MapInfoCard
+        mapInfo={mapInfo}
+        isLoading={isLoadingMapInfo}
+        error={mapInfoError}
       />
 
       {/* Section 2 & 3: Preview PCD/Image + QR codes */}
@@ -1568,32 +1920,30 @@ const Upload: React.FC = () => {
               <h2 className="text-lg font-semibold text-gray-900">
                 {previewMode === '2d' ? t('upload_image_preview_title') : t('upload_pcd_preview_title')}
               </h2>
-              
+
               {/* Toggle Switch for 2D/3D and Fullscreen */}
               <div className="flex gap-2 items-center">
                 <button
                   onClick={() => setPreviewMode('2d')}
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-                    previewMode === '2d'
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${previewMode === '2d'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
                 >
                   <ImageIcon size={18} />
                   2D View
                 </button>
                 <button
                   onClick={() => setPreviewMode('3d')}
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-                    previewMode === '3d'
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${previewMode === '3d'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
                 >
                   <Grid3x3 size={18} />
                   3D View
                 </button>
-                
+
                 {/* Fullscreen Button */}
                 <button
                   onClick={() => setIsFullscreenPreview(true)}
@@ -1620,17 +1970,23 @@ const Upload: React.FC = () => {
             {previewMode === '2d' && (
               <div
                 ref={mapCardRef}
-                className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative ${isPickingPosition ? 'ring-2 ring-blue-500 z-50' : ''}`}
+                className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative`}
+                // Commented out: 2D picking ring - no longer used
+                // className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative ${isPickingPosition ? 'ring-2 ring-blue-500 z-50' : ''}`}
               >
-                <Image2DPreview 
-                  vehicles={previewVehicles} 
+                <Image2DPreview
+                  vehicles={previewVehicles}
                   qrPins={qrPins}
-                  picking={isPickingPosition}
-                  onPick={handleMapPositionPick}
+                  picking={false}
+                  // Commented out: 2D picking functionality - no longer used
+                  // picking={isPickingPosition}
+                  // onPick={handleMapPositionPick}
+                  onPick={undefined}
                   mapMetadata={mapMetadata}
                   view="top"
                 />
-                {isPickingPosition && (
+                {/* Commented out: 2D picking overlay - no longer used */}
+                {/* {isPickingPosition && (
                   <div className="absolute inset-0 pointer-events-none">
                     <div className="absolute top-3 left-3 bg-white/95 border border-blue-200 shadow-sm rounded px-3 py-2 max-w-xs pointer-events-auto">
                       <p className="text-xs text-gray-700">{t('upload_qr_pick_hint')}</p>
@@ -1644,7 +2000,7 @@ const Upload: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                )}
+                )} */}
               </div>
             )}
 
@@ -1655,8 +2011,8 @@ const Upload: React.FC = () => {
                   camera={{ position: [0, 10, 20], fov: 60 }}
                   style={{ height: '100%' }}
                 >
-                  <PCDPreview3D 
-                    vehicles={previewVehicles} 
+                  <PCDPreview3D
+                    vehicles={previewVehicles}
                     pcdUrl={pcdUrl}
                     isPickingMode={isPickingPosition3D}
                     qrMarkers={qrMarkers3D}
@@ -1696,7 +2052,7 @@ const Upload: React.FC = () => {
           <p className="text-xs text-gray-500 mb-3">
             {t('upload_qr_list_desc')}
           </p>
-          
+
           {/* Loading and Error States for QR Codes */}
           {isLoadingQRCodes && (
             <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
@@ -1749,9 +2105,9 @@ const Upload: React.FC = () => {
                     const isEditing = editingExistingQRCodes.has(qr.id);
                     const editedQR = editingExistingQRCodes.get(qr.id);
                     const displayPosition = editedQR ? editedQR.position : qr.position;
-                    
+
                     return (
-                      <tr 
+                      <tr
                         key={qr.id}
                         className={isEditing ? 'bg-yellow-50' : (qr.isManual ? 'bg-blue-50' : '')}
                       >
@@ -1762,7 +2118,12 @@ const Upload: React.FC = () => {
                           {isEditing ? (
                             <div className="space-y-2">
                               <div className="text-xs text-gray-700">
-                                {t('upload_qr_position_x')}: {isNaN(displayPosition[0]) ? '--' : displayPosition[0]}, {t('upload_qr_position_y')}: {isNaN(displayPosition[1]) ? '--' : displayPosition[1]}
+                                {t('upload_qr_position_x')}: {isNaN(displayPosition[0]) ? '--' : displayPosition[0].toFixed(2)}, {t('upload_qr_position_y')}: {isNaN(displayPosition[1]) ? '--' : displayPosition[1].toFixed(2)}
+                                {editedQR?.position3D && (
+                                  <>
+                                    , Z: {editedQR.position3D[2].toFixed(2)}
+                                  </>
+                                )}
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 <button
@@ -1788,7 +2149,13 @@ const Upload: React.FC = () => {
                               )}
                             </div>
                           ) : (
-                            <span>X: {isNaN(qr.position[0]) ? '--' : qr.position[0]}, Y: {isNaN(qr.position[1]) ? '--' : qr.position[1]}</span>
+                            <span>
+                              X: {isNaN(qr.position[0]) ? '--' : qr.position[0].toFixed(2)}, 
+                              Y: {isNaN(qr.position[1]) ? '--' : qr.position[1].toFixed(2)}
+                              {qr.position3D && (
+                                <>, Z: {qr.position3D[2].toFixed(2)}</>
+                              )}
+                            </span>
                           )}
                         </td>
                         <td className="px-3 py-2">
@@ -1849,7 +2216,10 @@ const Upload: React.FC = () => {
                     <td className="px-3 py-2">
                       <div className="space-y-2">
                         <div className="text-xs text-gray-700">
-                          X: {isNaN(row.position[0]) ? '--' : row.position[0]}, Y: {isNaN(row.position[1]) ? '--' : row.position[1]}
+                          X: {isNaN(row.position[0]) ? '--' : row.position[0].toFixed(2)}, Y: {isNaN(row.position[1]) ? '--' : row.position[1].toFixed(2)}
+                          {row.position3D && (
+                            <>, Z: {row.position3D[2].toFixed(2)}</>
+                          )}
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <button
@@ -1891,44 +2261,40 @@ const Upload: React.FC = () => {
                     </td>
                   </tr>
                 )}
-                {/* Dòng cuối cùng chứa các buttons - luôn ở dưới cùng của table */}
-                {(editingRows.length > 0 || previewQRCodes.filter(qr => !deletedQRCodeIds.has(qr.id)).length > 0) && (
-                  <tr className="bg-gray-50">
-                    <td colSpan={3} className="px-3 py-4">
-                      <div className="flex gap-2 justify-center">
-                        {/* Hiển thị button "Lưu" và "Hủy" cho tất cả các dòng đang edit */}
-                        {editingRows.length > 0 && (
-                          <>
-                            <button
-                              onClick={handleSaveAllRows}
-                              className="px-4 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                            >
-                              {t('upload_qr_save')}
-                            </button>
-                            <button
-                              onClick={() => {
-                                stopPicking();
-                                setEditingRows([]);
-                              }}
-                              className="px-4 py-2 text-sm bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
-                            >
-                              {t('upload_qr_cancel')}
-                            </button>
-                          </>
-                        )}
-                        {/* Chỉ hiển thị button "thêm mới dữ liệu" khi đã load dữ liệu */}
-                        {previewQRCodes.filter(qr => !deletedQRCodeIds.has(qr.id)).length > 0 && (
+                {/* Dòng cuối cùng chứa các buttons - luôn hiển thị ở dưới cùng của table */}
+                <tr className="bg-gray-50">
+                  <td colSpan={3} className="px-3 py-4">
+                    <div className="flex gap-2 justify-center">
+                      {/* Hiển thị button "Lưu" và "Hủy" cho tất cả các dòng đang edit */}
+                      {editingRows.length > 0 && (
+                        <>
                           <button
-                            onClick={handleAddNewRow}
-                            className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                            onClick={handleSaveAllRows}
+                            className="px-4 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
                           >
-                            {t('upload_qr_add_new')}
+                            {t('upload_qr_save')}
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                )}
+                          <button
+                            onClick={() => {
+                              stopPicking();
+                              setEditingRows([]);
+                            }}
+                            className="px-4 py-2 text-sm bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+                          >
+                            {t('upload_qr_cancel')}
+                          </button>
+                        </>
+                      )}
+                      {/* Luôn hiển thị button "thêm mới dữ liệu" để người dùng có thể thêm khi danh sách rỗng */}
+                      <button
+                        onClick={handleAddNewRow}
+                        className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                      >
+                        {t('upload_qr_add_new')}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -1943,29 +2309,27 @@ const Upload: React.FC = () => {
             <h2 className="text-lg font-semibold text-white">
               {previewMode === '2d' ? t('upload_image_preview_title') : t('upload_pcd_preview_title')}
             </h2>
-            
+
             {/* Controls */}
             <div className="flex gap-3 items-center">
               {/* View Toggle */}
               <div className="flex gap-2">
                 <button
                   onClick={() => setPreviewMode('2d')}
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded font-medium text-sm transition-all ${
-                    previewMode === '2d'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded font-medium text-sm transition-all ${previewMode === '2d'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
                 >
                   <ImageIcon size={16} />
                   2D
                 </button>
                 <button
                   onClick={() => setPreviewMode('3d')}
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded font-medium text-sm transition-all ${
-                    previewMode === '3d'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded font-medium text-sm transition-all ${previewMode === '3d'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
                 >
                   <Grid3x3 size={16} />
                   3D
@@ -1988,15 +2352,19 @@ const Upload: React.FC = () => {
             {/* 2D Preview */}
             {previewMode === '2d' && (
               <div className="w-full h-full bg-gray-50">
-                <Image2DPreview 
-                  vehicles={previewVehicles} 
+                <Image2DPreview
+                  vehicles={previewVehicles}
                   qrPins={qrPins}
-                  picking={isPickingPosition}
-                  onPick={handleMapPositionPick}
+                  picking={false}
+                  // Commented out: 2D picking functionality - no longer used
+                  // picking={isPickingPosition}
+                  // onPick={handleMapPositionPick}
+                  onPick={undefined}
                   mapMetadata={mapMetadata}
                   view="top"
                 />
-                {isPickingPosition && (
+                {/* Commented out: 2D picking overlay - no longer used */}
+                {/* {isPickingPosition && (
                   <div className="absolute inset-0 pointer-events-none">
                     <div className="absolute top-3 left-3 bg-white/95 border border-blue-200 shadow-sm rounded px-3 py-2 max-w-xs pointer-events-auto">
                       <p className="text-xs text-gray-700">{t('upload_qr_pick_hint')}</p>
@@ -2010,7 +2378,7 @@ const Upload: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                )}
+                )} */}
               </div>
             )}
 
@@ -2021,8 +2389,8 @@ const Upload: React.FC = () => {
                   camera={{ position: [0, 10, 20], fov: 60 }}
                   style={{ height: '100%' }}
                 >
-                  <PCDPreview3D 
-                    vehicles={previewVehicles} 
+                  <PCDPreview3D
+                    vehicles={previewVehicles}
                     pcdUrl={pcdUrl}
                     isPickingMode={isPickingPosition3D}
                     qrMarkers={qrMarkers3D}

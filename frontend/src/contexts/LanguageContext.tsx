@@ -181,6 +181,10 @@ const translations = {
     'upload_qr_save_changes': 'Lưu',
     'upload_qr_cancel_edit': 'Hủy',
     'upload_qr_edit_position': 'Chỉnh sửa vị trí',
+    'upload_qr_save_success': 'Lưu QR code thành công',
+    'upload_qr_save_failed': 'Lưu QR code thất bại',
+    'upload_qr_delete_success': 'Xóa QR code thành công',
+    'upload_qr_delete_failed': 'Xóa QR code thất bại',
     // Map info translations
     'map_info_title': 'Thông tin bản đồ',
     'map_name': 'Tên bản đồ',
@@ -428,6 +432,10 @@ const translations = {
     'upload_qr_save_changes': 'Save',
     'upload_qr_cancel_edit': 'Cancel',
     'upload_qr_edit_position': 'Edit position',
+    'upload_qr_save_success': 'QR codes saved successfully',
+    'upload_qr_save_failed': 'Failed to save QR codes',
+    'upload_qr_delete_success': 'QR code deleted',
+    'upload_qr_delete_failed': 'Failed to delete QR code',
     // Map info translations
     'map_info_title': 'Map information',
     'map_name': 'Map name',
@@ -676,6 +684,10 @@ const translations = {
     'upload_qr_save_changes': '保存',
     'upload_qr_cancel_edit': 'キャンセル',
     'upload_qr_edit_position': '位置を編集',
+    'upload_qr_save_success': 'QRコードを保存しました',
+    'upload_qr_save_failed': 'QRコードの保存に失敗しました',
+    'upload_qr_delete_success': 'QRコードを削除しました',
+    'upload_qr_delete_failed': 'QRコードの削除に失敗しました',
     // Map info translations
     'map_info_title': 'マップ情報',
     'map_name': 'マップ名',
