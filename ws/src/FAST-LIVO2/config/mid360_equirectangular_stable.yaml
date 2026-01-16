@@ -96,7 +96,7 @@
 
     evo:
       seq_name: "MID360_Equirectangular_Stable"
-      pose_output_en: false
+      pose_output_en: true  # Enable trajectory file output for tunnel direction computation
 
     pcd_save:
       pcd_save_en: true
