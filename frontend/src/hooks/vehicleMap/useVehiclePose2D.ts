@@ -28,7 +28,7 @@ function getMarkerColorByStatus(status: 'online' | 'offline' | undefined, preser
  * 
  * @returns Vehicle markers, map metadata, loading state, and refresh function
  */
-export function useVehiclePose2D(view: 'top' | 'side_x' | 'side_y' = 'top'): UseVehiclePose2DResult {
+export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose2DResult {
   const [mapMetadata, setMapMetadata] = useState<MapMetadata | null>(null);
   const [vehicleMarkers, setVehicleMarkers] = useState<VehicleMarker2D[]>([]);
   const [isLoading, setIsLoading] = useState(true);

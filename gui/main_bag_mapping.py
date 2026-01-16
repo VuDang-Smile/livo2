@@ -1334,16 +1334,34 @@ class BagMappingInterface:
             self.root.after(0, lambda: self.set_progress(20))
             
             # 2. HBA Optimize
-            self.add_log(self.translator.get('log.step_hba', 'Step 2/6: Running HBA Optimize...'))
+            self.add_log(self.translator.get('log.step_hba', 'Step 2/8: Running HBA Optimize...'))
             if not self._run_hba_core():
                 self.add_log(self.translator.get('log.pipeline_stopped_hba', '❌ Pipeline stopped at HBA step.'))
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                 return
             
+            self.root.after(0, lambda: self.set_progress(35))
+            
+            # 2.5. Compute Tunnel Direction
+            self.add_log(self.translator.get('log.step_compute_tunnel_dir', 'Step 2.5/8: Computing tunnel direction...'))
+            if not self._compute_tunnel_direction():
+                self.add_log(self.translator.get('log.pipeline_stopped_compute_dir', '❌ Pipeline stopped at Compute Tunnel Direction step.'))
+                self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
+                return
+            
             self.root.after(0, lambda: self.set_progress(40))
             
+            # 2.6. Rotate PCD to +X
+            self.add_log(self.translator.get('log.step_rotate_pcd', 'Step 2.6/8: Rotating PCD to align with +X axis...'))
+            if not self._rotate_pcd_to_positive_x():
+                self.add_log(self.translator.get('log.pipeline_stopped_rotate', '❌ Pipeline stopped at Rotate PCD step.'))
+                self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
+                return
+            
+            self.root.after(0, lambda: self.set_progress(45))
+            
             # 3. SC Tile
-            self.add_log(self.translator.get('log.step_sc', 'Step 3/6: Running ScanContext Tiling...'))
+            self.add_log(self.translator.get('log.step_sc', 'Step 3/8: Running ScanContext Tiling...'))
             if not self._run_sc_core():
                 self.add_log(self.translator.get('log.pipeline_stopped_sc', '❌ Pipeline stopped at ScanContext step.'))
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
@@ -1352,18 +1370,18 @@ class BagMappingInterface:
             self.root.after(0, lambda: self.set_progress(60))
             
             # 4. Generate Floorplan
-            self.add_log(self.translator.get('log.step_floorplan', 'Step 4/6: Generating floorplan...'))
+            self.add_log(self.translator.get('log.step_floorplan', 'Step 4/8: Generating floorplan...'))
             if not self._generate_floorplan():
                 self.add_log(self.translator.get('log.pipeline_stopped_floorplan', '❌ Pipeline stopped at Generate Floorplan step.'))
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
                 return
             
-            self.root.after(0, lambda: self.set_progress(80))
+            self.root.after(0, lambda: self.set_progress(70))
             
             # 4.5. So sánh với bản thiết kế (PCD/OBJ) nếu người dùng đã chọn
             if self.design_file_path:
                 self.add_log(self.translator.get('log.step_comparing_design_map', 
-                    'Step 5/7: Comparing generated map with design map...'))
+                    'Step 5/8: Comparing generated map with design map...'))
                 generated_pcd_path = (
                     self.workspace_path
                     / "src"
@@ -1381,7 +1399,7 @@ class BagMappingInterface:
                     return
 
                 # Cập nhật progress nhẹ sau khi so sánh
-                self.root.after(0, lambda: self.set_progress(82))
+                self.root.after(0, lambda: self.set_progress(75))
 
                 # Nếu % khớp thấp hơn ngưỡng, hỏi người dùng có tiếp tục upload không
                 try:
@@ -1411,18 +1429,18 @@ class BagMappingInterface:
                             '➡ User chose to continue upload despite low similarity.'))
             
             # 5. Save QR codes to JSON
-            self.add_log(self.translator.get('log.step_save_qr', 'Step 5/7: Saving QR codes...'))
+            self.add_log(self.translator.get('log.step_save_qr', 'Step 6/8: Saving QR codes...'))
             qr_json_path = self._save_qr_codes_to_json()
             if qr_json_path:
                 self.add_log(self.translator.get('log.qr_codes_saved', '✅ QR codes saved to: {path}').replace('{path}', str(qr_json_path)))
             else:
                 self.add_log(self.translator.get('log.no_qr_codes_to_save', '⚠️ No QR codes to save'))
             
-            self.root.after(0, lambda: self.set_progress(75))
+            self.root.after(0, lambda: self.set_progress(80))
             
             # 6. Zip files
-            self.add_log(self.translator.get('log.step_zip', 'Step 6/7: Compressing files (Zip)...'))
-            zip_path = self._zip_map_folders()
+            self.add_log(self.translator.get('log.step_zip', 'Step 7/8: Compressing files (Zip)...'))
+            zip_path = self._zip_map_folders(map_name, vehicle_id)
             if not zip_path:
                 self.add_log(self.translator.get('log.pipeline_stopped_zip', '❌ Pipeline stopped at Zip step.'))
                 self.root.after(0, lambda: self.btn_upload.config(state=tk.NORMAL))
@@ -1431,7 +1449,7 @@ class BagMappingInterface:
             self.root.after(0, lambda: self.set_progress(90))
             
             # 7. Upload to backend
-            self.add_log(self.translator.get('log.step_upload', 'Step 7/7: Uploading to backend...'))
+            self.add_log(self.translator.get('log.step_upload', 'Step 8/8: Uploading to backend...'))
             upload_success, upload_info = self._upload_map_to_backend(zip_path, map_name, vehicle_id)
             if upload_success:
                 if upload_info:
@@ -2871,6 +2889,156 @@ class BagMappingInterface:
             self.add_log(f"   Details: {traceback.format_exc()}")
             return False
     
+    def _compute_tunnel_direction(self):
+        """Tính vector hướng đường hầm từ PCD sau HBA"""
+        hba_map_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "hba_map"
+        merged_map_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "merged_map"
+        compute_dir_script = Path(__file__).parent.parent / "scripts" / "compute_tunnel_direction.py"
+        
+        if not compute_dir_script.exists():
+            self.add_log(self.translator.get('log.compute_dir_script_not_found', '❌ compute_tunnel_direction.py script not found: {path}').replace('{path}', str(compute_dir_script)))
+            return False
+        
+        # Input PCD từ hba_map
+        input_pcd = hba_map_dir / "merge_all_hba.pcd"
+        if not input_pcd.exists():
+            self.add_log(self.translator.get('log.compute_dir_no_hba_pcd', '❌ merge_all_hba.pcd not found in hba_map directory'))
+            self.add_log(f"   Expected path: {input_pcd}")
+            return False
+        
+        # Output sẽ được lưu vào merged_map
+        merged_map_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = merged_map_dir
+        
+        self.add_log("=" * 60)
+        self.add_log(self.translator.get('log.compute_dir_start', '🧭 Computing tunnel direction vector...'))
+        self.add_log(f"📁 Input PCD: {input_pcd}")
+        self.add_log(f"📁 Output directory: {output_dir}")
+        
+        try:
+            # Gọi script compute_tunnel_direction.py
+            cmd = [
+                "python3",
+                str(compute_dir_script),
+                "--pcd_path", str(input_pcd),
+                "--output_dir", str(output_dir)
+            ]
+            
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
+            
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    self.add_log(f"[TunnelDirection] {line.strip()}")
+            
+            process.wait()
+            
+            if process.returncode == 0:
+                # Kiểm tra output file
+                expected_output = output_dir / f"{input_pcd.stem}_tunnel_direction.json"
+                if expected_output.exists():
+                    self.add_log(self.translator.get('log.compute_dir_success', '✅ Tunnel direction computed successfully!'))
+                    self.add_log(f"📄 Output: {expected_output}")
+                    return True
+                else:
+                    self.add_log(self.translator.get('log.compute_dir_no_output', '⚠️ Script completed but output file not found'))
+                    self.add_log(f"   Expected: {expected_output}")
+                    return False
+            else:
+                self.add_log(self.translator.get('log.compute_dir_failed', '❌ compute_tunnel_direction.py failed with code {code}').replace('{code}', str(process.returncode)))
+                return False
+                
+        except Exception as e:
+            self.add_log(self.translator.get('log.compute_dir_error', '❌ Error computing tunnel direction: {error}').replace('{error}', str(e)))
+            import traceback
+            self.add_log(f"   Details: {traceback.format_exc()}")
+            return False
+    
+    def _rotate_pcd_to_positive_x(self):
+        """Xoay PCD về hướng +x dựa trên tunnel direction"""
+        hba_map_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "hba_map"
+        merged_map_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "merged_map"
+        rotate_script = Path(__file__).parent.parent / "scripts" / "rotate_pcd_to_positive_x.py"
+        
+        if not rotate_script.exists():
+            self.add_log(self.translator.get('log.rotate_script_not_found', '❌ rotate_pcd_to_positive_x.py script not found: {path}').replace('{path}', str(rotate_script)))
+            return False
+        
+        # Input PCD từ hba_map
+        input_pcd = hba_map_dir / "merge_all_hba.pcd"
+        if not input_pcd.exists():
+            self.add_log(self.translator.get('log.rotate_no_hba_pcd', '❌ merge_all_hba.pcd not found in hba_map directory'))
+            return False
+        
+        # Tìm direction JSON trong merged_map
+        direction_json = merged_map_dir / f"{input_pcd.stem}_tunnel_direction.json"
+        if not direction_json.exists():
+            # Thử tìm với tên khác
+            direction_json = merged_map_dir / "merged_all_tunnel_direction.json"
+            if not direction_json.exists():
+                self.add_log(self.translator.get('log.rotate_no_direction_json', '❌ Tunnel direction JSON not found'))
+                self.add_log(f"   Expected: {merged_map_dir / f'{input_pcd.stem}_tunnel_direction.json'}")
+                return False
+        
+        # Output sẽ được lưu vào merged_map với tên merged_all_rotated.pcd
+        output_dir = merged_map_dir
+        
+        self.add_log("=" * 60)
+        self.add_log(self.translator.get('log.rotate_start', '🔄 Rotating PCD to align tunnel with +X axis...'))
+        self.add_log(f"📁 Input PCD: {input_pcd}")
+        self.add_log(f"📁 Direction JSON: {direction_json}")
+        self.add_log(f"📁 Output directory: {output_dir}")
+        
+        try:
+            # Gọi script rotate_pcd_to_positive_x.py
+            cmd = [
+                "python3",
+                str(rotate_script),
+                "--pcd_path", str(input_pcd),
+                "--direction_json", str(direction_json),
+                "--output_dir", str(output_dir),
+                "--output_name", "merged_all_rotated"
+            ]
+            
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
+            
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    self.add_log(f"[RotatePCD] {line.strip()}")
+            
+            process.wait()
+            
+            if process.returncode == 0:
+                # Kiểm tra output files
+                expected_pcd = output_dir / "merged_all_rotated.pcd"
+                expected_metadata = output_dir / "merged_all_rotated_rotation_metadata.json"
+                
+                if expected_pcd.exists() and expected_metadata.exists():
+                    self.add_log(self.translator.get('log.rotate_success', '✅ PCD rotated successfully!'))
+                    self.add_log(f"📄 Rotated PCD: {expected_pcd}")
+                    self.add_log(f"📄 Rotation metadata: {expected_metadata}")
+                    return True
+                else:
+                    missing = []
+                    if not expected_pcd.exists():
+                        missing.append(f"PCD: {expected_pcd}")
+                    if not expected_metadata.exists():
+                        missing.append(f"Metadata: {expected_metadata}")
+                    self.add_log(self.translator.get('log.rotate_missing_output', '⚠️ Script completed but output files missing: {files}').replace('{files}', ', '.join(missing)))
+                    return False
+            else:
+                self.add_log(self.translator.get('log.rotate_failed', '❌ rotate_pcd_to_positive_x.py failed with code {code}').replace('{code}', str(process.returncode)))
+                return False
+                
+        except Exception as e:
+            self.add_log(self.translator.get('log.rotate_error', '❌ Error rotating PCD: {error}').replace('{error}', str(e)))
+            import traceback
+            self.add_log(f"   Details: {traceback.format_exc()}")
+            return False
+    
     def _run_sc_core(self):
         """Core logic của ScanContext tiling (đồng bộ) - sử dụng input từ hba_map với error handling tốt hơn"""
         hba_map_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "hba_map"
@@ -3111,18 +3279,16 @@ class BagMappingInterface:
             return False
     
     def _generate_floorplan(self):
-        """Generate floorplan from PCD file using pcd_to_3_views - tạo folder riêng cho 2D"""
-        hba_map_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "hba_map"
+        """Generate floorplan from PCD file using pcd_to_2_views - tạo folder riêng cho 2D"""
         merged_map_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "merged_map"
         
-        # Prefer merge_all_hba.pcd từ hba_map, fallback to merged_all.pcd từ merged_map
-        input_pcd = hba_map_dir / "merge_all_hba.pcd"
+        # Use merged_all_rotated.pcd from merged_map directory (file đã được xoay về +X)
+        input_pcd = merged_map_dir / "merged_all_rotated.pcd"
         if not input_pcd.exists():
-            self.add_log(self.translator.get('log.floorplan_hba_not_found', '⚠️ merge_all_hba.pcd not found, trying merged_all.pcd...'))
-            input_pcd = merged_map_dir / "merged_all.pcd"
-            if not input_pcd.exists():
-                self.add_log(self.translator.get('log.floorplan_no_pcd_found', '❌ Neither merge_all_hba.pcd nor merged_all.pcd found for floorplan generation'))
-                return False
+            self.add_log(self.translator.get('log.floorplan_no_pcd_found', '❌ merged_all_rotated.pcd not found in merged_map directory'))
+            self.add_log(f"   Expected path: {input_pcd}")
+            self.add_log(self.translator.get('log.floorplan_hint', '   Hint: Make sure rotation step completed successfully.'))
+            return False
         
         # Tạo folder riêng cho floorplan (2D)
         floorplan_output_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "floorplan_2d"
@@ -3141,10 +3307,10 @@ class BagMappingInterface:
             # Dynamic import using importlib to avoid linter warnings
             import importlib
             pcd_module = importlib.import_module("pcd_to_floorplan")
-            pcd_to_3_views = pcd_module.pcd_to_3_views
+            pcd_to_2_views = pcd_module.pcd_to_2_views
             
-            # Generate 3 views with same parameters as backend
-            result = pcd_to_3_views(
+            # Generate 2 views (top, side_x) with same parameters as backend
+            result = pcd_to_2_views(
                 str(input_pcd),
                 output_dir=str(floorplan_output_dir),
                 resolution=0.05,
@@ -3161,7 +3327,6 @@ class BagMappingInterface:
             expected_files = [
                 floorplan_output_dir / f"{input_pcd.stem}_top.png",
                 floorplan_output_dir / f"{input_pcd.stem}_side_x.png",
-                floorplan_output_dir / f"{input_pcd.stem}_side_y.png",
                 floorplan_output_dir / f"{input_pcd.stem}_metadata.json"
             ]
             
@@ -3234,9 +3399,11 @@ class BagMappingInterface:
             self.add_log(self.translator.get('log.error_saving_qr', '❌ Error saving QR codes: {error}').replace('{error}', str(e)))
             return None
     
-    def _zip_map_folders(self):
-        """Zip các folder map: merged_map, hba_map, fastloc_map, floorplan_2d và file QR_detect.json"""
+    def _zip_map_folders(self, map_name: str = None, vehicle_id: str = None):
+        """Zip các folder map: merged_map, hba_map, fastloc_map, floorplan_2d và file QR_detect.json
+        Tạo map_metadata.json với thông tin về rotation và tunnel direction"""
         log_root = self.workspace_path / "src" / "FAST-LIVO2" / "Log"
+        merged_map_dir = log_root / "merged_map"
         
         # Các folder cần zip
         folders_to_zip = [
@@ -3282,6 +3449,39 @@ class BagMappingInterface:
         self.add_log(self.translator.get('log.zip_folders', '📁 Items to zip: {folders}').replace('{folders}', ', '.join(zip_items)))
         
         try:
+            # Đọc rotation metadata và tunnel direction nếu có
+            rotation_metadata = None
+            tunnel_direction_data = None
+            
+            rotation_meta_path = merged_map_dir / "merged_all_rotated_rotation_metadata.json"
+            if rotation_meta_path.exists():
+                try:
+                    with open(rotation_meta_path, 'r', encoding='utf-8') as f:
+                        rotation_metadata = json.load(f)
+                    self.add_log(self.translator.get('log.zip_loaded_rotation_meta', '📄 Loaded rotation metadata'))
+                except Exception as e:
+                    self.add_log(self.translator.get('log.zip_error_reading_rotation', '⚠️ Error reading rotation metadata: {error}').replace('{error}', str(e)))
+            
+            # Tìm tunnel direction JSON (có thể có nhiều tên)
+            # Script compute_tunnel_direction.py tạo file với tên {pcd_stem}_tunnel_direction.json
+            tunnel_dir_patterns = [
+                merged_map_dir / "merge_all_hba_tunnel_direction.json",  # Từ hba_map/merge_all_hba.pcd
+                merged_map_dir / "merged_all_tunnel_direction.json",    # Fallback
+            ]
+            # Tìm tất cả file *_tunnel_direction.json trong merged_map
+            for tunnel_file in merged_map_dir.glob("*_tunnel_direction.json"):
+                if tunnel_file not in tunnel_dir_patterns:
+                    tunnel_dir_patterns.append(tunnel_file)
+            for pattern in tunnel_dir_patterns:
+                if pattern.exists():
+                    try:
+                        with open(pattern, 'r', encoding='utf-8') as f:
+                            tunnel_direction_data = json.load(f)
+                        self.add_log(self.translator.get('log.zip_loaded_tunnel_dir', '📄 Loaded tunnel direction data'))
+                        break
+                    except Exception as e:
+                        self.add_log(self.translator.get('log.zip_error_reading_tunnel', '⚠️ Error reading tunnel direction: {error}').replace('{error}', str(e)))
+            
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 # Zip các folders
                 for folder_name in existing_folders:
@@ -3299,6 +3499,64 @@ class BagMappingInterface:
                 if has_qr_file:
                     zipf.write(qr_detect_file, "QR_detect.json")
                     self.add_log(self.translator.get('log.zip_file_added', '   ✓ Added: {path}').replace('{path}', 'QR_detect.json'))
+                
+                # Tạo và thêm map_metadata.json vào zip (chỉ giữ thông tin cần thiết)
+                map_metadata = {
+                    "map_name": map_name or "Unknown",
+                    "vehicle_id": vehicle_id or "Unknown",
+                    "created_at": datetime.now().isoformat(),
+                }
+                
+                # Thêm thông tin rotation nếu có (chỉ giữ thông tin cần thiết)
+                if rotation_metadata:
+                    rotation_info = rotation_metadata.get("rotation_info", {})
+                    # Tìm tên file rotation metadata (chỉ tên file, không có path)
+                    rotation_source_file = "merged_all_rotated_rotation_metadata.json"
+                    map_metadata["tunnel_rotation"] = {
+                        "angle_rad": rotation_info.get("rotation_angle_rad"),
+                        "angle_deg": rotation_info.get("rotation_angle_deg"),
+                        "rotation_axis": rotation_info.get("rotation_axis"),
+                        "source_file": rotation_source_file
+                    }
+                
+                # Thêm thông tin tunnel direction nếu có (chỉ giữ thông tin cần thiết)
+                if tunnel_direction_data:
+                    tunnel_dir_info = tunnel_direction_data.get("tunnel_direction", {})
+                    if tunnel_dir_info:
+                        # Tìm tên file tunnel direction (chỉ tên file, không có path)
+                        tunnel_source_file = None
+                        for pattern in tunnel_dir_patterns:
+                            if pattern.exists():
+                                tunnel_source_file = pattern.name
+                                break
+                        if not tunnel_source_file:
+                            tunnel_source_file = "merged_all_tunnel_direction.json"
+                        
+                        map_metadata["tunnel_direction"] = {
+                            "direction": tunnel_dir_info.get("direction"),
+                            "source_file": tunnel_source_file
+                        }
+                
+                # Thêm danh sách files quan trọng (chỉ giữ các file cần thiết)
+                map_metadata["files"] = {}
+                if (log_root / "hba_map" / "merge_all_hba.pcd").exists():
+                    map_metadata["files"]["pcd_original"] = "hba_map/merge_all_hba.pcd"
+                if (merged_map_dir / "merged_all_rotated.pcd").exists():
+                    map_metadata["files"]["pcd_rotated"] = "merged_map/merged_all_rotated.pcd"
+                floorplan_dir = log_root / "floorplan_2d"
+                if floorplan_dir.exists():
+                    top_png = list(floorplan_dir.glob("*_top.png"))
+                    side_png = list(floorplan_dir.glob("*_side_x.png"))
+                    if top_png:
+                        map_metadata["files"]["floorplan_top"] = f"floorplan_2d/{top_png[0].name}"
+                    if side_png:
+                        map_metadata["files"]["floorplan_side"] = f"floorplan_2d/{side_png[0].name}"
+                
+                # Ghi map_metadata.json vào zip
+                import io
+                metadata_json_str = json.dumps(map_metadata, ensure_ascii=False, indent=2)
+                zipf.writestr("map_metadata.json", metadata_json_str.encode('utf-8'))
+                self.add_log(self.translator.get('log.zip_file_added', '   ✓ Added: {path}').replace('{path}', 'map_metadata.json'))
             
             if zip_path.exists():
                 size_mb = zip_path.stat().st_size / (1024 * 1024)

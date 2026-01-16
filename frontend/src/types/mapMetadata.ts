@@ -1,6 +1,6 @@
 /**
  * Type definitions for map metadata and coordinate transformations
- * Supports 3 views: top (XY plane), side_x (YZ plane), side_y (XZ plane)
+ * Supports 2 views: top (XY plane), side_x (YZ plane)
  */
 
 /**
@@ -155,10 +155,10 @@ export interface ProcessingParams {
 }
 
 /**
- * Metadata for a single view (top, side_x, or side_y)
+ * Metadata for a single view (top or side_x)
  */
 export interface ViewMetadata {
-  id: 'top' | 'side_x' | 'side_y';
+  id: 'top' | 'side_x';
   projection: ProjectionInfo;
   bounds: {
     world: WorldBounds;
@@ -169,7 +169,7 @@ export interface ViewMetadata {
 }
 
 /**
- * Complete map metadata with all 3 views
+ * Complete map metadata with 2 views (top and side_x)
  */
 export interface MapMetadata {
   input_file: string;
@@ -182,7 +182,6 @@ export interface MapMetadata {
   views: {
     top: ViewMetadata;
     side_x: ViewMetadata;
-    side_y: ViewMetadata;
   };
 }
 

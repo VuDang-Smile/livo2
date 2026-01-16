@@ -9,7 +9,7 @@ interface MapView2DProps {
   vehicleMarkers: VehicleMarker2D[];
   mapMetadata: MapMetadata | null;
   uploadId?: string | null;
-  view?: 'top' | 'side_x' | 'side_y';
+  view?: 'top' | 'side_x';
   selectedVehicleId?: string | null;
   onVehicleSelect?: (id: string) => void;
 }

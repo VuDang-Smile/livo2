@@ -199,7 +199,7 @@ const Image2DPreview: React.FC<{
   picking?: boolean;
   onPick?: (pos: [number, number]) => void;
   mapMetadata?: MapMetadata | null;
-  view?: 'top' | 'side_x' | 'side_y';
+  view?: 'top' | 'side_x';
 }> = ({ vehicles, qrPins = [], picking = false, onPick, mapMetadata, view = 'top' }) => {
   const { t } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement>(null);

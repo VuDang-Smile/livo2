@@ -381,8 +381,8 @@ Examples:
     parser.add_argument(
         '--min_distance',
         type=float,
-        default=0.1,
-        help='Khoảng cách tối thiểu giữa 2 pose để tính vector (m, default: 0.1)'
+        default=0.01,
+        help='Khoảng cách tối thiểu giữa 2 pose để tính vector (m, default: 0.01)'
     )
     parser.add_argument(
         '--angle_threshold',
