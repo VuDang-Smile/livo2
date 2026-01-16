@@ -1238,6 +1238,8 @@ const Upload: React.FC = () => {
       id: `qr-${Date.now()}-${Math.random()}`,
       code: `TM:${row.normalizedIndex || String(parseInt(row.codeIndex, 10)).padStart(3, '0')}`,
       position: row.position,
+      position3D: row.position3D, // Giữ nguyên position3D (bao gồm Z coordinate)
+      surface: row.surface, // Giữ nguyên surface information
       isManual: true,
     }));
 
@@ -1248,8 +1250,18 @@ const Upload: React.FC = () => {
     (async () => {
       try {
         const payload: { [key: string]: number[] } = {};
+        const coordinateConfig = mapMetadata?.coordinate_system;
         newQRCodes.forEach(qr => {
-          const coords3d = (qr as any).position3D ? (qr as any).position3D : [qr.position[0], qr.position[1], 0];
+          // Use position3D if available (in scene coordinates), convert to world coordinates for backend
+          let coords3d: [number, number, number];
+          if (qr.position3D) {
+            // Convert from scene coordinates to world coordinates
+            coords3d = transformSceneToWorld(qr.position3D, coordinateConfig);
+          } else {
+            // Fallback: convert 2D to 3D scene, then to world
+            const scenePos3D = convert2DTo3DScene(qr.position, qr.surface || 'floor', mapMetadata, 'top');
+            coords3d = transformSceneToWorld(scenePos3D, coordinateConfig);
+          }
           payload[qr.code] = coords3d;
         });
 
@@ -1351,7 +1363,17 @@ const Upload: React.FC = () => {
     (async () => {
       try {
         const code = editedQR.code;
-        const coords3d = editedQR.position3D ? editedQR.position3D : [editedQR.position[0], editedQR.position[1], 0];
+        const coordinateConfig = mapMetadata?.coordinate_system;
+        // Use position3D if available (in scene coordinates), convert to world coordinates for backend
+        let coords3d: [number, number, number];
+        if (editedQR.position3D) {
+          // Convert from scene coordinates to world coordinates
+          coords3d = transformSceneToWorld(editedQR.position3D, coordinateConfig);
+        } else {
+          // Fallback: convert 2D to 3D scene, then to world
+          const scenePos3D = convert2DTo3DScene(editedQR.position, editedQR.surface || 'floor', mapMetadata, 'top');
+          coords3d = transformSceneToWorld(scenePos3D, coordinateConfig);
+        }
         const payload: { [key: string]: number[] } = {};
         payload[code] = coords3d;
 
@@ -1984,7 +2006,12 @@ const Upload: React.FC = () => {
                           {isEditing ? (
                             <div className="space-y-2">
                               <div className="text-xs text-gray-700">
-                                {t('upload_qr_position_x')}: {isNaN(displayPosition[0]) ? '--' : displayPosition[0]}, {t('upload_qr_position_y')}: {isNaN(displayPosition[1]) ? '--' : displayPosition[1]}
+                                {t('upload_qr_position_x')}: {isNaN(displayPosition[0]) ? '--' : displayPosition[0].toFixed(2)}, {t('upload_qr_position_y')}: {isNaN(displayPosition[1]) ? '--' : displayPosition[1].toFixed(2)}
+                                {editedQR?.position3D && (
+                                  <>
+                                    , Z: {editedQR.position3D[2].toFixed(2)}
+                                  </>
+                                )}
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 <button
@@ -2010,7 +2037,13 @@ const Upload: React.FC = () => {
                               )}
                             </div>
                           ) : (
-                            <span>X: {isNaN(qr.position[0]) ? '--' : qr.position[0]}, Y: {isNaN(qr.position[1]) ? '--' : qr.position[1]}</span>
+                            <span>
+                              X: {isNaN(qr.position[0]) ? '--' : qr.position[0].toFixed(2)}, 
+                              Y: {isNaN(qr.position[1]) ? '--' : qr.position[1].toFixed(2)}
+                              {qr.position3D && (
+                                <>, Z: {qr.position3D[2].toFixed(2)}</>
+                              )}
+                            </span>
                           )}
                         </td>
                         <td className="px-3 py-2">
@@ -2071,7 +2104,10 @@ const Upload: React.FC = () => {
                     <td className="px-3 py-2">
                       <div className="space-y-2">
                         <div className="text-xs text-gray-700">
-                          X: {isNaN(row.position[0]) ? '--' : row.position[0]}, Y: {isNaN(row.position[1]) ? '--' : row.position[1]}
+                          X: {isNaN(row.position[0]) ? '--' : row.position[0].toFixed(2)}, Y: {isNaN(row.position[1]) ? '--' : row.position[1].toFixed(2)}
+                          {row.position3D && (
+                            <>, Z: {row.position3D[2].toFixed(2)}</>
+                          )}
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <button
