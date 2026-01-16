@@ -1,11 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, TransformControls } from '@react-three/drei';
+import { OrbitControls, TransformControls, Text } from '@react-three/drei';
 import * as THREE from 'three';
-import { Edit, Trash2, Grid3x3, ImageIcon, Maximize2, X } from 'lucide-react';
+import { Edit, Trash2, Grid3x3, ImageIcon, Maximize2, X, CheckCircle2, XCircle, Info, AlertCircle } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import type { VehicleCanvasPosition } from '../types/vehicle';
-import { MapInfo } from '../types/mapInfo';
 import { QRCodeInfo } from '../types/qrCode';
 import { EditingRow, ManualPin } from '../types/upload';
 import PCDMap from '../components/PCDMap';
@@ -13,7 +12,6 @@ import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { useMapImage } from '../hooks/useMapImage';
 import { MAP_2D_IMAGE_URL } from '../constants/mapConfig';
 import { getVehicle2DPosition } from '../utils/vehicle2DHelper';
-import { useMapInfo } from '../hooks/api/useMapInfo';
 import { useQRCodes } from '../hooks/api/useQRCodes';
 import { MapMetadata, CoordinateSystemConfig } from '../types/mapMetadata';
 import { transformPoseToPixel, pixelToWorld } from '../utils/coordinateTransform';
@@ -200,11 +198,12 @@ const PreviewMarker3D: React.FC<{
 const QRMarker3D: React.FC<{
   position: [number, number, number];
   id: string;
+  label?: string;
   isActive?: boolean;
   surface?: 'floor' | 'ceiling' | 'left' | 'right';
   onSelect?: (id: string) => void;
   onMount?: (id: string, mesh: THREE.Mesh | null) => void;
-}> = ({ position, id, isActive = false, surface = 'floor', onSelect, onMount }) => {
+}> = ({ position, id, label, isActive = false, surface = 'floor', onSelect, onMount }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
   // Calculate rotation based on surface
@@ -283,6 +282,21 @@ const QRMarker3D: React.FC<{
         distance={3}
         color={isActive ? '#3b82f6' : '#93c5fd'}
       />
+
+      {/* Label text above the marker */}
+      {label && (
+        <Text
+          position={[0, 1.5, 0]}
+          fontSize={0.5}
+          color={isActive ? '#3b82f6' : '#ffffff'}
+          anchorX="center"
+          anchorY="middle"
+          outlineWidth={0.02}
+          outlineColor="#000000"
+        >
+          {label}
+        </Text>
+      )}
     </group>
   );
 };
@@ -403,7 +417,7 @@ const PCDPreview3D: React.FC<{
   pcdUrl?: string | null;
   mapMetadata?: MapMetadata | null;
   isPickingMode?: boolean;
-  qrMarkers?: Array<{ position: [number, number, number]; id: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>;
+  qrMarkers?: Array<{ position: [number, number, number]; id: string; label?: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>;
   onPositionPick?: (position: [number, number, number], surface: 'floor' | 'ceiling' | 'left' | 'right') => void;
   previewPosition?: [number, number, number] | null;
   onPreviewPositionUpdate?: (position: [number, number, number] | null) => void;
@@ -417,8 +431,6 @@ const PCDPreview3D: React.FC<{
         enableZoom={true}
         enableRotate={true}
         maxPolarAngle={Math.PI / 2}
-        minDistance={10}
-        maxDistance={200}
       />
 
       {/* Background color */}
@@ -458,6 +470,7 @@ const PCDPreview3D: React.FC<{
           key={marker.id}
           position={marker.position}
           id={marker.id}
+          label={marker.label}
           isActive={marker.isActive}
           surface={marker.surface || 'floor'}
         />
@@ -596,31 +609,31 @@ const Image2DPreview: React.FC<{
       };
     };
 
-    // Draw vehicles
-    vehicles.forEach(vehicle => {
-      const { x, y } = getVehicle2DPosition(vehicle, canvas.width, canvas.height);
+    // Commented out: Draw vehicles - no longer displayed on 2D map
+    // vehicles.forEach(vehicle => {
+    //   const { x, y } = getVehicle2DPosition(vehicle, canvas.width, canvas.height);
 
-      let color = '#95a5a6';
-      switch (vehicle.status) {
-        case 'online': color = '#27ae60'; break;
-        case 'offline': color = '#e74c3c'; break;
-      }
+    //   let color = '#95a5a6';
+    //   switch (vehicle.status) {
+    //     case 'online': color = '#27ae60'; break;
+    //     case 'offline': color = '#e74c3c'; break;
+    //   }
 
-      ctx.beginPath();
-      ctx.arc(x, y, 8, 0, 2 * Math.PI);
-      ctx.fillStyle = color;
-      ctx.fill();
+    //   ctx.beginPath();
+    //   ctx.arc(x, y, 8, 0, 2 * Math.PI);
+    //   ctx.fillStyle = color;
+    //   ctx.fill();
 
-      ctx.strokeStyle = '#2c3e50';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+    //   ctx.strokeStyle = '#2c3e50';
+    //   ctx.lineWidth = 2;
+    //   ctx.stroke();
 
-      ctx.fillStyle = '#2c3e50';
-      ctx.font = '12px Arial';
-      ctx.textAlign = 'center';
-      const label = vehicle.licensePlate || vehicle.id;
-      ctx.fillText(label, x, y - 15);
-    });
+    //   ctx.fillStyle = '#2c3e50';
+    //   ctx.font = '12px Arial';
+    //   ctx.textAlign = 'center';
+    //   const label = vehicle.licensePlate || vehicle.id;
+    //   ctx.fillText(label, x, y - 15);
+    // });
 
     // Draw QR pins (existing + drafting)
     qrPins.forEach(pin => {
@@ -661,7 +674,9 @@ const Image2DPreview: React.FC<{
         ctx.fillText(pin.label, x, y - 12);
       }
     });
-  }, [vehicles, qrPins, canvasSize, mapImage, imageError]);
+  }, [qrPins, canvasSize, mapImage, imageError]);
+  // Commented out: vehicles dependency removed - vehicles no longer displayed on 2D map
+  // }, [vehicles, qrPins, canvasSize, mapImage, imageError]);
 
   const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!picking || !onPick) return;
@@ -729,8 +744,8 @@ const Image2DPreview: React.FC<{
         onClick={handleCanvasClick}
       />
 
-      {/* Legend for 2D map */}
-      <div className="absolute bottom-4 left-4 bg-white bg-opacity-90 p-3 rounded-lg shadow-sm border">
+      {/* Commented out: Legend for 2D map - vehicles no longer displayed */}
+      {/* <div className="absolute bottom-4 left-4 bg-white bg-opacity-90 p-3 rounded-lg shadow-sm border">
         <div className="text-sm font-medium text-gray-700 mb-2">{t('legend')}</div>
         <div className="space-y-1">
           <div className="flex items-center space-x-2">
@@ -742,122 +757,30 @@ const Image2DPreview: React.FC<{
             <span className="text-xs text-gray-600">{t('offline')}</span>
           </div>
         </div>
-      </div>
+      </div> */}
     </div>
   );
 };
 
-// Utility function: Format file size
-const formatFileSize = (bytes: number): string => {
-  if (bytes === 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-};
-
-// Utility function: Format datetime from YYYY-MM-DD HH:mm:ss to dd/MM/yyyy HH:mm:ss
-const formatDateTime = (dateTimeStr: string): string => {
-  try {
-    const [datePart, timePart] = dateTimeStr.split(' ');
-    const [year, month, day] = datePart.split('-');
-    return `${day}/${month}/${year} ${timePart || ''}`.trim();
-  } catch (error) {
-    return dateTimeStr; // Return original if parsing fails
-  }
-};
-
-// Component hiển thị thông tin map (info card style)
-const MapInfoCard: React.FC<{
-  mapInfo: MapInfo | null;
-  isLoading?: boolean;
-  error?: string | null;
-}> = ({ mapInfo, isLoading = false, error = null }) => {
+// Component hiển thị giới thiệu về màn hình QR Mapper
+const IntroCard: React.FC = () => {
   const { t } = useLanguage();
 
-  // Loading state
-  if (isLoading) {
-    return (
-      <div className="bg-blue-50 border-l-4 border-blue-500 rounded-md p-4">
-        <div className="flex items-start">
-          <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-blue-500 mt-0.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </div>
-          <div className="ml-3 flex-1">
-            <h3 className="text-sm font-medium text-blue-800 mb-3">
-              {t('map_info_title')}
-            </h3>
-            <p className="text-xs text-blue-600">{t('loading') || 'Loading...'}</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Error state
-  if (error) {
-    return (
-      <div className="bg-red-50 border-l-4 border-red-500 rounded-md p-4">
-        <div className="flex items-start">
-          <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-red-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div className="ml-3 flex-1">
-            <h3 className="text-sm font-medium text-red-800 mb-2">
-              {t('map_info_title')}
-            </h3>
-            <p className="text-xs text-red-700">
-              {t('error_loading_map_info') || 'Error loading map information'}: {error}
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // No data state
-  if (!mapInfo) {
-    return null;
-  }
-
-  // Success state - display map info
   return (
-    <div className="bg-blue-50 border-l-4 border-blue-500 rounded-md p-4">
+    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 rounded-md p-5 shadow-sm">
       <div className="flex items-start">
         <div className="flex-shrink-0">
-          <svg className="h-5 w-5 text-blue-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="h-6 w-6 text-blue-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </div>
-        <div className="ml-3 flex-1">
-          <h3 className="text-sm font-medium text-blue-800 mb-3">
-            {t('map_info_title')}
+        <div className="ml-4 flex-1">
+          <h3 className="text-base font-semibold text-blue-900 mb-2">
+            {t('upload_intro_title')}
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-xs text-blue-700">
-            <div>
-              <span className="font-medium">{t('map_name')}:</span>
-              <span className="ml-2">{mapInfo.name}</span>
-            </div>
-            <div>
-              <span className="font-medium">{t('map_created_at')}:</span>
-              <span className="ml-2">{formatDateTime(mapInfo.createdAt)}</span>
-            </div>
-            <div>
-              <span className="font-medium">{t('map_uploaded_by')}:</span>
-              <span className="ml-2">{mapInfo.uploadedBy}</span>
-            </div>
-            <div>
-              <span className="font-medium">{t('map_uploaded_at')}:</span>
-              <span className="ml-2">{formatDateTime(mapInfo.uploadedAt)}</span>
-            </div>
-            <div>
-              <span className="font-medium">{t('map_file_size')}:</span>
-              <span className="ml-2">{formatFileSize(mapInfo.fileSize)}</span>
-            </div>
-          </div>
+          <p className="text-sm text-blue-800 leading-relaxed">
+            {t('upload_intro_content')}
+          </p>
         </div>
       </div>
     </div>
@@ -875,33 +798,35 @@ const Upload: React.FC = () => {
   const [editingRows, setEditingRows] = useState<EditingRow[]>([]);
   const [nextTempId, setNextTempId] = useState<number>(1);
   // State để chuyển đổi giữa 2D và 3D preview
-  const [previewMode, setPreviewMode] = useState<'2d' | '3d'>('2d');
+  const [previewMode, setPreviewMode] = useState<'2d' | '3d'>('3d');
   // State để fullscreen preview
   const [isFullscreenPreview, setIsFullscreenPreview] = useState(false);
   // State để track preview position saat picking
   const [previewPickPosition, setPreviewPickPosition] = useState<[number, number, number] | null>(null);
   const didAutoLoadRef = useRef(false);
   const [isLoadingLastZip, setIsLoadingLastZip] = useState(false);
-  const [isPickingPosition, setIsPickingPosition] = useState(false);
+  // Commented out: 2D picking functionality - no longer used
+  // const [isPickingPosition, setIsPickingPosition] = useState(false);
+  const [isPickingPosition] = useState(false); // Keep for compatibility but always false
   const [isPickingPosition3D, setIsPickingPosition3D] = useState(false);
   const [pickingRowId, setPickingRowId] = useState<string | null>(null);
   const mapCardRef = useRef<HTMLDivElement>(null);
   const [pcdUrl, setPcdUrl] = useState<string | null>(null);
   const pcdObjectUrlRef = useRef<string | null>(null);
-  // Simple toast notifications
-  type Toast = { id: string; message: string; type?: 'success' | 'error' | 'info' };
+  // Enhanced toast notifications
+  type Toast = { id: string; message: string; type?: 'success' | 'error' | 'info'; timeout?: number };
   const [toasts, setToasts] = useState<Toast[]>([]);
   const addToast = (message: string, type: Toast['type'] = 'info', timeout = 4000) => {
     const id = `${Date.now()}-${Math.random()}`;
-    setToasts(s => [...s, { id, message, type }]);
-    setTimeout(() => setToasts(s => s.filter(t => t.id !== id)), timeout);
+    setToasts(s => [...s, { id, message, type, timeout }]);
+    setTimeout(() => {
+      setToasts(s => s.filter(t => t.id !== id));
+    }, timeout);
   };
   // Map metadata (floorplan)
   const [mapMetadata, setMapMetadata] = useState<MapMetadata | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState<boolean>(false);
   const [mapMetadataError, setMapMetadataError] = useState<string | null>(null);
-  // Fetch map info from storage using hook
-  const { mapInfo, isLoading: isLoadingMapInfo, error: mapInfoError } = useMapInfo();
   // Fetch QR codes from storage using hook
   const { qrCodes: apiQRCodes, isLoading: isLoadingQRCodes, error: qrCodesError, refetch: refetchQRCodes } = useQRCodes();
   // State quản lý các QR code đang được chỉnh sửa (từ previewQRCodes)
@@ -1012,7 +937,8 @@ const Upload: React.FC = () => {
 
   const stopPicking = () => {
     console.log('🛑 stopPicking called');
-    setIsPickingPosition(false);
+    // Commented out: 2D picking functionality - no longer used
+    // setIsPickingPosition(false);
     setIsPickingPosition3D(false);
     setPickingRowId(null);
   };
@@ -1020,76 +946,83 @@ const Upload: React.FC = () => {
   const startPicking = (id: string, mode: '2d' | '3d' = '2d') => {
     console.log(`🎯 startPicking called: id=${id}, mode=${mode}`);
     setPickingRowId(id);
-    if (mode === '2d') {
-      setIsPickingPosition(true);
-      setIsPickingPosition3D(false);
-      console.log('✅ Enabled 2D picking mode');
-    } else {
-      setIsPickingPosition(false);
+    // Commented out: 2D picking functionality - no longer used, always use 3D
+    // if (mode === '2d') {
+    //   setIsPickingPosition(true);
+    //   setIsPickingPosition3D(false);
+    //   console.log('✅ Enabled 2D picking mode');
+    // } else {
       setIsPickingPosition3D(true);
       console.log('✅ Enabled 3D picking mode');
-    }
+    // }
   };
 
-  const handleMapPositionPick = (pos: [number, number]) => {
-    if (!pickingRowId) return;
+  // Commented out: 2D picking functionality - no longer used
+  // const handleMapPositionPick = (pos: [number, number]) => {
+  //   if (!pickingRowId) return;
 
-    // pos is in world coordinates (from pixelToWorld conversion)
-    // Get surface from existing data if available
-    let surface: 'floor' | 'ceiling' | 'left' | 'right' = 'floor';
+  //   // pos is in world coordinates (from pixelToWorld conversion)
+  //   // Get surface from existing data if available
+  //   let surface: 'floor' | 'ceiling' | 'left' | 'right' = 'floor';
     
-    // Check if we're editing an existing row
-    const editingRow = editingRows.find(r => r.tempId === pickingRowId);
-    if (editingRow && editingRow.surface) {
-      surface = editingRow.surface;
-    }
+  //   // Check if we're editing an existing row
+  //   const editingRow = editingRows.find(r => r.tempId === pickingRowId);
+  //   if (editingRow && editingRow.surface) {
+  //     surface = editingRow.surface;
+  //   }
     
-    // Check if we're editing an existing QR code
-    const editingQR = editingExistingQRCodes.get(pickingRowId);
-    if (editingQR && editingQR.surface) {
-      surface = editingQR.surface;
-    }
+  //   // Check if we're editing an existing QR code
+  //   const editingQR = editingExistingQRCodes.get(pickingRowId);
+  //   if (editingQR && editingQR.surface) {
+  //     surface = editingQR.surface;
+  //   }
     
-    // Convert 2D world position to 3D scene coordinates (our standard)
-    const position3D = convert2DTo3DScene(pos, surface, mapMetadata, 'top');
+  //   // Convert 2D world position to 3D scene coordinates (our standard)
+  //   const position3D = convert2DTo3DScene(pos, surface, mapMetadata, 'top');
 
-    // Kiểm tra xem pickingRowId có trong editingRows không
-    const isEditingRow = editingRows.some(r => r.tempId === pickingRowId);
-    if (isEditingRow) {
-      handleEditRowChange(pickingRowId, 'position', pos);
-      // Update position3D and surface information
-      setEditingRows(rows => rows.map(row => row.tempId === pickingRowId ? {
-        ...row,
-        surface,
-        position3D
-      } : row));
-      return;
-    }
+  //   // Kiểm tra xem pickingRowId có trong editingRows không
+  //   const isEditingRow = editingRows.some(r => r.tempId === pickingRowId);
+  //   if (isEditingRow) {
+  //     handleEditRowChange(pickingRowId, 'position', pos);
+  //     // Update position3D and surface information
+  //     setEditingRows(rows => rows.map(row => row.tempId === pickingRowId ? {
+  //       ...row,
+  //       surface,
+  //       position3D
+  //     } : row));
+  //     return;
+  //   }
 
-    // Kiểm tra xem pickingRowId có trong editingExistingQRCodes không
-    if (editingExistingQRCodes.has(pickingRowId)) {
-      handleUpdateQRPosition(pickingRowId, pos);
-      // Update position3D and surface information
-      setEditingExistingQRCodes(prev => {
-        const next = new Map(prev);
-        const current = next.get(pickingRowId);
-        if (current) {
-          next.set(pickingRowId, {
-            ...current,
-            surface,
-            position3D
-          });
-        }
-        return next;
-      });
-      // Also update previewQRCodes to show it immediately
-      setPreviewQRCodes(qrs => qrs.map(qr => qr.id === pickingRowId ? {
-        ...qr,
-        surface,
-        position3D
-      } : qr));
-      return;
-    }
+  //   // Kiểm tra xem pickingRowId có trong editingExistingQRCodes không
+  //   if (editingExistingQRCodes.has(pickingRowId)) {
+  //     handleUpdateQRPosition(pickingRowId, pos);
+  //     // Update position3D and surface information
+  //     setEditingExistingQRCodes(prev => {
+  //       const next = new Map(prev);
+  //       const current = next.get(pickingRowId);
+  //       if (current) {
+  //         next.set(pickingRowId, {
+  //           ...current,
+  //           surface,
+  //           position3D
+  //         });
+  //       }
+  //       return next;
+  //     });
+  //     // Also update previewQRCodes to show it immediately
+  //     setPreviewQRCodes(qrs => qrs.map(qr => qr.id === pickingRowId ? {
+  //       ...qr,
+  //       surface,
+  //       position3D
+  //     } : qr));
+  //     return;
+  //   }
+  // };
+  
+  // Placeholder function to prevent errors
+  const handleMapPositionPick = (_pos: [number, number]) => {
+    // 2D picking is disabled - this function is kept for compatibility
+    return;
   };
 
   const handleMap3DPositionPick = (pos: [number, number, number], surface: 'floor' | 'ceiling' | 'left' | 'right') => {
@@ -1238,6 +1171,8 @@ const Upload: React.FC = () => {
       id: `qr-${Date.now()}-${Math.random()}`,
       code: `TM:${row.normalizedIndex || String(parseInt(row.codeIndex, 10)).padStart(3, '0')}`,
       position: row.position,
+      position3D: row.position3D, // Giữ nguyên position3D (bao gồm Z coordinate)
+      surface: row.surface, // Giữ nguyên surface information
       isManual: true,
     }));
 
@@ -1248,8 +1183,18 @@ const Upload: React.FC = () => {
     (async () => {
       try {
         const payload: { [key: string]: number[] } = {};
+        const coordinateConfig = mapMetadata?.coordinate_system;
         newQRCodes.forEach(qr => {
-          const coords3d = (qr as any).position3D ? (qr as any).position3D : [qr.position[0], qr.position[1], 0];
+          // Use position3D if available (in scene coordinates), convert to world coordinates for backend
+          let coords3d: [number, number, number];
+          if (qr.position3D) {
+            // Convert from scene coordinates to world coordinates
+            coords3d = transformSceneToWorld(qr.position3D, coordinateConfig);
+          } else {
+            // Fallback: convert 2D to 3D scene, then to world
+            const scenePos3D = convert2DTo3DScene(qr.position, qr.surface || 'floor', mapMetadata, 'top');
+            coords3d = transformSceneToWorld(scenePos3D, coordinateConfig);
+          }
           payload[qr.code] = coords3d;
         });
 
@@ -1351,7 +1296,17 @@ const Upload: React.FC = () => {
     (async () => {
       try {
         const code = editedQR.code;
-        const coords3d = editedQR.position3D ? editedQR.position3D : [editedQR.position[0], editedQR.position[1], 0];
+        const coordinateConfig = mapMetadata?.coordinate_system;
+        // Use position3D if available (in scene coordinates), convert to world coordinates for backend
+        let coords3d: [number, number, number];
+        if (editedQR.position3D) {
+          // Convert from scene coordinates to world coordinates
+          coords3d = transformSceneToWorld(editedQR.position3D, coordinateConfig);
+        } else {
+          // Fallback: convert 2D to 3D scene, then to world
+          const scenePos3D = convert2DTo3DScene(editedQR.position, editedQR.surface || 'floor', mapMetadata, 'top');
+          coords3d = transformSceneToWorld(scenePos3D, coordinateConfig);
+        }
         const payload: { [key: string]: number[] } = {};
         payload[code] = coords3d;
 
@@ -1522,12 +1477,13 @@ const Upload: React.FC = () => {
     fetchMapMetadata();
   }, [fetchMapMetadata]);
 
-  useEffect(() => {
-    document.body.style.overflow = isPickingPosition ? 'hidden' : '';
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [isPickingPosition]);
+  // Commented out: 2D picking functionality - no longer used
+  // useEffect(() => {
+  //   document.body.style.overflow = isPickingPosition ? 'hidden' : '';
+  //   return () => {
+  //     document.body.style.overflow = '';
+  //   };
+  // }, [isPickingPosition]);
 
   // Auto-sync QR codes from API when available (only if previewQRCodes is empty)
   useEffect(() => {
@@ -1680,8 +1636,8 @@ const Upload: React.FC = () => {
   }, [previewQRCodes, editingRows, editingExistingQRCodes, deletedQRCodeIds, pickingRowId, mapMetadata]);
 
   // Convert 2D QR pins to 3D markers for 3D view
-  const qrMarkers3D = useMemo<Array<{ position: [number, number, number]; id: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>>(() => {
-    const markers: Array<{ position: [number, number, number]; id: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }> = [];
+  const qrMarkers3D = useMemo<Array<{ position: [number, number, number]; id: string; label?: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>>(() => {
+    const markers: Array<{ position: [number, number, number]; id: string; label?: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }> = [];
     const coordinateConfig = mapMetadata?.coordinate_system;
 
     // Add saved QR codes
@@ -1695,9 +1651,13 @@ const Upload: React.FC = () => {
           ? qr.position3D
           : convert2DTo3DScene(qr.position, surface, mapMetadata, 'top');
         
+        // Get label from QR code
+        const label = qr.code;
+        
         markers.push({
           position: scenePos3d, // Use scene coordinates directly
           id: qr.id,
+          label,
           isActive: pickingRowId === qr.id,
           surface
         });
@@ -1714,9 +1674,15 @@ const Upload: React.FC = () => {
         ? row.position3D
         : convert2DTo3DScene(row.position, surface, mapMetadata, 'top');
 
+      // Get label from codeIndex if available
+      const label = row.codeIndex && /^\d+$/.test(row.codeIndex)
+        ? `TM:${String(parseInt(row.codeIndex, 10)).padStart(3, '0')}`
+        : undefined;
+
       markers.push({
         position: scenePos3d, // Use scene coordinates directly
         id: row.tempId,
+        label,
         isActive: row.tempId === pickingRowId,
         surface: row.surface || 'floor'
       });
@@ -1728,15 +1694,79 @@ const Upload: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Toast container */}
-      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2">
-        {toasts.map(tst => (
-          <div key={tst.id} className={`px-3 py-2 rounded shadow text-sm ${tst.type === 'error' ? 'bg-red-600 text-white' : tst.type === 'success' ? 'bg-green-600 text-white' : 'bg-gray-800 text-white'}`}>
-            {tst.message}
-          </div>
-        ))}
+      {/* Enhanced Toast container */}
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-3 pointer-events-none">
+        {toasts.map((tst, index) => {
+          const getToastStyles = () => {
+            switch (tst.type) {
+              case 'success':
+                return 'bg-white border-l-4 border-green-500 text-green-800 shadow-lg';
+              case 'error':
+                return 'bg-white border-l-4 border-red-500 text-red-800 shadow-lg';
+              case 'info':
+              default:
+                return 'bg-white border-l-4 border-blue-500 text-blue-800 shadow-lg';
+            }
+          };
+
+          const getIcon = () => {
+            switch (tst.type) {
+              case 'success':
+                return <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />;
+              case 'error':
+                return <XCircle className="w-5 h-5 text-red-500 flex-shrink-0" />;
+              case 'info':
+              default:
+                return <Info className="w-5 h-5 text-blue-500 flex-shrink-0" />;
+            }
+          };
+
+          return (
+            <div
+              key={tst.id}
+              className={`
+                ${getToastStyles()}
+                px-4 py-3 rounded-lg
+                min-w-[300px] max-w-[400px]
+                flex items-start gap-3
+                pointer-events-auto
+                animate-in slide-in-from-right-full
+                transition-all duration-300 ease-in-out
+                backdrop-blur-sm
+              `}
+              style={{
+                animation: `slideInRight 0.3s ease-out ${index * 0.1}s both`,
+              }}
+            >
+              {getIcon()}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium leading-5">{tst.message}</p>
+              </div>
+              <button
+                onClick={() => setToasts(s => s.filter(t => t.id !== tst.id))}
+                className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          );
+        })}
       </div>
-      {isPickingPosition && (
+      <style>{`
+        @keyframes slideInRight {
+          from {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+      `}</style>
+      {/* Commented out: 2D picking overlay - no longer used */}
+      {/* {isPickingPosition && (
         <>
           <div className="fixed inset-0 bg-black/40 backdrop-blur-[1px] z-40 pointer-events-auto" />
           <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
@@ -1745,7 +1775,7 @@ const Upload: React.FC = () => {
             </div>
           </div>
         </>
-      )}
+      )} */}
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
@@ -1775,12 +1805,8 @@ const Upload: React.FC = () => {
           )}
         </div>
       </div>
-      {/* Map Info Card */}
-      <MapInfoCard
-        mapInfo={mapInfo}
-        isLoading={isLoadingMapInfo}
-        error={mapInfoError}
-      />
+      {/* Introduction Card */}
+      <IntroCard />
 
       {/* Section 2 & 3: Preview PCD/Image + QR codes */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1842,17 +1868,23 @@ const Upload: React.FC = () => {
             {previewMode === '2d' && (
               <div
                 ref={mapCardRef}
-                className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative ${isPickingPosition ? 'ring-2 ring-blue-500 z-50' : ''}`}
+                className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative`}
+                // Commented out: 2D picking ring - no longer used
+                // className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative ${isPickingPosition ? 'ring-2 ring-blue-500 z-50' : ''}`}
               >
                 <Image2DPreview
                   vehicles={previewVehicles}
                   qrPins={qrPins}
-                  picking={isPickingPosition}
-                  onPick={handleMapPositionPick}
+                  picking={false}
+                  // Commented out: 2D picking functionality - no longer used
+                  // picking={isPickingPosition}
+                  // onPick={handleMapPositionPick}
+                  onPick={undefined}
                   mapMetadata={mapMetadata}
                   view="top"
                 />
-                {isPickingPosition && (
+                {/* Commented out: 2D picking overlay - no longer used */}
+                {/* {isPickingPosition && (
                   <div className="absolute inset-0 pointer-events-none">
                     <div className="absolute top-3 left-3 bg-white/95 border border-blue-200 shadow-sm rounded px-3 py-2 max-w-xs pointer-events-auto">
                       <p className="text-xs text-gray-700">{t('upload_qr_pick_hint')}</p>
@@ -1866,7 +1898,7 @@ const Upload: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                )}
+                )} */}
               </div>
             )}
 
@@ -1984,7 +2016,12 @@ const Upload: React.FC = () => {
                           {isEditing ? (
                             <div className="space-y-2">
                               <div className="text-xs text-gray-700">
-                                {t('upload_qr_position_x')}: {isNaN(displayPosition[0]) ? '--' : displayPosition[0]}, {t('upload_qr_position_y')}: {isNaN(displayPosition[1]) ? '--' : displayPosition[1]}
+                                {t('upload_qr_position_x')}: {isNaN(displayPosition[0]) ? '--' : displayPosition[0].toFixed(2)}, {t('upload_qr_position_y')}: {isNaN(displayPosition[1]) ? '--' : displayPosition[1].toFixed(2)}
+                                {editedQR?.position3D && (
+                                  <>
+                                    , Z: {editedQR.position3D[2].toFixed(2)}
+                                  </>
+                                )}
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 <button
@@ -2010,7 +2047,13 @@ const Upload: React.FC = () => {
                               )}
                             </div>
                           ) : (
-                            <span>X: {isNaN(qr.position[0]) ? '--' : qr.position[0]}, Y: {isNaN(qr.position[1]) ? '--' : qr.position[1]}</span>
+                            <span>
+                              X: {isNaN(qr.position[0]) ? '--' : qr.position[0].toFixed(2)}, 
+                              Y: {isNaN(qr.position[1]) ? '--' : qr.position[1].toFixed(2)}
+                              {qr.position3D && (
+                                <>, Z: {qr.position3D[2].toFixed(2)}</>
+                              )}
+                            </span>
                           )}
                         </td>
                         <td className="px-3 py-2">
@@ -2071,7 +2114,10 @@ const Upload: React.FC = () => {
                     <td className="px-3 py-2">
                       <div className="space-y-2">
                         <div className="text-xs text-gray-700">
-                          X: {isNaN(row.position[0]) ? '--' : row.position[0]}, Y: {isNaN(row.position[1]) ? '--' : row.position[1]}
+                          X: {isNaN(row.position[0]) ? '--' : row.position[0].toFixed(2)}, Y: {isNaN(row.position[1]) ? '--' : row.position[1].toFixed(2)}
+                          {row.position3D && (
+                            <>, Z: {row.position3D[2].toFixed(2)}</>
+                          )}
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <button
@@ -2207,12 +2253,16 @@ const Upload: React.FC = () => {
                 <Image2DPreview
                   vehicles={previewVehicles}
                   qrPins={qrPins}
-                  picking={isPickingPosition}
-                  onPick={handleMapPositionPick}
+                  picking={false}
+                  // Commented out: 2D picking functionality - no longer used
+                  // picking={isPickingPosition}
+                  // onPick={handleMapPositionPick}
+                  onPick={undefined}
                   mapMetadata={mapMetadata}
                   view="top"
                 />
-                {isPickingPosition && (
+                {/* Commented out: 2D picking overlay - no longer used */}
+                {/* {isPickingPosition && (
                   <div className="absolute inset-0 pointer-events-none">
                     <div className="absolute top-3 left-3 bg-white/95 border border-blue-200 shadow-sm rounded px-3 py-2 max-w-xs pointer-events-auto">
                       <p className="text-xs text-gray-700">{t('upload_qr_pick_hint')}</p>
@@ -2226,7 +2276,7 @@ const Upload: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                )}
+                )} */}
               </div>
             )}
 

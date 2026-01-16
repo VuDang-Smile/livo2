@@ -12,7 +12,7 @@ const SideMenu: React.FC = () => {
     { name: t('about'), href: '/about', icon: Info },
     { name: t('map'), href: '/vehicle-map', icon: Map },
     { name: t('vehicles'), href: '/vehicles', icon: Car },
-    { name: t('upload_menu_label'), href: '/map-upload', icon: Upload },
+    { name: t('upload_menu_label'), href: '/map-upload', icon: QrCode },
     { name: t('qr_generator_menu_label'), href: '/qr-generator', icon: QrCode },
     { name: t('health_menu_label'), href: '/health', icon: Heart },
   ];
