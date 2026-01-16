@@ -15,41 +15,70 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/qrcodes", tags=["qrcodes"])
 
 
-@router.post("", response_model=QRCodeResponse)
+@router.post("", response_model=QRCodeListResponse)
 async def create_qrcode(qrcode_request: QRCodeCreateRequest):
     """
-    Create or update QR code.
+    Create or update QR codes.
     
+    Format: {"TM:0001": [x, y, z]} or {"TM:0001": [x, y, z], "TM:0002": [x, y, z]}
     If QR code with the same ID already exists, it will be overwritten.
     """
     try:
-        # Validate ID is not empty
-        if not qrcode_request.id or not qrcode_request.id.strip():
-            raise HTTPException(status_code=400, detail="ID cannot be empty")
+        if not qrcode_request or not isinstance(qrcode_request, dict):
+            raise HTTPException(status_code=400, detail="Request must be a dictionary with QR code IDs as keys and positions as values")
         
-        # Validate position has 3 elements
-        if len(qrcode_request.position) != 3:
-            raise HTTPException(
-                status_code=400,
-                detail="Position must have exactly 3 elements [x, y, z]"
+        if len(qrcode_request) == 0:
+            raise HTTPException(status_code=400, detail="Request cannot be empty")
+        
+        # Validate and process each QR code
+        results = []
+        for qr_id, position in qrcode_request.items():
+            # Validate ID
+            if not qr_id or not str(qr_id).strip():
+                raise HTTPException(status_code=400, detail=f"QR code ID cannot be empty: {qr_id}")
+            
+            # Validate position
+            if not isinstance(position, list) or len(position) != 3:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Position must be a list of 3 numbers for {qr_id}: {position}"
+                )
+            
+            if not all(isinstance(x, (int, float)) for x in position):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Position must contain only numbers for {qr_id}: {position}"
+                )
+            
+            # Convert to float list
+            position_float = [float(x) for x in position]
+            
+            # Create QRCode object
+            qrcode = QRCode(
+                id=str(qr_id).strip(),
+                position=position_float,
+                isActive=False,  # Default
+                surface="floor"  # Default
             )
+            
+            # Create or update
+            result = qrcode_service.create_or_update(qrcode)
+            results.append(result)
         
-        # Create QRCode object
-        qrcode = QRCode(
-            id=qrcode_request.id.strip(),
-            position=qrcode_request.position,
-            isActive=qrcode_request.isActive,
-            surface=qrcode_request.surface
-        )
+        # Return all created/updated QR codes
+        qrcode_responses = [
+            QRCodeResponse(
+                id=qrcode.id,
+                position=qrcode.position,
+                isActive=qrcode.isActive,
+                surface=qrcode.surface
+            )
+            for qrcode in results
+        ]
         
-        # Create or update
-        result = qrcode_service.create_or_update(qrcode)
-        
-        return QRCodeResponse(
-            id=result.id,
-            position=result.position,
-            isActive=result.isActive,
-            surface=result.surface
+        return QRCodeListResponse(
+            qrcodes=qrcode_responses,
+            total=len(qrcode_responses)
         )
     except HTTPException:
         raise
@@ -61,49 +90,42 @@ async def create_qrcode(qrcode_request: QRCodeCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("", response_model=QRCodeListResponse)
+@router.get("")
 async def get_all_qrcodes():
-    """Get all QR codes."""
+    """
+    Get all QR codes.
+    
+    Returns format: {"TM:0001": [x, y, z], "TM:0002": [x, y, z], ...}
+    """
     try:
-        qrcodes = qrcode_service.get_all()
-        
-        qrcode_responses = [
-            QRCodeResponse(
-                id=qrcode.id,
-                position=qrcode.position,
-                isActive=qrcode.isActive,
-                surface=qrcode.surface
-            )
-            for qrcode in qrcodes
-        ]
-        
-        return QRCodeListResponse(
-            qrcodes=qrcode_responses,
-            total=len(qrcode_responses)
-        )
+        # Read directly from file to get the exact format
+        data = qrcode_service.get_all_raw()
+        return data
     except Exception as e:
         logger.error(f"Error getting all QR codes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{qr_id}", response_model=QRCodeResponse)
+@router.get("/{qr_id}")
 async def get_qrcode_by_id(qr_id: str):
-    """Get QR code by ID."""
+    """
+    Get QR code by ID.
+    
+    Returns format: {"TM:0001": [x, y, z]}
+    """
     try:
         if not qr_id or not qr_id.strip():
             raise HTTPException(status_code=400, detail="ID cannot be empty")
         
-        qrcode = qrcode_service.get_by_id(qr_id.strip())
+        # Read directly from file
+        data = qrcode_service.get_all_raw()
+        qr_id_clean = qr_id.strip()
         
-        if not qrcode:
+        if qr_id_clean not in data:
             raise HTTPException(status_code=404, detail=f"QR code with ID '{qr_id}' not found")
         
-        return QRCodeResponse(
-            id=qrcode.id,
-            position=qrcode.position,
-            isActive=qrcode.isActive,
-            surface=qrcode.surface
-        )
+        # Return in same format as file: {id: [x, y, z]}
+        return {qr_id_clean: data[qr_id_clean]}
     except HTTPException:
         raise
     except Exception as e:

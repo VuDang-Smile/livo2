@@ -1,6 +1,6 @@
 """QR Code models."""
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 
 class QRCode(BaseModel):
@@ -25,12 +25,9 @@ class QRCodeListResponse(BaseModel):
     total: int
 
 
-class QRCodeCreateRequest(BaseModel):
-    """Request model for creating/updating QR code."""
-    id: str = Field(..., description="QR code ID (e.g., qr-TM-0001)")
-    position: List[float] = Field(..., description="3D position [x, y, z]", min_length=3, max_length=3)
-    isActive: bool = Field(default=False, description="Whether QR code is active")
-    surface: str = Field(default="floor", description="Surface type (e.g., floor, wall, ceiling)")
+# QRCodeCreateRequest is now just a type alias for Dict[str, List[float]]
+# Format: {"TM:0001": [x, y, z]} or {"TM:0001": [x, y, z], "TM:0002": [x, y, z]}
+QRCodeCreateRequest = Dict[str, List[float]]
 
 
 class QRCodeUpdateRequest(BaseModel):
