@@ -21,7 +21,7 @@ try:
     import tkinter as tk
     from tkinter import ttk, messagebox, scrolledtext, filedialog
 except ImportError as e:
-    print(f"Lỗi import: {e}")
+    print(translator.get("log.import_error", "Import error: {error}").replace("{error}", str(e)))
     import sys
     sys.exit(1)
 
@@ -734,7 +734,8 @@ class LivoxApp:
             # Xác định nội dung text dựa trên biến success
             status_text = translator.get("status.running") if is_active_theta else translator.get("status.not_running")
 
-            print(f"UI cập nhật: is_active_theta={is_active_theta}")
+            # Debug log - có thể bỏ comment nếu cần debug
+            # print(translator.get("log.ui_update_theta", "UI update: is_active_theta={value}").replace("{value}", str(is_active_theta)))
             
             # Cập nhật UI Theta
             full_text_theta = f"● {translator.get('label.theta_driver')}: {status_text}"
@@ -748,7 +749,7 @@ class LivoxApp:
                 self.btn_stop_livox.config(state=tk.DISABLED)
         except Exception as e:
             # Log lỗi nhưng không crash
-            print(f"⚠️  Lỗi khi cập nhật UI theta: {e}")
+            print(translator.get("log.error_update_ui_theta", "⚠️ Error updating UI theta: {error}").replace("{error}", str(e)))
             import traceback
             traceback.print_exc()
 

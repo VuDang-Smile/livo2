@@ -886,7 +886,7 @@ class WorkerInterface:
             # Build command
             cmd = f"source {ros2_setup} && source {drive_ws_setup} && ros2 launch livox_ros_driver2 {launch_file}"
             
-            self.log(self.translator.get('log.starting_livox_driver', '🚀 Đang khởi động Livox driver...'))
+            self.log(self.translator.get('log.starting_livox_driver', '🚀 Starting Livox driver...'))
             self.log(f"Command: {cmd}")
             
             # Start process
@@ -913,16 +913,16 @@ class WorkerInterface:
                 
                 # Kiểm tra lại topics (nhưng không bắt buộc phải có)
                 if self.check_livox_driver_running():
-                    self.log(self.translator.get('log.livox_driver_started', '✅ Livox driver đã khởi động thành công'))
+                    self.log(self.translator.get('log.livox_driver_started', '✅ Livox driver started successfully'))
                     return True
                 else:
                     # Process đang chạy nhưng topics chưa xuất hiện - có thể thiết bị chưa kết nối
                     # Nhưng vẫn return True để tiếp tục với localization (có thể đang replay bag)
-                    self.log(self.translator.get('log.livox_driver_running_no_topics', '⚠️ Driver process đang chạy nhưng topics chưa xuất hiện. Tiếp tục với localization...'))
+                    self.log(self.translator.get('log.livox_driver_running_no_topics', '⚠️ Driver process is running but topics not yet available. Continuing with localization...'))
                     return True
             else:
                 # Process đã dừng ngay sau khi start - có thể không có thiết bị
-                self.log(self.translator.get('log.livox_driver_exited_immediately', '⚠️ Driver process đã dừng ngay sau khi start. Có thể không có thiết bị hoặc đang replay bag.'))
+                self.log(self.translator.get('log.livox_driver_exited_immediately', '⚠️ Driver process exited immediately. May be no device or bag replay.'))
                 self.is_livox_driver_running = False
                 self.livox_driver_process = None
                 return False
@@ -960,7 +960,7 @@ class WorkerInterface:
     def _handle_driver_stopped(self):
         """Xử lý khi driver dừng"""
         if self.is_livox_driver_running:
-            self.log(self.translator.get('log.livox_driver_stopped', '⏹ Livox driver đã dừng'))
+            self.log(self.translator.get('log.livox_driver_stopped', '⏹ Livox driver stopped'))
             self.is_livox_driver_running = False
             self.livox_driver_process = None
     
@@ -971,7 +971,7 @@ class WorkerInterface:
         
         if self.livox_driver_process:
             try:
-                self.log(self.translator.get('log.stopping_livox_driver', '🛑 Đang dừng Livox driver...'))
+                self.log(self.translator.get('log.stopping_livox_driver', '🛑 Stopping Livox driver...'))
                 if hasattr(os, 'setsid'):
                     os.killpg(os.getpgid(self.livox_driver_process.pid), signal.SIGTERM)
                 else:
@@ -1312,7 +1312,7 @@ class WorkerInterface:
                self.theta_driver.theta_driver_process and \
                self.theta_driver.theta_driver_process.poll() is None:
                 # Đã chạy rồi
-                self.log(self.translator.get('log.theta_driver_already_running', '✅ Theta driver đã đang chạy'))
+                self.log(self.translator.get('log.theta_driver_already_running', '✅ Theta driver is already running'))
                 return True
             
             # Launch theta driver
@@ -1603,7 +1603,7 @@ class WorkerInterface:
         self.log("=" * 60)
         
         # Kiểm tra và launch Theta driver trước (cần cho QR scanning)
-        self.log(self.translator.get('log.checking_theta_driver', '🔍 Kiểm tra Theta driver...'))
+        self.log(self.translator.get('log.checking_theta_driver', '🔍 Checking Theta driver...'))
         if self.theta_driver:
             try:
                 # Check USB connection nếu chưa check
@@ -1622,10 +1622,10 @@ class WorkerInterface:
         else:
             self.log(self.translator.get('log.theta_driver_not_available', '⚠️ Theta driver not available. QR scanning will be disabled.'))
         
-        self.log(self.translator.get('log.checking_livox_driver', '🔍 Kiểm tra Livox driver...'))
+        self.log(self.translator.get('log.checking_livox_driver', '🔍 Checking Livox driver...'))
         
         if not self.is_livox_driver_running:
-            self.log(self.translator.get('log.livox_driver_not_running', '⚠️ Livox driver chưa chạy, đang khởi động...'))
+            self.log(self.translator.get('log.livox_driver_not_running', '⚠️ Livox driver not running, starting...'))
             # Thử start driver (sẽ tự động detect nếu có thiết bị)
             driver_started = self.start_livox_driver()
             if driver_started:
@@ -1633,9 +1633,9 @@ class WorkerInterface:
             else:
                 # Driver không start được, có thể không có thiết bị hoặc đang replay bag
                 # Vẫn tiếp tục với localization (có thể đang replay bag)
-                self.log(self.translator.get('log.livox_driver_start_failed_continue', '⚠️ Không thể khởi động Livox driver. Tiếp tục với localization (có thể đang replay bag)...'))
+                self.log(self.translator.get('log.livox_driver_start_failed_continue', '⚠️ Cannot start Livox driver. Continuing with localization (may be bag replay)...'))
         else:
-            self.log(self.translator.get('log.livox_driver_already_running', '✅ Livox driver đã đang chạy'))
+            self.log(self.translator.get('log.livox_driver_already_running', '✅ Livox driver is already running'))
         
         # Script helper
         run_script = Path(project_root) / "scripts" / "run_localization.sh"

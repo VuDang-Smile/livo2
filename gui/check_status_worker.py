@@ -3,6 +3,7 @@ import uuid
 import sys
 import subprocess
 from contants.API import VEHICLE_ENDPOINT, API_TIMEOUT, HEADERS
+from languages.translate_engine import translator
 
 def get_mac():
     # Lấy địa chỉ MAC của máy hiện tại
@@ -28,15 +29,15 @@ def is_registered(mac):
         # Kiểm tra phản hồi từ server
         if response.text and data.get("vehicle_id"):
             # Nếu API trả về 200, xe đã tồn tại trong hệ thống
-            print(f"Thành công: Thiết bị {mac} đã được đăng ký.")
+            print(translator.get("log.device_registered_success", "Success: Device {mac} has been registered.").replace("{mac}", mac))
             return True
         else:
-            print(f"Lỗi hệ thống: API trả về mã lỗi {data.get("vehicle_id")}")
+            print(translator.get("log.system_error_api", "System error: API returned error code {code}").replace("{code}", str(data.get("vehicle_id"))))
             return False
 
     except requests.exceptions.RequestException as e:
         # Xử lý trường hợp không kết nối được server (Server die, mất mạng...)
-        print(f"Không thể kết nối tới Server: {e}")
+        print(translator.get("log.cannot_connect_server", "Cannot connect to Server: {error}").replace("{error}", str(e)))
         return False
 
 if __name__ == "__main__":
