@@ -204,50 +204,6 @@ async def get_json_file(filename: str):
         raise HTTPException(status_code=500, detail=f"Failed to read JSON file: {str(e)}")
 
 
-@router.delete("/json/{filename}")
-async def delete_json_file(filename: str):
-    """
-    Xóa file JSON từ storage directory.
-    
-    Parameters:
-    - filename: Tên file JSON cần xóa (phải có extension .json)
-    
-    Lưu ý: Không thể xóa QR_detect.json qua API này, hãy dùng DELETE /api/v1/storage/qr/{qr_id} để xóa từng QR code
-    """
-    try:
-        # Sanitize filename để tránh path traversal
-        safe_filename = _sanitize_filename(filename)
-        
-        # Bảo vệ file QR_detect.json - không cho xóa qua API này
-        if safe_filename == "QR_detect.json":
-            raise HTTPException(
-                status_code=403, 
-                detail="Cannot delete QR_detect.json via this endpoint. Use DELETE /api/v1/storage/qr/{qr_id} to delete individual QR codes"
-            )
-        
-        file_path = storage_service.get_storage_path(safe_filename)
-        
-        if not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"File {safe_filename} not found")
-        
-        # Xóa file
-        if storage_service.delete_file(file_path):
-            logger.info(f"Deleted JSON file: {file_path}")
-            return JSONResponse(content={
-                "success": True,
-                "message": f"File {safe_filename} deleted successfully",
-                "filename": safe_filename
-            })
-        else:
-            raise HTTPException(status_code=500, detail=f"Failed to delete file {safe_filename}")
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting JSON file: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to delete JSON file: {str(e)}")
-
-
 @router.get("/json")
 async def list_json_files():
     """Liệt kê tất cả các file JSON trong storage directory."""
@@ -489,48 +445,31 @@ async def get_qr_code(qr_id: str):
 
 @router.delete("/qr/{qr_id}")
 async def delete_qr_code(qr_id: str):
-    """
-    Xóa QR code theo ID trong file QR_detect.json.
-    
-    Chỉ xóa nội dung QR code đó trong file, không xóa toàn bộ file.
-    File QR_detect.json vẫn tồn tại với danh sách QR codes còn lại.
-    
-    Parameters:
-    - qr_id: ID của QR code cần xóa (có thể có hoặc không có prefix "qr-")
-    
-    Returns:
-    - success: True nếu xóa thành công
-    - message: Thông báo kết quả
-    - total_qr_codes: Tổng số QR codes còn lại trong file
-    """
+    """Xóa QR code theo ID."""
     try:
         # Đảm bảo ID có format đúng
         if not qr_id.startswith("qr-"):
             qr_id = f"qr-{qr_id}"
         
-        # Load danh sách QR codes từ file QR_detect.json
         qr_list = _load_qr_detect_file()
         
-        # Tìm và xóa QR code (chỉ xóa nội dung trong danh sách, không xóa file)
+        # Tìm và xóa QR code
         original_count = len(qr_list)
         qr_list = [qr for qr in qr_list if qr.get("id") != qr_id]
         
-        # Kiểm tra xem có tìm thấy QR code để xóa không
         if len(qr_list) == original_count:
             raise HTTPException(status_code=404, detail=f"QR code with ID '{qr_id}' not found")
         
-        # Lưu lại danh sách đã cập nhật vào file QR_detect.json (file vẫn tồn tại)
+        # Lưu file
         if not _save_qr_detect_file(qr_list):
             raise HTTPException(status_code=500, detail="Failed to save QR_detect.json")
         
-        logger.info(f"Deleted QR code '{qr_id}' from QR_detect.json. Remaining: {len(qr_list)} QR codes")
+        logger.info(f"Deleted QR code: {qr_id}")
         
         return JSONResponse(content={
             "success": True,
-            "message": f"QR code '{qr_id}' deleted successfully from QR_detect.json",
-            "deleted_qr_id": qr_id,
-            "total_qr_codes": len(qr_list),
-            "file_path": str(storage_service.get_storage_path("QR_detect.json"))
+            "message": f"QR code '{qr_id}' deleted successfully",
+            "total_qr_codes": len(qr_list)
         })
     
     except HTTPException:
