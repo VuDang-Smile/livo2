@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback, Suspense } fr
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
-import { Edit, Trash2, Grid3x3, ImageIcon, Maximize2, X } from 'lucide-react';
+import { Edit, Trash2, Grid3x3, ImageIcon, Maximize2, X, CheckCircle2, XCircle, Info, AlertCircle } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import type { VehicleCanvasPosition } from '../types/vehicle';
 import { MapInfo } from '../types/mapInfo';
@@ -888,13 +888,15 @@ const Upload: React.FC = () => {
   const mapCardRef = useRef<HTMLDivElement>(null);
   const [pcdUrl, setPcdUrl] = useState<string | null>(null);
   const pcdObjectUrlRef = useRef<string | null>(null);
-  // Simple toast notifications
-  type Toast = { id: string; message: string; type?: 'success' | 'error' | 'info' };
+  // Enhanced toast notifications
+  type Toast = { id: string; message: string; type?: 'success' | 'error' | 'info'; timeout?: number };
   const [toasts, setToasts] = useState<Toast[]>([]);
   const addToast = (message: string, type: Toast['type'] = 'info', timeout = 4000) => {
     const id = `${Date.now()}-${Math.random()}`;
-    setToasts(s => [...s, { id, message, type }]);
-    setTimeout(() => setToasts(s => s.filter(t => t.id !== id)), timeout);
+    setToasts(s => [...s, { id, message, type, timeout }]);
+    setTimeout(() => {
+      setToasts(s => s.filter(t => t.id !== id));
+    }, timeout);
   };
   // Map metadata (floorplan)
   const [mapMetadata, setMapMetadata] = useState<MapMetadata | null>(null);
@@ -1750,14 +1752,77 @@ const Upload: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Toast container */}
-      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2">
-        {toasts.map(tst => (
-          <div key={tst.id} className={`px-3 py-2 rounded shadow text-sm ${tst.type === 'error' ? 'bg-red-600 text-white' : tst.type === 'success' ? 'bg-green-600 text-white' : 'bg-gray-800 text-white'}`}>
-            {tst.message}
-          </div>
-        ))}
+      {/* Enhanced Toast container */}
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-3 pointer-events-none">
+        {toasts.map((tst, index) => {
+          const getToastStyles = () => {
+            switch (tst.type) {
+              case 'success':
+                return 'bg-white border-l-4 border-green-500 text-green-800 shadow-lg';
+              case 'error':
+                return 'bg-white border-l-4 border-red-500 text-red-800 shadow-lg';
+              case 'info':
+              default:
+                return 'bg-white border-l-4 border-blue-500 text-blue-800 shadow-lg';
+            }
+          };
+
+          const getIcon = () => {
+            switch (tst.type) {
+              case 'success':
+                return <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />;
+              case 'error':
+                return <XCircle className="w-5 h-5 text-red-500 flex-shrink-0" />;
+              case 'info':
+              default:
+                return <Info className="w-5 h-5 text-blue-500 flex-shrink-0" />;
+            }
+          };
+
+          return (
+            <div
+              key={tst.id}
+              className={`
+                ${getToastStyles()}
+                px-4 py-3 rounded-lg
+                min-w-[300px] max-w-[400px]
+                flex items-start gap-3
+                pointer-events-auto
+                animate-in slide-in-from-right-full
+                transition-all duration-300 ease-in-out
+                backdrop-blur-sm
+              `}
+              style={{
+                animation: `slideInRight 0.3s ease-out ${index * 0.1}s both`,
+              }}
+            >
+              {getIcon()}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium leading-5">{tst.message}</p>
+              </div>
+              <button
+                onClick={() => setToasts(s => s.filter(t => t.id !== tst.id))}
+                className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          );
+        })}
       </div>
+      <style>{`
+        @keyframes slideInRight {
+          from {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+      `}</style>
       {isPickingPosition && (
         <>
           <div className="fixed inset-0 bg-black/40 backdrop-blur-[1px] z-40 pointer-events-auto" />
