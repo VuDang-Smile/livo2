@@ -974,8 +974,8 @@ const Upload: React.FC = () => {
     const normalizedIndex = String(indexNum).padStart(3, '0');
     const code = `TM:${normalizedIndex}`;
 
-    // Kiểm tra trùng với các QR code đã lưu
-    const existsInSaved = previewQRCodes.some(qr => qr.code === code);
+    // Kiểm tra trùng với các QR code đã lưu (bỏ qua những QR đã tạm xóa)
+    const existsInSaved = previewQRCodes.some(qr => qr.code === code && !deletedQRCodeIds.has(qr.id));
     if (existsInSaved) {
       return { isValid: false, error: t('upload_qr_index_duplicate') };
     }
