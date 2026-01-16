@@ -29,25 +29,25 @@ const Tunnel: React.FC = () => {
         <planeGeometry args={[200, 100]} />
         <meshStandardMaterial color="#2c3e50" />
       </mesh>
-      
+
       {/* Trần đường hầm */}
       <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 8, 0]}>
         <planeGeometry args={[200, 100]} />
         <meshStandardMaterial color="#34495e" />
       </mesh>
-      
+
       {/* Tường trái */}
       <mesh position={[-50, 3, 0]}>
         <boxGeometry args={[2, 10, 100]} />
         <meshStandardMaterial color="#7f8c8d" />
       </mesh>
-      
+
       {/* Tường phải */}
       <mesh position={[50, 3, 0]}>
         <boxGeometry args={[2, 10, 100]} />
         <meshStandardMaterial color="#7f8c8d" />
       </mesh>
-      
+
       {/* Đèn chiếu sáng */}
       {Array.from({ length: 10 }, (_, i) => (
         <group key={i} position={[0, 6, -45 + i * 10]}>
@@ -63,8 +63,8 @@ const Tunnel: React.FC = () => {
 };
 
 // Component cho phương tiện (copy từ VehicleMap) - đã chuẩn hóa theo hệ trục
-const Vehicle: React.FC<{ 
-  vehicle: VehicleCanvasPosition; 
+const Vehicle: React.FC<{
+  vehicle: VehicleCanvasPosition;
   coordinateConfig?: CoordinateSystemConfig;
 }> = ({ vehicle, coordinateConfig }) => {
   const meshRef = useRef<THREE.Mesh>(null);
@@ -73,7 +73,7 @@ const Vehicle: React.FC<{
     vehicle.position,
     coordinateConfig
   );
-  
+
   // Animation cho phương tiện
   useFrame((state) => {
     if (meshRef.current) {
@@ -82,17 +82,17 @@ const Vehicle: React.FC<{
     }
   });
 
-const getVehicleColor = (status?: string) => {
-  switch (status) {
+  const getVehicleColor = (status?: string) => {
+    switch (status) {
       case 'online': return '#27ae60';
       case 'offline': return '#e74c3c';
       default: return '#95a5a6';
     }
   };
 
-const getVehicleGeometry = (vehicleType?: string) => {
-  const type = vehicleType || 'default';
-  switch (type) {
+  const getVehicleGeometry = (vehicleType?: string) => {
+    const type = vehicleType || 'default';
+    switch (type) {
       case 'Xe đào hầm TBM':
         // Cylinder: bán kính 0.7m, chiều cao 1.4m (giảm 30% so với kích thước thực tế)
         return <cylinderGeometry args={[0.7, 0.7, 1.4, 8]} />;
@@ -116,20 +116,20 @@ const getVehicleGeometry = (vehicleType?: string) => {
       {/* Phương tiện */}
       <mesh ref={meshRef}>
         {getVehicleGeometry(vehicle.vehicleType)}
-        <meshStandardMaterial 
+        <meshStandardMaterial
           color={getVehicleColor(vehicle.status)}
           emissive={getVehicleColor(vehicle.status)}
           emissiveIntensity={0.2}
         />
       </mesh>
-      
+
       {/* Đèn phát sáng cho phương tiện đang hoạt động */}
       {vehicle.status === 'online' && (
-        <pointLight 
-          position={[0, 2, 0]} 
-          intensity={0.3} 
-          distance={10} 
-          color={getVehicleColor(vehicle.status)} 
+        <pointLight
+          position={[0, 2, 0]}
+          intensity={0.3}
+          distance={10}
+          color={getVehicleColor(vehicle.status)}
         />
       )}
     </group>
@@ -172,7 +172,7 @@ const PreviewMarker3D: React.FC<{
           opacity={0.7}
         />
       </mesh>
-      
+
       {/* Preview ring */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
         <torusGeometry args={[0.4, 0.05, 8, 32]} />
@@ -182,7 +182,7 @@ const PreviewMarker3D: React.FC<{
           emissiveIntensity={0.8}
         />
       </mesh>
-      
+
       {/* Preview light */}
       <pointLight
         position={[0, 0, 0]}
@@ -207,7 +207,7 @@ const QRMarker3D: React.FC<{
 
   // Calculate rotation based on surface
   const getRotation = (): [number, number, number] => {
-    switch(surface) {
+    switch (surface) {
       case 'floor':
         return [0, 0, 0];
       case 'ceiling':
@@ -245,12 +245,12 @@ const QRMarker3D: React.FC<{
 
   return (
     <group position={position} rotation={rotation}>
-      {/* Square marker for QR code */}
+      {/* Cube marker for QR code */}
       <mesh
         ref={meshRef}
         onPointerDown={(e) => { e.stopPropagation(); onSelect?.(id); }}
       >
-        <boxGeometry args={[1, 1, 0.15]} />
+        <boxGeometry args={[1.2, 1.2, 1.2]} />
         <meshStandardMaterial
           color={isActive ? '#3b82f6' : '#93c5fd'}
           emissive={isActive ? '#1e40af' : '#60a5fa'}
@@ -258,22 +258,22 @@ const QRMarker3D: React.FC<{
           wireframe={false}
         />
       </mesh>
-      
+
       {/* Glow effect for active marker */}
       {isActive && (
         <mesh>
-          <boxGeometry args={[1.2, 1.2, 0.2]} />
+          <boxGeometry args={[1.4, 1.4, 1.4]} />
           <meshStandardMaterial
             color="#3b82f6"
             emissive="#1e40af"
             emissiveIntensity={0.4}
             transparent={true}
-            opacity={0.3}
+            opacity={0.18}
             wireframe={true}
           />
         </mesh>
       )}
-      
+
       {/* Point light for visual feedback */}
       <pointLight
         position={[0, 0, 0.5]}
@@ -342,22 +342,8 @@ const ClickHandler3D: React.FC<{
 
       const surface = detectTunnelSurface(point, normal);
 
-      let finalPosition: [number, number, number];
-
-      switch(surface) {
-        case 'floor':
-          finalPosition = [point.x, -2, point.z];
-          break;
-        case 'ceiling':
-          finalPosition = [point.x, 8, point.z];
-          break;
-        case 'left':
-          finalPosition = [-50, point.y, point.z];
-          break;
-        case 'right':
-          finalPosition = [50, point.y, point.z];
-          break;
-      }
+      // Use the exact intersection point
+      const finalPosition: [number, number, number] = [point.x, point.y, point.z];
 
       return { position: finalPosition, surface };
     }
@@ -375,11 +361,11 @@ const ClickHandler3D: React.FC<{
     };
 
     const handleDoubleClick = (event: MouseEvent) => {
-      console.log('🖱️ dblclick event fired', { 
-        isPickingMode: isPickingModeRef.current, 
-        hasCallback: !!onPositionClickRef.current 
+      console.log('🖱️ dblclick event fired', {
+        isPickingMode: isPickingModeRef.current,
+        hasCallback: !!onPositionClickRef.current
       });
-      
+
       if (!isPickingModeRef.current || !onPositionClickRef.current) {
         return;
       }
@@ -410,7 +396,7 @@ const ClickHandler3D: React.FC<{
 };
 
 // Component cho bản đồ 3D Preview
-const PCDPreview3D: React.FC<{ 
+const PCDPreview3D: React.FC<{
   vehicles: VehicleCanvasPosition[];
   pcdUrl?: string | null;
   mapMetadata?: MapMetadata | null;
@@ -424,7 +410,7 @@ const PCDPreview3D: React.FC<{
   return (
     <>
       {/* Camera controls */}
-      <OrbitControls 
+      <OrbitControls
         enablePan={true}
         enableZoom={true}
         enableRotate={true}
@@ -432,18 +418,18 @@ const PCDPreview3D: React.FC<{
         minDistance={10}
         maxDistance={200}
       />
-      
+
       {/* Background color */}
       <color attach="background" args={['#000000']} />
-      
+
       {/* Lighting */}
       <ambientLight intensity={0.4} />
       <directionalLight position={[10, 10, 5]} intensity={0.8} />
-      
+
       {/* Tunnel / PCD map */}
       {pcdUrl ? (
         <Suspense fallback={null}>
-          <PCDMap 
+          <PCDMap
             url={pcdUrl}
             // Đơn vị: mét (scale = 1)
             scale={1}
@@ -454,16 +440,16 @@ const PCDPreview3D: React.FC<{
       ) : (
         <Tunnel />
       )}
-      
+
       {/* Vehicles */}
       {vehicles.map((vehicle) => (
-        <Vehicle 
-          key={vehicle.id} 
+        <Vehicle
+          key={vehicle.id}
           vehicle={vehicle}
           coordinateConfig={coordinateConfig}
         />
       ))}
-      
+
       {/* QR Code Markers */}
       {qrMarkers.map((marker) => (
         <QRMarker3D
@@ -474,25 +460,25 @@ const PCDPreview3D: React.FC<{
           surface={marker.surface || 'floor'}
         />
       ))}
-      
+
       {/* Preview Marker - shows where QR code will be placed */}
       {isPickingMode && previewPosition && <PreviewMarker3D position={previewPosition} />}
-      
+
       {/* Grid helper */}
       <gridHelper args={[200, 20, '#34495e', '#2c3e50']} />
-      
+
       {/* Click handler for picking positions - always render but only listens when isPickingMode is true */}
-      <ClickHandler3D 
-        onPositionClick={onPositionPick} 
+      <ClickHandler3D
+        onPositionClick={onPositionPick}
         onPreviewPositionUpdate={onPreviewPositionUpdate}
-        isPickingMode={isPickingMode} 
+        isPickingMode={isPickingMode}
       />
     </>
   );
 };
 
 // Component cho bản đồ 2D Preview
-const Image2DPreview: React.FC<{ 
+const Image2DPreview: React.FC<{
   vehicles: VehicleCanvasPosition[];
   qrPins?: ManualPin[];
   picking?: boolean;
@@ -503,7 +489,7 @@ const Image2DPreview: React.FC<{
   const { t } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
-  
+
   // Load map image với proper cleanup
   const { image: mapImage, error: imageError } = useMapImage(MAP_2D_IMAGE_URL);
 
@@ -611,7 +597,7 @@ const Image2DPreview: React.FC<{
     // Draw vehicles
     vehicles.forEach(vehicle => {
       const { x, y } = getVehicle2DPosition(vehicle, canvas.width, canvas.height);
-      
+
       let color = '#95a5a6';
       switch (vehicle.status) {
         case 'online': color = '#27ae60'; break;
@@ -622,7 +608,7 @@ const Image2DPreview: React.FC<{
       ctx.arc(x, y, 8, 0, 2 * Math.PI);
       ctx.fillStyle = color;
       ctx.fill();
-      
+
       ctx.strokeStyle = '#2c3e50';
       ctx.lineWidth = 2;
       ctx.stroke();
@@ -740,7 +726,7 @@ const Image2DPreview: React.FC<{
         className={`w-full h-full ${picking ? 'cursor-crosshair' : 'cursor-default'}`}
         onClick={handleCanvasClick}
       />
-      
+
       {/* Legend for 2D map */}
       <div className="absolute bottom-4 left-4 bg-white bg-opacity-90 p-3 rounded-lg shadow-sm border">
         <div className="text-sm font-medium text-gray-700 mb-2">{t('legend')}</div>
@@ -779,9 +765,9 @@ const formatDateTime = (dateTimeStr: string): string => {
 };
 
 // Component hiển thị thông tin map (info card style)
-const MapInfoCard: React.FC<{ 
-  mapInfo: MapInfo | null; 
-  isLoading?: boolean; 
+const MapInfoCard: React.FC<{
+  mapInfo: MapInfo | null;
+  isLoading?: boolean;
   error?: string | null;
 }> = ({ mapInfo, isLoading = false, error = null }) => {
   const { t } = useLanguage();
@@ -819,7 +805,7 @@ const MapInfoCard: React.FC<{
           </div>
           <div className="ml-3 flex-1">
             <h3 className="text-sm font-medium text-red-800 mb-2">
-              {t('map_info_title')} 
+              {t('map_info_title')}
             </h3>
             <p className="text-xs text-red-700">
               {t('error_loading_map_info') || 'Error loading map information'}: {error}
@@ -913,6 +899,8 @@ const Upload: React.FC = () => {
     id: string;
     code: string;
     position: [number, number];
+    position3D?: [number, number, number];
+    surface?: 'floor' | 'ceiling' | 'left' | 'right';
     originalPosition: [number, number];
     errors?: {
       position?: string;
@@ -961,12 +949,12 @@ const Upload: React.FC = () => {
     if (!codeIndex || codeIndex.trim() === '') {
       return { isValid: false, error: t('upload_qr_index_invalid') };
     }
-    
+
     // Kiểm tra xem tất cả ký tự có phải là số không
     if (!/^\d+$/.test(codeIndex)) {
       return { isValid: false, error: t('upload_qr_index_invalid') };
     }
-    
+
     const indexNum = parseInt(codeIndex, 10);
     if (isNaN(indexNum) || indexNum < 0 || indexNum > 999) {
       return { isValid: false, error: t('upload_qr_index_invalid') };
@@ -1035,14 +1023,14 @@ const Upload: React.FC = () => {
 
   const handleMapPositionPick = (pos: [number, number]) => {
     if (!pickingRowId) return;
-    
+
     // Kiểm tra xem pickingRowId có trong editingRows không
     const isEditingRow = editingRows.some(r => r.tempId === pickingRowId);
     if (isEditingRow) {
       handleEditRowChange(pickingRowId, 'position', pos);
       return;
     }
-    
+
     // Kiểm tra xem pickingRowId có trong editingExistingQRCodes không
     if (editingExistingQRCodes.has(pickingRowId)) {
       handleUpdateQRPosition(pickingRowId, pos);
@@ -1052,7 +1040,7 @@ const Upload: React.FC = () => {
 
   const handleMap3DPositionPick = (pos: [number, number, number], surface: 'floor' | 'ceiling' | 'left' | 'right') => {
     console.log(`🎯 handleMap3DPositionPick called with:`, pos, `surface: ${surface}`, `pickingRowId: ${pickingRowId}`);
-    
+
     if (!pickingRowId) {
       console.log('⚠️ pickingRowId is null');
       return;
@@ -1065,24 +1053,45 @@ const Upload: React.FC = () => {
     // Kiểm tra xem pickingRowId có trong editingRows không
     const isEditingRow = editingRows.some(r => r.tempId === pickingRowId);
     console.log(`🎯 isEditingRow: ${isEditingRow}`);
-    
+
     if (isEditingRow) {
       console.log(`✅ Updating editing row ${pickingRowId}`);
       handleEditRowChange(pickingRowId, 'position', pos2D);
-      // Update surface information
-      setEditingRows(rows => rows.map(row => row.tempId === pickingRowId ? { ...row, surface } : row));
+      // Update position3D and surface information
+      setEditingRows(rows => rows.map(row => row.tempId === pickingRowId ? {
+        ...row,
+        surface,
+        position3D: pos
+      } : row));
       return;
     }
 
     // Kiểm tra xem pickingRowId có trong editingExistingQRCodes không
     const isExistingQR = editingExistingQRCodes.has(pickingRowId);
     console.log(`🎯 isExistingQR: ${isExistingQR}`);
-    
+
     if (isExistingQR) {
       console.log(`✅ Updating existing QR ${pickingRowId}`);
       handleUpdateQRPosition(pickingRowId, pos2D);
-      // Update surface information
-      setPreviewQRCodes(qrs => qrs.map(qr => qr.id === pickingRowId ? { ...qr, surface } : qr));
+      // Update position3D and surface information
+      setEditingExistingQRCodes(prev => {
+        const next = new Map(prev);
+        const current = next.get(pickingRowId);
+        if (current) {
+          next.set(pickingRowId, {
+            ...current,
+            surface,
+            position3D: pos
+          });
+        }
+        return next;
+      });
+      // Also update previewQRCodes to show it immediately (optimistic update logic might handle this but ensuring consistent view)
+      setPreviewQRCodes(qrs => qrs.map(qr => qr.id === pickingRowId ? {
+        ...qr,
+        surface,
+        position3D: pos
+      } : qr));
       return;
     }
 
@@ -1143,7 +1152,7 @@ const Upload: React.FC = () => {
 
       // Kiểm tra trùng lặp ngay trong batch đang save
       const currentNormalized = batchNormalizedIndices[idx];
-      const isDuplicateInBatch = currentNormalized !== null && 
+      const isDuplicateInBatch = currentNormalized !== null &&
         batchNormalizedIndices.some((otherIndex, otherIdx) => otherIdx !== idx && otherIndex === currentNormalized);
 
       let codeError = codeValidation.isValid ? undefined : codeValidation.error;
@@ -1186,13 +1195,15 @@ const Upload: React.FC = () => {
   const handleStartEditQR = (qrId: string) => {
     const qr = previewQRCodes.find(q => q.id === qrId);
     if (!qr) return;
-    
+
     setEditingExistingQRCodes(prev => {
       const newMap = new Map(prev);
       newMap.set(qrId, {
         id: qr.id,
         code: qr.code,
         position: [...qr.position] as [number, number],
+        position3D: qr.position3D ? [...qr.position3D] as [number, number, number] : undefined,
+        surface: qr.surface,
         originalPosition: [...qr.position] as [number, number],
         errors: {}
       });
@@ -1206,7 +1217,7 @@ const Upload: React.FC = () => {
       const newMap = new Map(prev);
       const existing = newMap.get(qrId);
       if (!existing) return prev;
-      
+
       const [x, y] = position;
       const errors = {
         ...existing.errors,
@@ -1214,7 +1225,7 @@ const Upload: React.FC = () => {
           ? t('upload_qr_position_invalid')
           : undefined
       };
-      
+
       newMap.set(qrId, { ...existing, position, errors });
       return newMap;
     });
@@ -1224,22 +1235,27 @@ const Upload: React.FC = () => {
   const handleSaveQRChanges = (qrId: string) => {
     const editedQR = editingExistingQRCodes.get(qrId);
     if (!editedQR) return;
-    
+
     // Validate trước khi lưu
     if (editedQR.errors?.position) return;
-    
-    setPreviewQRCodes(prev => prev.map(qr => 
-      qr.id === qrId 
-        ? { ...qr, position: editedQR.position }
+
+    setPreviewQRCodes(prev => prev.map(qr =>
+      qr.id === qrId
+        ? {
+          ...qr,
+          position: editedQR.position,
+          position3D: editedQR.position3D,
+          surface: editedQR.surface
+        }
         : qr
     ));
-    
+
     setEditingExistingQRCodes(prev => {
       const newMap = new Map(prev);
       newMap.delete(qrId);
       return newMap;
     });
-    
+
     if (pickingRowId === qrId) {
       stopPicking();
     }
@@ -1252,7 +1268,7 @@ const Upload: React.FC = () => {
       newMap.delete(qrId);
       return newMap;
     });
-    
+
     if (pickingRowId === qrId) {
       stopPicking();
     }
@@ -1261,12 +1277,12 @@ const Upload: React.FC = () => {
   // Handler: Xóa QR code
   const handleDeleteQR = (qrId: string) => {
     if (!window.confirm(t('upload_qr_delete_confirm'))) return;
-    
+
     // Nếu đang chỉnh sửa, hủy chỉnh sửa trước
     if (editingExistingQRCodes.has(qrId)) {
       handleCancelEditQR(qrId);
     }
-    
+
     setDeletedQRCodeIds(prev => new Set(prev).add(qrId));
   };
 
@@ -1402,13 +1418,13 @@ const Upload: React.FC = () => {
       if (viewMeta) {
         const pose = position3D
           ? {
-              position: position3D,
-              orientation: { x: 0, y: 0, z: 0, w: 1 },
-            }
+            position: position3D,
+            orientation: { x: 0, y: 0, z: 0, w: 1 },
+          }
           : {
-              position: toPosition3D(worldPair),
-              orientation: { x: 0, y: 0, z: 0, w: 1 },
-            };
+            position: toPosition3D(worldPair),
+            orientation: { x: 0, y: 0, z: 0, w: 1 },
+          };
         const pixel = transformPoseToPixel(pose, mapMetadata!, 'top', process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEBUG_LOGS === '1');
         if (pixel) {
           pixelPosition = [pixel.pixel_x, pixel.pixel_y];
@@ -1442,12 +1458,17 @@ const Upload: React.FC = () => {
         const worldPair = editedQR ? editedQR.position : extractPair(pos3d);
         const isBeingEdited = !!editedQR;
 
+        // Use edited 3D position if available, otherwise original 3D position
+        const effectivePos3D = editedQR && editedQR.position3D ?
+          { x: editedQR.position3D[0], y: editedQR.position3D[1], z: editedQR.position3D[2] } :
+          (editedQR ? toPosition3D(editedQR.position) : pos3d);
+
         pins.push(
           buildPin(
             qr.id,
             qr.code,
             worldPair,
-            editedQR ? toPosition3D(editedQR.position) : pos3d,
+            effectivePos3D,
             false,
             isBeingEdited || pickingRowId === qr.id
           )
@@ -1467,13 +1488,15 @@ const Upload: React.FC = () => {
           row.tempId,
           normalizedIndex,
           row.position,
-          toPosition3D(row.position),
+          row.position3D
+            ? { x: row.position3D[0], y: row.position3D[1], z: row.position3D[2] }
+            : toPosition3D(row.position),
           true,
           row.tempId === pickingRowId
         )
       );
     });
-    
+
     return pins;
   }, [previewQRCodes, editingRows, editingExistingQRCodes, deletedQRCodeIds, pickingRowId, mapMetadata]);
 
@@ -1498,8 +1521,13 @@ const Upload: React.FC = () => {
     editingRows.forEach(row => {
       const [x, z] = row.position;
       if (isNaN(x) || isNaN(z)) return;
+
+      const pos3d: [number, number, number] = row.position3D
+        ? row.position3D
+        : [x, row.surface === 'ceiling' ? 8 : (row.surface === 'left' || row.surface === 'right') ? 3 : -2, z];
+
       markers.push({
-        position: [x, row.surface === 'ceiling' ? 8 : (row.surface === 'left' || row.surface === 'right') ? 3 : -2, z],
+        position: pos3d,
         id: row.tempId,
         isActive: row.tempId === pickingRowId,
         surface: row.surface || 'floor'
@@ -1552,10 +1580,10 @@ const Upload: React.FC = () => {
         </div>
       </div>
       {/* Map Info Card */}
-      <MapInfoCard 
-        mapInfo={mapInfo} 
-        isLoading={isLoadingMapInfo} 
-        error={mapInfoError} 
+      <MapInfoCard
+        mapInfo={mapInfo}
+        isLoading={isLoadingMapInfo}
+        error={mapInfoError}
       />
 
       {/* Section 2 & 3: Preview PCD/Image + QR codes */}
@@ -1568,32 +1596,30 @@ const Upload: React.FC = () => {
               <h2 className="text-lg font-semibold text-gray-900">
                 {previewMode === '2d' ? t('upload_image_preview_title') : t('upload_pcd_preview_title')}
               </h2>
-              
+
               {/* Toggle Switch for 2D/3D and Fullscreen */}
               <div className="flex gap-2 items-center">
                 <button
                   onClick={() => setPreviewMode('2d')}
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-                    previewMode === '2d'
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${previewMode === '2d'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
                 >
                   <ImageIcon size={18} />
                   2D View
                 </button>
                 <button
                   onClick={() => setPreviewMode('3d')}
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-                    previewMode === '3d'
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${previewMode === '3d'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
                 >
                   <Grid3x3 size={18} />
                   3D View
                 </button>
-                
+
                 {/* Fullscreen Button */}
                 <button
                   onClick={() => setIsFullscreenPreview(true)}
@@ -1622,8 +1648,8 @@ const Upload: React.FC = () => {
                 ref={mapCardRef}
                 className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative ${isPickingPosition ? 'ring-2 ring-blue-500 z-50' : ''}`}
               >
-                <Image2DPreview 
-                  vehicles={previewVehicles} 
+                <Image2DPreview
+                  vehicles={previewVehicles}
                   qrPins={qrPins}
                   picking={isPickingPosition}
                   onPick={handleMapPositionPick}
@@ -1655,8 +1681,8 @@ const Upload: React.FC = () => {
                   camera={{ position: [0, 10, 20], fov: 60 }}
                   style={{ height: '100%' }}
                 >
-                  <PCDPreview3D 
-                    vehicles={previewVehicles} 
+                  <PCDPreview3D
+                    vehicles={previewVehicles}
                     pcdUrl={pcdUrl}
                     isPickingMode={isPickingPosition3D}
                     qrMarkers={qrMarkers3D}
@@ -1696,7 +1722,7 @@ const Upload: React.FC = () => {
           <p className="text-xs text-gray-500 mb-3">
             {t('upload_qr_list_desc')}
           </p>
-          
+
           {/* Loading and Error States for QR Codes */}
           {isLoadingQRCodes && (
             <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
@@ -1749,9 +1775,9 @@ const Upload: React.FC = () => {
                     const isEditing = editingExistingQRCodes.has(qr.id);
                     const editedQR = editingExistingQRCodes.get(qr.id);
                     const displayPosition = editedQR ? editedQR.position : qr.position;
-                    
+
                     return (
-                      <tr 
+                      <tr
                         key={qr.id}
                         className={isEditing ? 'bg-yellow-50' : (qr.isManual ? 'bg-blue-50' : '')}
                       >
@@ -1943,29 +1969,27 @@ const Upload: React.FC = () => {
             <h2 className="text-lg font-semibold text-white">
               {previewMode === '2d' ? t('upload_image_preview_title') : t('upload_pcd_preview_title')}
             </h2>
-            
+
             {/* Controls */}
             <div className="flex gap-3 items-center">
               {/* View Toggle */}
               <div className="flex gap-2">
                 <button
                   onClick={() => setPreviewMode('2d')}
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded font-medium text-sm transition-all ${
-                    previewMode === '2d'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded font-medium text-sm transition-all ${previewMode === '2d'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
                 >
                   <ImageIcon size={16} />
                   2D
                 </button>
                 <button
                   onClick={() => setPreviewMode('3d')}
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded font-medium text-sm transition-all ${
-                    previewMode === '3d'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded font-medium text-sm transition-all ${previewMode === '3d'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
                 >
                   <Grid3x3 size={16} />
                   3D
@@ -1988,8 +2012,8 @@ const Upload: React.FC = () => {
             {/* 2D Preview */}
             {previewMode === '2d' && (
               <div className="w-full h-full bg-gray-50">
-                <Image2DPreview 
-                  vehicles={previewVehicles} 
+                <Image2DPreview
+                  vehicles={previewVehicles}
                   qrPins={qrPins}
                   picking={isPickingPosition}
                   onPick={handleMapPositionPick}
@@ -2021,8 +2045,8 @@ const Upload: React.FC = () => {
                   camera={{ position: [0, 10, 20], fov: 60 }}
                   style={{ height: '100%' }}
                 >
-                  <PCDPreview3D 
-                    vehicles={previewVehicles} 
+                  <PCDPreview3D
+                    vehicles={previewVehicles}
                     pcdUrl={pcdUrl}
                     isPickingMode={isPickingPosition3D}
                     qrMarkers={qrMarkers3D}
