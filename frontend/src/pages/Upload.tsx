@@ -899,7 +899,9 @@ const Upload: React.FC = () => {
   const [previewPickPosition, setPreviewPickPosition] = useState<[number, number, number] | null>(null);
   const didAutoLoadRef = useRef(false);
   const [isLoadingLastZip, setIsLoadingLastZip] = useState(false);
-  const [isPickingPosition, setIsPickingPosition] = useState(false);
+  // Commented out: 2D picking functionality - no longer used
+  // const [isPickingPosition, setIsPickingPosition] = useState(false);
+  const [isPickingPosition] = useState(false); // Keep for compatibility but always false
   const [isPickingPosition3D, setIsPickingPosition3D] = useState(false);
   const [pickingRowId, setPickingRowId] = useState<string | null>(null);
   const mapCardRef = useRef<HTMLDivElement>(null);
@@ -1031,7 +1033,8 @@ const Upload: React.FC = () => {
 
   const stopPicking = () => {
     console.log('🛑 stopPicking called');
-    setIsPickingPosition(false);
+    // Commented out: 2D picking functionality - no longer used
+    // setIsPickingPosition(false);
     setIsPickingPosition3D(false);
     setPickingRowId(null);
   };
@@ -1039,76 +1042,83 @@ const Upload: React.FC = () => {
   const startPicking = (id: string, mode: '2d' | '3d' = '2d') => {
     console.log(`🎯 startPicking called: id=${id}, mode=${mode}`);
     setPickingRowId(id);
-    if (mode === '2d') {
-      setIsPickingPosition(true);
-      setIsPickingPosition3D(false);
-      console.log('✅ Enabled 2D picking mode');
-    } else {
-      setIsPickingPosition(false);
+    // Commented out: 2D picking functionality - no longer used, always use 3D
+    // if (mode === '2d') {
+    //   setIsPickingPosition(true);
+    //   setIsPickingPosition3D(false);
+    //   console.log('✅ Enabled 2D picking mode');
+    // } else {
       setIsPickingPosition3D(true);
       console.log('✅ Enabled 3D picking mode');
-    }
+    // }
   };
 
-  const handleMapPositionPick = (pos: [number, number]) => {
-    if (!pickingRowId) return;
+  // Commented out: 2D picking functionality - no longer used
+  // const handleMapPositionPick = (pos: [number, number]) => {
+  //   if (!pickingRowId) return;
 
-    // pos is in world coordinates (from pixelToWorld conversion)
-    // Get surface from existing data if available
-    let surface: 'floor' | 'ceiling' | 'left' | 'right' = 'floor';
+  //   // pos is in world coordinates (from pixelToWorld conversion)
+  //   // Get surface from existing data if available
+  //   let surface: 'floor' | 'ceiling' | 'left' | 'right' = 'floor';
     
-    // Check if we're editing an existing row
-    const editingRow = editingRows.find(r => r.tempId === pickingRowId);
-    if (editingRow && editingRow.surface) {
-      surface = editingRow.surface;
-    }
+  //   // Check if we're editing an existing row
+  //   const editingRow = editingRows.find(r => r.tempId === pickingRowId);
+  //   if (editingRow && editingRow.surface) {
+  //     surface = editingRow.surface;
+  //   }
     
-    // Check if we're editing an existing QR code
-    const editingQR = editingExistingQRCodes.get(pickingRowId);
-    if (editingQR && editingQR.surface) {
-      surface = editingQR.surface;
-    }
+  //   // Check if we're editing an existing QR code
+  //   const editingQR = editingExistingQRCodes.get(pickingRowId);
+  //   if (editingQR && editingQR.surface) {
+  //     surface = editingQR.surface;
+  //   }
     
-    // Convert 2D world position to 3D scene coordinates (our standard)
-    const position3D = convert2DTo3DScene(pos, surface, mapMetadata, 'top');
+  //   // Convert 2D world position to 3D scene coordinates (our standard)
+  //   const position3D = convert2DTo3DScene(pos, surface, mapMetadata, 'top');
 
-    // Kiểm tra xem pickingRowId có trong editingRows không
-    const isEditingRow = editingRows.some(r => r.tempId === pickingRowId);
-    if (isEditingRow) {
-      handleEditRowChange(pickingRowId, 'position', pos);
-      // Update position3D and surface information
-      setEditingRows(rows => rows.map(row => row.tempId === pickingRowId ? {
-        ...row,
-        surface,
-        position3D
-      } : row));
-      return;
-    }
+  //   // Kiểm tra xem pickingRowId có trong editingRows không
+  //   const isEditingRow = editingRows.some(r => r.tempId === pickingRowId);
+  //   if (isEditingRow) {
+  //     handleEditRowChange(pickingRowId, 'position', pos);
+  //     // Update position3D and surface information
+  //     setEditingRows(rows => rows.map(row => row.tempId === pickingRowId ? {
+  //       ...row,
+  //       surface,
+  //       position3D
+  //     } : row));
+  //     return;
+  //   }
 
-    // Kiểm tra xem pickingRowId có trong editingExistingQRCodes không
-    if (editingExistingQRCodes.has(pickingRowId)) {
-      handleUpdateQRPosition(pickingRowId, pos);
-      // Update position3D and surface information
-      setEditingExistingQRCodes(prev => {
-        const next = new Map(prev);
-        const current = next.get(pickingRowId);
-        if (current) {
-          next.set(pickingRowId, {
-            ...current,
-            surface,
-            position3D
-          });
-        }
-        return next;
-      });
-      // Also update previewQRCodes to show it immediately
-      setPreviewQRCodes(qrs => qrs.map(qr => qr.id === pickingRowId ? {
-        ...qr,
-        surface,
-        position3D
-      } : qr));
-      return;
-    }
+  //   // Kiểm tra xem pickingRowId có trong editingExistingQRCodes không
+  //   if (editingExistingQRCodes.has(pickingRowId)) {
+  //     handleUpdateQRPosition(pickingRowId, pos);
+  //     // Update position3D and surface information
+  //     setEditingExistingQRCodes(prev => {
+  //       const next = new Map(prev);
+  //       const current = next.get(pickingRowId);
+  //       if (current) {
+  //         next.set(pickingRowId, {
+  //           ...current,
+  //           surface,
+  //           position3D
+  //         });
+  //       }
+  //       return next;
+  //     });
+  //     // Also update previewQRCodes to show it immediately
+  //     setPreviewQRCodes(qrs => qrs.map(qr => qr.id === pickingRowId ? {
+  //       ...qr,
+  //       surface,
+  //       position3D
+  //     } : qr));
+  //     return;
+  //   }
+  // };
+  
+  // Placeholder function to prevent errors
+  const handleMapPositionPick = (_pos: [number, number]) => {
+    // 2D picking is disabled - this function is kept for compatibility
+    return;
   };
 
   const handleMap3DPositionPick = (pos: [number, number, number], surface: 'floor' | 'ceiling' | 'left' | 'right') => {
@@ -1563,12 +1573,13 @@ const Upload: React.FC = () => {
     fetchMapMetadata();
   }, [fetchMapMetadata]);
 
-  useEffect(() => {
-    document.body.style.overflow = isPickingPosition ? 'hidden' : '';
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [isPickingPosition]);
+  // Commented out: 2D picking functionality - no longer used
+  // useEffect(() => {
+  //   document.body.style.overflow = isPickingPosition ? 'hidden' : '';
+  //   return () => {
+  //     document.body.style.overflow = '';
+  //   };
+  // }, [isPickingPosition]);
 
   // Auto-sync QR codes from API when available (only if previewQRCodes is empty)
   useEffect(() => {
@@ -1850,7 +1861,8 @@ const Upload: React.FC = () => {
           }
         }
       `}</style>
-      {isPickingPosition && (
+      {/* Commented out: 2D picking overlay - no longer used */}
+      {/* {isPickingPosition && (
         <>
           <div className="fixed inset-0 bg-black/40 backdrop-blur-[1px] z-40 pointer-events-auto" />
           <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
@@ -1859,7 +1871,7 @@ const Upload: React.FC = () => {
             </div>
           </div>
         </>
-      )}
+      )} */}
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
@@ -1956,17 +1968,23 @@ const Upload: React.FC = () => {
             {previewMode === '2d' && (
               <div
                 ref={mapCardRef}
-                className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative ${isPickingPosition ? 'ring-2 ring-blue-500 z-50' : ''}`}
+                className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative`}
+                // Commented out: 2D picking ring - no longer used
+                // className={`h-[70vh] min-h-[400px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50 relative ${isPickingPosition ? 'ring-2 ring-blue-500 z-50' : ''}`}
               >
                 <Image2DPreview
                   vehicles={previewVehicles}
                   qrPins={qrPins}
-                  picking={isPickingPosition}
-                  onPick={handleMapPositionPick}
+                  picking={false}
+                  // Commented out: 2D picking functionality - no longer used
+                  // picking={isPickingPosition}
+                  // onPick={handleMapPositionPick}
+                  onPick={undefined}
                   mapMetadata={mapMetadata}
                   view="top"
                 />
-                {isPickingPosition && (
+                {/* Commented out: 2D picking overlay - no longer used */}
+                {/* {isPickingPosition && (
                   <div className="absolute inset-0 pointer-events-none">
                     <div className="absolute top-3 left-3 bg-white/95 border border-blue-200 shadow-sm rounded px-3 py-2 max-w-xs pointer-events-auto">
                       <p className="text-xs text-gray-700">{t('upload_qr_pick_hint')}</p>
@@ -1980,7 +1998,7 @@ const Upload: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                )}
+                )} */}
               </div>
             )}
 
@@ -2335,12 +2353,16 @@ const Upload: React.FC = () => {
                 <Image2DPreview
                   vehicles={previewVehicles}
                   qrPins={qrPins}
-                  picking={isPickingPosition}
-                  onPick={handleMapPositionPick}
+                  picking={false}
+                  // Commented out: 2D picking functionality - no longer used
+                  // picking={isPickingPosition}
+                  // onPick={handleMapPositionPick}
+                  onPick={undefined}
                   mapMetadata={mapMetadata}
                   view="top"
                 />
-                {isPickingPosition && (
+                {/* Commented out: 2D picking overlay - no longer used */}
+                {/* {isPickingPosition && (
                   <div className="absolute inset-0 pointer-events-none">
                     <div className="absolute top-3 left-3 bg-white/95 border border-blue-200 shadow-sm rounded px-3 py-2 max-w-xs pointer-events-auto">
                       <p className="text-xs text-gray-700">{t('upload_qr_pick_hint')}</p>
@@ -2354,7 +2376,7 @@ const Upload: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                )}
+                )} */}
               </div>
             )}
 
