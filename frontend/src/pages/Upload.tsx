@@ -613,31 +613,31 @@ const Image2DPreview: React.FC<{
       };
     };
 
-    // Draw vehicles
-    vehicles.forEach(vehicle => {
-      const { x, y } = getVehicle2DPosition(vehicle, canvas.width, canvas.height);
+    // Commented out: Draw vehicles - no longer displayed on 2D map
+    // vehicles.forEach(vehicle => {
+    //   const { x, y } = getVehicle2DPosition(vehicle, canvas.width, canvas.height);
 
-      let color = '#95a5a6';
-      switch (vehicle.status) {
-        case 'online': color = '#27ae60'; break;
-        case 'offline': color = '#e74c3c'; break;
-      }
+    //   let color = '#95a5a6';
+    //   switch (vehicle.status) {
+    //     case 'online': color = '#27ae60'; break;
+    //     case 'offline': color = '#e74c3c'; break;
+    //   }
 
-      ctx.beginPath();
-      ctx.arc(x, y, 8, 0, 2 * Math.PI);
-      ctx.fillStyle = color;
-      ctx.fill();
+    //   ctx.beginPath();
+    //   ctx.arc(x, y, 8, 0, 2 * Math.PI);
+    //   ctx.fillStyle = color;
+    //   ctx.fill();
 
-      ctx.strokeStyle = '#2c3e50';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+    //   ctx.strokeStyle = '#2c3e50';
+    //   ctx.lineWidth = 2;
+    //   ctx.stroke();
 
-      ctx.fillStyle = '#2c3e50';
-      ctx.font = '12px Arial';
-      ctx.textAlign = 'center';
-      const label = vehicle.licensePlate || vehicle.id;
-      ctx.fillText(label, x, y - 15);
-    });
+    //   ctx.fillStyle = '#2c3e50';
+    //   ctx.font = '12px Arial';
+    //   ctx.textAlign = 'center';
+    //   const label = vehicle.licensePlate || vehicle.id;
+    //   ctx.fillText(label, x, y - 15);
+    // });
 
     // Draw QR pins (existing + drafting)
     qrPins.forEach(pin => {
@@ -678,7 +678,9 @@ const Image2DPreview: React.FC<{
         ctx.fillText(pin.label, x, y - 12);
       }
     });
-  }, [vehicles, qrPins, canvasSize, mapImage, imageError]);
+  }, [qrPins, canvasSize, mapImage, imageError]);
+  // Commented out: vehicles dependency removed - vehicles no longer displayed on 2D map
+  // }, [vehicles, qrPins, canvasSize, mapImage, imageError]);
 
   const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!picking || !onPick) return;
@@ -746,8 +748,8 @@ const Image2DPreview: React.FC<{
         onClick={handleCanvasClick}
       />
 
-      {/* Legend for 2D map */}
-      <div className="absolute bottom-4 left-4 bg-white bg-opacity-90 p-3 rounded-lg shadow-sm border">
+      {/* Commented out: Legend for 2D map - vehicles no longer displayed */}
+      {/* <div className="absolute bottom-4 left-4 bg-white bg-opacity-90 p-3 rounded-lg shadow-sm border">
         <div className="text-sm font-medium text-gray-700 mb-2">{t('legend')}</div>
         <div className="space-y-1">
           <div className="flex items-center space-x-2">
@@ -759,7 +761,7 @@ const Image2DPreview: React.FC<{
             <span className="text-xs text-gray-600">{t('offline')}</span>
           </div>
         </div>
-      </div>
+      </div> */}
     </div>
   );
 };
