@@ -19,6 +19,7 @@ import { MapMetadata, CoordinateSystemConfig } from '../types/mapMetadata';
 import { transformPoseToPixel, pixelToWorld } from '../utils/coordinateTransform';
 import { getPCDRotation, transformWorldToScene } from '../utils/coordinateTransformer';
 import { MAP_FLOORPLAN_METADATA_URL } from '../config/dataSources';
+import { BACKEND_API_BASE } from '../constants/apiConfig';
 
 // Component cho đường hầm (copy từ VehicleMap)
 const Tunnel: React.FC = () => {
@@ -886,6 +887,14 @@ const Upload: React.FC = () => {
   const mapCardRef = useRef<HTMLDivElement>(null);
   const [pcdUrl, setPcdUrl] = useState<string | null>(null);
   const pcdObjectUrlRef = useRef<string | null>(null);
+  // Simple toast notifications
+  type Toast = { id: string; message: string; type?: 'success' | 'error' | 'info' };
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const addToast = (message: string, type: Toast['type'] = 'info', timeout = 4000) => {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts(s => [...s, { id, message, type }]);
+    setTimeout(() => setToasts(s => s.filter(t => t.id !== id)), timeout);
+  };
   // Map metadata (floorplan)
   const [mapMetadata, setMapMetadata] = useState<MapMetadata | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState<boolean>(false);
@@ -1189,6 +1198,38 @@ const Upload: React.FC = () => {
     setPreviewQRCodes(prev => [...prev, ...newQRCodes]);
     setEditingRows([]);
     stopPicking();
+    // Prepare payload and send to backend
+    (async () => {
+      try {
+        const payload: { [key: string]: number[] } = {};
+        newQRCodes.forEach(qr => {
+          const coords3d = (qr as any).position3D ? (qr as any).position3D : [qr.position[0], qr.position[1], 0];
+          payload[qr.code] = coords3d;
+        });
+
+        if (Object.keys(payload).length === 0) return;
+
+        const res = await fetch(`${BACKEND_API_BASE}/qrcodes`, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          const txt = await res.text();
+          console.error('Failed to save QR codes', txt);
+          addToast(t('upload_qr_save_failed') || `Failed to save QR codes (${res.status})`, 'error');
+        } else {
+          console.log('QR codes saved successfully');
+          addToast(t('upload_qr_save_success') || 'QR codes saved', 'success');
+        }
+      } catch (err) {
+        console.error('Error while saving QR codes', err);
+      }
+    })();
   };
 
   // Handler: Bắt đầu chỉnh sửa QR code
@@ -1259,6 +1300,36 @@ const Upload: React.FC = () => {
     if (pickingRowId === qrId) {
       stopPicking();
     }
+
+    // Send updated single QR to backend
+    (async () => {
+      try {
+        const code = editedQR.code;
+        const coords3d = editedQR.position3D ? editedQR.position3D : [editedQR.position[0], editedQR.position[1], 0];
+        const payload: { [key: string]: number[] } = {};
+        payload[code] = coords3d;
+
+        const res = await fetch(`${BACKEND_API_BASE}/qrcodes`, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          const txt = await res.text();
+          console.error('Failed to save QR change', txt);
+          addToast(t('upload_qr_save_failed') || 'Failed to save QR change', 'error');
+        } else {
+          console.log('QR change saved successfully');
+          addToast(t('upload_qr_save_success') || 'QR change saved', 'success');
+        }
+      } catch (err) {
+        console.error('Error while saving QR change', err);
+      }
+    })();
   };
 
   // Handler: Hủy chỉnh sửa
@@ -1283,7 +1354,49 @@ const Upload: React.FC = () => {
       handleCancelEditQR(qrId);
     }
 
+    // Optimistically mark deleted in UI
     setDeletedQRCodeIds(prev => new Set(prev).add(qrId));
+
+    // Find code string for API call
+    const qr = previewQRCodes.find(q => q.id === qrId);
+    if (!qr) return;
+
+    (async () => {
+      try {
+        const code = qr.code; // e.g. 'TM:0002'
+        const encoded = encodeURIComponent(code);
+        const res = await fetch(`${BACKEND_API_BASE}/qrcodes/${encoded}`, {
+          method: 'DELETE',
+          headers: {
+            Accept: 'application/json',
+          },
+        });
+
+        if (!res.ok) {
+          const txt = await res.text();
+          console.error('Failed to delete QR code', txt);
+          addToast(t('upload_qr_delete_failed') || 'Failed to delete QR code', 'error');
+          // Revert optimistic deletion
+          setDeletedQRCodeIds(prev => {
+            const next = new Set(prev);
+            next.delete(qrId);
+            return next;
+          });
+        } else {
+          console.log('QR code deleted successfully');
+          addToast(t('upload_qr_delete_success') || 'QR code deleted', 'success');
+          // Optionally refetch QR codes from API
+          refetchQRCodes();
+        }
+      } catch (err) {
+        console.error('Error while deleting QR code', err);
+        setDeletedQRCodeIds(prev => {
+          const next = new Set(prev);
+          next.delete(qrId);
+          return next;
+        });
+      }
+    })();
   };
 
   const handleLastZipLoad = useCallback(() => {
@@ -1540,6 +1653,14 @@ const Upload: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Toast container */}
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2">
+        {toasts.map(tst => (
+          <div key={tst.id} className={`px-3 py-2 rounded shadow text-sm ${tst.type === 'error' ? 'bg-red-600 text-white' : tst.type === 'success' ? 'bg-green-600 text-white' : 'bg-gray-800 text-white'}`}>
+            {tst.message}
+          </div>
+        ))}
+      </div>
       {isPickingPosition && (
         <>
           <div className="fixed inset-0 bg-black/40 backdrop-blur-[1px] z-40 pointer-events-auto" />
@@ -1917,44 +2038,40 @@ const Upload: React.FC = () => {
                     </td>
                   </tr>
                 )}
-                {/* Dòng cuối cùng chứa các buttons - luôn ở dưới cùng của table */}
-                {(editingRows.length > 0 || previewQRCodes.filter(qr => !deletedQRCodeIds.has(qr.id)).length > 0) && (
-                  <tr className="bg-gray-50">
-                    <td colSpan={3} className="px-3 py-4">
-                      <div className="flex gap-2 justify-center">
-                        {/* Hiển thị button "Lưu" và "Hủy" cho tất cả các dòng đang edit */}
-                        {editingRows.length > 0 && (
-                          <>
-                            <button
-                              onClick={handleSaveAllRows}
-                              className="px-4 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                            >
-                              {t('upload_qr_save')}
-                            </button>
-                            <button
-                              onClick={() => {
-                                stopPicking();
-                                setEditingRows([]);
-                              }}
-                              className="px-4 py-2 text-sm bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
-                            >
-                              {t('upload_qr_cancel')}
-                            </button>
-                          </>
-                        )}
-                        {/* Chỉ hiển thị button "thêm mới dữ liệu" khi đã load dữ liệu */}
-                        {previewQRCodes.filter(qr => !deletedQRCodeIds.has(qr.id)).length > 0 && (
+                {/* Dòng cuối cùng chứa các buttons - luôn hiển thị ở dưới cùng của table */}
+                <tr className="bg-gray-50">
+                  <td colSpan={3} className="px-3 py-4">
+                    <div className="flex gap-2 justify-center">
+                      {/* Hiển thị button "Lưu" và "Hủy" cho tất cả các dòng đang edit */}
+                      {editingRows.length > 0 && (
+                        <>
                           <button
-                            onClick={handleAddNewRow}
-                            className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                            onClick={handleSaveAllRows}
+                            className="px-4 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
                           >
-                            {t('upload_qr_add_new')}
+                            {t('upload_qr_save')}
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                )}
+                          <button
+                            onClick={() => {
+                              stopPicking();
+                              setEditingRows([]);
+                            }}
+                            className="px-4 py-2 text-sm bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+                          >
+                            {t('upload_qr_cancel')}
+                          </button>
+                        </>
+                      )}
+                      {/* Luôn hiển thị button "thêm mới dữ liệu" để người dùng có thể thêm khi danh sách rỗng */}
+                      <button
+                        onClick={handleAddNewRow}
+                        className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                      >
+                        {t('upload_qr_add_new')}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
