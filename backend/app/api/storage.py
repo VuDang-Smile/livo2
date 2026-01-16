@@ -285,10 +285,16 @@ async def list_json_files():
 # ========== QR Code APIs ==========
 
 def _load_qr_detect_file() -> List[Dict[str, Any]]:
-    """Load và parse file QR_detect.json, trả về danh sách QR codes dạng array."""
+    """
+    Load và parse file QR_detect.json, trả về danh sách QR codes dạng array.
+    
+    File được load từ: backend/storage/QR_detect.json
+    """
     qr_path = storage_service.get_storage_path("QR_detect.json")
+    absolute_path = qr_path.resolve()
     
     if not qr_path.exists():
+        logger.debug(f"QR_detect.json not found at {absolute_path}")
         return []
     
     try:
@@ -329,19 +335,44 @@ def _load_qr_detect_file() -> List[Dict[str, Any]]:
 
 
 def _save_qr_detect_file(qr_list: List[Dict[str, Any]]) -> bool:
-    """Lưu danh sách QR codes vào file QR_detect.json."""
+    """
+    Lưu danh sách QR codes vào file QR_detect.json.
+    
+    Luôn lưu vào: backend/storage/QR_detect.json
+    Luôn lưu theo format mới (array), không phải format cũ (dict).
+    Format: [{"id": "qr-xxx", "position": [x, y, z], "isActive": bool, "surface": "floor"}, ...]
+    """
     try:
+        # Lấy đường dẫn đầy đủ đến file QR_detect.json trong backend/storage
         qr_path = storage_service.get_storage_path("QR_detect.json")
+        
+        # Đảm bảo thư mục storage tồn tại
         storage_service.ensure_storage_directories()
         
-        # Lưu dạng array
+        # Đảm bảo qr_list là list (format mới)
+        if not isinstance(qr_list, list):
+            logger.error(f"qr_list must be a list, got {type(qr_list)}")
+            return False
+        
+        # Lưu dạng array (format mới) - luôn luôn
         with open(qr_path, 'w', encoding='utf-8') as f:
             json.dump(qr_list, f, ensure_ascii=False, indent=2)
         
-        logger.info(f"QR_detect.json saved: {len(qr_list)} QR codes")
+        # Log đường dẫn đầy đủ để đảm bảo lưu đúng file
+        absolute_path = qr_path.resolve()
+        logger.info(f"✅ QR_detect.json saved successfully")
+        logger.info(f"   Path: {absolute_path}")
+        logger.info(f"   QR codes count: {len(qr_list)}")
+        logger.info(f"   Format: array")
+        
+        # Verify file đã được tạo
+        if not qr_path.exists():
+            logger.error(f"❌ File was not created at {absolute_path}")
+            return False
+        
         return True
     except Exception as e:
-        logger.error(f"Error saving QR_detect.json: {e}")
+        logger.error(f"❌ Error saving QR_detect.json: {e}", exc_info=True)
         return False
 
 
@@ -352,9 +383,14 @@ async def upload_qr_code(
     """
     Upload hoặc cập nhật QR code vào QR_detect.json.
     
+    Nghiệp vụ:
+    - Ghi nội dung QR được upload vào file QR_detect.json
+    - Kiểm tra trùng ID để replace nội dung QR trùng
+    - File luôn được lưu theo format mới (array)
+    
     Kiểm tra xem QR code với ID đã tồn tại chưa:
-    - Nếu tồn tại: cập nhật thông tin
-    - Nếu chưa tồn tại: thêm mới
+    - Nếu tồn tại: cập nhật/replace thông tin QR code đó
+    - Nếu chưa tồn tại: thêm mới vào file
     
     Format QR code:
     {
@@ -390,10 +426,10 @@ async def upload_qr_code(
             qr_id = f"qr-{qr_id}"
             qr_data["id"] = qr_id
         
-        # Load file hiện tại
+        # Load file hiện tại (tự động convert format cũ sang mới nếu cần)
         qr_list = _load_qr_detect_file()
         
-        # Tìm QR code với ID tương ứng
+        # Tìm QR code với ID tương ứng để kiểm tra trùng
         found_index = None
         for i, qr in enumerate(qr_list):
             if qr.get("id") == qr_id:
@@ -415,26 +451,32 @@ async def upload_qr_code(
         
         # Update hoặc thêm mới
         if found_index is not None:
-            # Update QR code hiện có
+            # Replace QR code hiện có (check trùng ID)
+            old_qr = qr_list[found_index]
             qr_list[found_index] = qr_code
             action = "updated"
-            logger.info(f"Updated QR code: {qr_id}")
+            logger.info(f"Replaced QR code '{qr_id}' in QR_detect.json (old: {old_qr}, new: {qr_code})")
         else:
             # Thêm QR code mới
             qr_list.append(qr_code)
             action = "added"
-            logger.info(f"Added new QR code: {qr_id}")
+            logger.info(f"Added new QR code '{qr_id}' to QR_detect.json")
         
-        # Lưu file
+        # Lưu file QR_detect.json với format mới (array) vào backend/storage/QR_detect.json
+        qr_file_path = storage_service.get_storage_path("QR_detect.json")
+        absolute_file_path = qr_file_path.resolve()
+        
         if not _save_qr_detect_file(qr_list):
-            raise HTTPException(status_code=500, detail="Failed to save QR_detect.json")
+            raise HTTPException(status_code=500, detail=f"Failed to save QR_detect.json to {absolute_file_path}")
         
         return JSONResponse(content={
             "success": True,
-            "message": f"QR code {action} successfully",
+            "message": f"QR code {action} successfully in QR_detect.json",
             "action": action,
             "qr_code": qr_code,
-            "total_qr_codes": len(qr_list)
+            "total_qr_codes": len(qr_list),
+            "file_path": str(absolute_file_path),
+            "relative_path": "backend/storage/QR_detect.json"
         })
     
     except HTTPException:
