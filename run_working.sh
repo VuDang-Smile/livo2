@@ -1,7 +1,7 @@
 #!/bin/bash
-# Script helper để chạy Theta Viewer GUI
+# Script helper to run Theta Viewer GUI
 
-# Lấy đường dẫn script
+# Get script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 echo "------------------------------------------------"
@@ -13,7 +13,7 @@ if [ -f /opt/ros/jazzy/setup.bash ]; then
     source /opt/ros/jazzy/setup.bash
     echo "[OK] Sourced ROS2 Jazzy"
 else
-    echo "[!] Cảnh báo: Không tìm thấy ROS2 Jazzy tại /opt/ros/jazzy/setup.bash"
+    echo "[!] Warning: ROS2 Jazzy not found at /opt/ros/jazzy/setup.bash"
 fi
 
 # 2. Source drive_ws (livox_ros_driver2)
@@ -21,64 +21,64 @@ if [ -f "$SCRIPT_DIR/dependencies/drive_ws/install/setup.bash" ]; then
     source "$SCRIPT_DIR/dependencies/drive_ws/install/setup.bash"
     echo "[OK] Sourced drive_ws"
 else
-    echo "[!] Cảnh báo: Không tìm thấy drive_ws. Kiểm tra: $SCRIPT_DIR/dependencies/drive_ws"
+    echo "[!] Warning: drive_ws not found. Check: $SCRIPT_DIR/dependencies/drive_ws"
 fi
 
-# 3. Source ws chính
+# 3. Source main workspace
 if [ -f "$SCRIPT_DIR/ws/install/setup.bash" ]; then
     source "$SCRIPT_DIR/ws/install/setup.bash"
-    echo "[OK] Sourced workspace chính"
+    echo "[OK] Sourced main workspace"
 else
-    echo "[!] Lỗi: Không tìm thấy ws/install/setup.bash. Hãy chạy 'colcon build' trước."
+    echo "[!] Error: ws/install/setup.bash not found. Please run 'colcon build' first."
 fi
 
-# 4. Quản lý Python Environment
+# 4. Python Environment Management
 GUI_DIR="$SCRIPT_DIR/gui"
 if [ -d "$GUI_DIR/venv" ]; then
     source "$GUI_DIR/venv/bin/activate"
     echo "[OK] Activated Virtual Environment"
 else
-    echo "[i] Sử dụng System Python"
+    echo "[i] Using System Python"
 fi
 
-# 5. Fix Qt/OpenCV Conflict (Quan trọng nếu dùng camera)
+# 5. Fix Qt/OpenCV Conflict (Important if using camera)
 export QT_QPA_PLATFORM_PLUGIN_PATH=""
 if [ -n "$QT_PLUGIN_PATH" ]; then
     export QT_PLUGIN_PATH=$(echo "$QT_PLUGIN_PATH" | tr ':' '\n' | grep -v cv2 | grep -v -i opencv | tr '\n' ':' | sed 's/:$//')
 fi
 
-# 6. Chạy GUI
+# 6. Run GUI
 echo "------------------------------------------------"
-echo "Đang khởi động giao diện tại: $GUI_DIR"
+echo "Starting interface at: $GUI_DIR"
 cd "$GUI_DIR"
 
-# THÊM DÒNG NÀY: Khai báo thư mục cha để Python tìm thấy 'languages'
+# ADD THIS LINE: Declare parent directory so Python can find 'languages'
 export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
 
-# Kiểm tra file python có tồn tại không trước khi chạy
+# Check if python file exists before running
 if [ -f "main_working.py" ]; then
-    # 1. Chạy script kiểm tra trạng thái ban đầu
+    # 1. Run initial status check script
     python3 check_status_worker.py
     STATUS=$?
 
     if [ $STATUS -eq 0 ]; then
-        echo "Thiết bị đã đăng ký. Đang mở Main..."
+        echo "Device is registered. Opening Main..."
         python3 main_working.py
     else
-        echo "Thiết bị chưa đăng ký. Đang mở Register..."
-        # Chạy đăng ký
+        echo "Device is not registered. Opening Register..."
+        # Run registration
         python3 main_registration.py
         
-        # Sau khi main_registration.py đóng (do lệnh self.root.destroy())
-        # Chúng ta kiểm tra lại một lần nữa hoặc tin tưởng mở luôn Main:
-        echo "Đang kiểm tra lại sau đăng ký..."
+        # After main_registration.py closes (due to self.root.destroy())
+        # We check again or trust to open Main:
+        echo "Rechecking after registration..."
         python3 check_status_worker.py
         if [ $? -eq 0 ]; then
              python3 main_working.py
         else
-             echo "Đăng ký không thành công hoặc người dùng đã tắt form."
+             echo "Registration failed or user closed the form."
         fi
     fi
 else
-    echo "[X] Lỗi: Không tìm thấy file main_working.py"
+    echo "[X] Error: File main_working.py not found"
 fi
