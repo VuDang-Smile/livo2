@@ -399,9 +399,14 @@ main() {
     # Source livox driver 2 setup
     source_livox_driver
     
-    # Select packages
-    echo -e "${YELLOW}Select packages to build${NC}"
-    handle_menu_input
+    # Auto-select all packages
+    echo -e "${YELLOW}Auto-selecting all packages to build...${NC}"
+    select_all
+    echo -e "${GREEN}All packages selected:${NC}"
+    for i in "${!PACKAGES[@]}"; do
+        echo -e "  - ${GREEN}${PACKAGES[$i]}${NC}"
+    done
+    echo ""
     
     # Prepare Log directories (before building)
     prepare_log_directories
