@@ -9,6 +9,8 @@ export interface EditingRow {
   tempId: string;
   codeIndex: string;
   position: [number, number];
+  position3D?: [number, number, number];
+  surface?: 'floor' | 'ceiling' | 'left' | 'right';
   errors: {
     codeIndex?: string;
     position?: string;

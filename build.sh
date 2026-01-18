@@ -1,24 +1,24 @@
 #!/bin/bash
 
-# Script build cho ROS2 workspace
-# Hỗ trợ build các packages trong ws/src
+# Script to build ROS2 workspace
+# Supports building packages in ws/src
 
 set -e
 
-# Màu sắc cho output
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Đường dẫn
+# Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS_DIR="$SCRIPT_DIR/ws"
 ROS2_SETUP_SCRIPT="/opt/ros/jazzy/setup.bash"
 DRIVE_WS_SETUP_SCRIPT="$SCRIPT_DIR/dependencies/drive_ws/install/setup.sh"
 
-# Danh sách packages trong ws/src + HBA standalone
+# List of packages in ws/src + HBA standalone
 declare -a PACKAGES=(
     "fast_livo"
     "fast_lio_localization"
@@ -30,20 +30,20 @@ declare -a PACKAGES=(
     "livox_msg_converter"
 )
 
-# Mảng lưu trạng thái chọn của từng package (0 = chưa chọn, 1 = đã chọn)
+# Array to store selection state of each package (0 = not selected, 1 = selected)
 declare -a SELECTED=(
     0 0 0 0 0 0 0 0
 )
 
-# Hàm hiển thị menu
+# Function to display menu
 show_menu() {
     local current_selection=$1
-    local clear_screen=${2:-1}  # Mặc định clear, nhưng có thể tắt
+    local clear_screen=${2:-1}  # Default clear, but can be disabled
     
     if [ "$clear_screen" -eq 1 ]; then
         clear
     else
-        # Không clear, chỉ in dòng phân cách
+        # Don't clear, just print separator line
         echo ""
         echo -e "${BLUE}========================================${NC}"
     fi
@@ -52,7 +52,7 @@ show_menu() {
     echo -e "${BLUE}    ROS2 Workspace Build Script${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
-    echo -e "${YELLOW}Chọn packages để build:${NC}"
+    echo -e "${YELLOW}Select packages to build:${NC}"
     echo ""
     
     for i in "${!PACKAGES[@]}"; do
@@ -65,7 +65,7 @@ show_menu() {
             marker="${RED}[ ]${NC}"
         fi
         
-        # Highlight package hiện tại
+        # Highlight current package
         if [ "$i" -eq "$current_selection" ]; then
             echo -e "  $marker ${BLUE}>>> ${pkg_name} <<<${NC}"
         else
@@ -74,16 +74,25 @@ show_menu() {
     done
     
     echo ""
-    echo -e "${YELLOW}Hướng dẫn:${NC}"
-    echo "  - Dùng phím ↑/↓ để di chuyển"
-    echo "  - Nhấn Space để chọn/bỏ chọn package hiện tại"
-    echo "  - Nhấn số (1-${#PACKAGES[@]}) để chọn/bỏ chọn package tương ứng"
-    echo "  - Nhấn Enter để bắt đầu build"
-    echo "  - Nhấn 'q' để thoát"
+    # Show Select All / Deselect All option
+    if all_selected; then
+        echo -e "  ${GREEN}[*]${NC} ${GREEN}Select All${NC} (Press 'a' to deselect all)"
+    else
+        echo -e "  ${RED}[ ]${NC} ${YELLOW}Select All${NC} (Press 'a' to select all)"
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}Instructions:${NC}"
+    echo "  - Use ↑/↓ keys to navigate"
+    echo "  - Press Space to toggle current package"
+    echo "  - Press number (1-${#PACKAGES[@]}) to toggle corresponding package"
+    echo "  - Press 'a' to select/deselect all packages"
+    echo "  - Press Enter to start build"
+    echo "  - Press 'q' to exit"
     echo ""
 }
 
-# Hàm toggle selection
+# Function to toggle selection
 toggle_selection() {
     local index=$1
     if [ "${SELECTED[$index]}" -eq 1 ]; then
@@ -93,24 +102,48 @@ toggle_selection() {
     fi
 }
 
-# Hàm xử lý input từ người dùng
+# Function to select all packages
+select_all() {
+    for i in "${!PACKAGES[@]}"; do
+        SELECTED[$i]=1
+    done
+}
+
+# Function to deselect all packages
+deselect_all() {
+    for i in "${!PACKAGES[@]}"; do
+        SELECTED[$i]=0
+    done
+}
+
+# Function to check if all packages are selected
+all_selected() {
+    for selected in "${SELECTED[@]}"; do
+        if [ "$selected" -eq 0 ]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+# Function to handle user input
 handle_menu_input() {
     local current_selection=0
-    local first_display=1  # Flag để biết lần đầu hiển thị menu
+    local first_display=1  # Flag to know first menu display
     
     while true; do
-        # Lần đầu không clear để giữ log, các lần sau clear để refresh menu
+        # First time don't clear to keep log, subsequent times clear to refresh menu
         if [ $first_display -eq 1 ]; then
-            show_menu $current_selection 0  # Không clear
+            show_menu $current_selection 0  # Don't clear
             first_display=0
         else
-            show_menu $current_selection 1  # Clear để refresh
+            show_menu $current_selection 1  # Clear to refresh
         fi
         
-        # Đọc input
+        # Read input
         IFS= read -rsn1 key
         
-        # Xử lý escape sequences (arrow keys)
+        # Handle escape sequences (arrow keys)
         if [ "$key" = $'\x1b' ]; then
             read -rsn1 -t 0.1 key
             if [ "$key" = "[" ]; then
@@ -146,6 +179,14 @@ handle_menu_input() {
                 # Space bar - toggle current selection
                 toggle_selection $current_selection
                 ;;
+            [aA])
+                # 'a' key - toggle select all / deselect all
+                if all_selected; then
+                    deselect_all
+                else
+                    select_all
+                fi
+                ;;
             "")
                 # Enter key
                 local has_selected=0
@@ -159,12 +200,12 @@ handle_menu_input() {
                 if [ "$has_selected" -eq 1 ]; then
                     return 0
                 else
-                    echo -e "${RED}Vui lòng chọn ít nhất một package!${NC}"
+                    echo -e "${RED}Please select at least one package!${NC}"
                     sleep 1
                 fi
                 ;;
             [qQ])
-                echo -e "${YELLOW}Đã hủy build.${NC}"
+                echo -e "${YELLOW}Build cancelled.${NC}"
                 exit 0
                 ;;
             *)
@@ -174,50 +215,50 @@ handle_menu_input() {
     done
 }
 
-# Hàm source ROS2 base setup (cần thiết cho colcon build khi chạy "as program")
+# Function to source ROS2 base setup (required for colcon build when running "as program")
 source_ros2_base() {
-    # Kiểm tra xem ROS2 đã được source chưa (kiểm tra biến môi trường ROS_DISTRO)
+    # Check if ROS2 has been sourced (check ROS_DISTRO environment variable)
     if [ -z "$ROS_DISTRO" ]; then
         echo -e "${BLUE}========================================${NC}"
         echo -e "${BLUE}Source ROS2 Jazzy base setup...${NC}"
         echo -e "${BLUE}========================================${NC}"
         
         if [ ! -f "$ROS2_SETUP_SCRIPT" ]; then
-            echo -e "${RED}Lỗi: Không tìm thấy ROS2 Jazzy tại: $ROS2_SETUP_SCRIPT${NC}"
-            echo -e "${RED}Vui lòng cài đặt ROS2 Jazzy trước!${NC}"
+            echo -e "${RED}Error: ROS2 Jazzy not found at: $ROS2_SETUP_SCRIPT${NC}"
+            echo -e "${RED}Please install ROS2 Jazzy first!${NC}"
             exit 1
         else
             source "$ROS2_SETUP_SCRIPT"
-            echo -e "${GREEN}Đã source ROS2 Jazzy base setup thành công!${NC}"
+            echo -e "${GREEN}Successfully sourced ROS2 Jazzy base setup!${NC}"
             echo ""
         fi
     else
-        echo -e "${GREEN}ROS2 environment đã được source (ROS_DISTRO=$ROS_DISTRO)${NC}"
+        echo -e "${GREEN}ROS2 environment already sourced (ROS_DISTRO=$ROS_DISTRO)${NC}"
         echo ""
     fi
 }
 
-# Hàm source livox driver 2 setup
+# Function to source livox driver 2 setup
 source_livox_driver() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}Source livox_ros_driver2 setup...${NC}"
     echo -e "${BLUE}========================================${NC}"
     
     if [ ! -f "$DRIVE_WS_SETUP_SCRIPT" ]; then
-        echo -e "${YELLOW}Cảnh báo: Không tìm thấy file setup.sh tại: $DRIVE_WS_SETUP_SCRIPT${NC}"
-        echo -e "${YELLOW}Có thể livox_ros_driver2 chưa được build.${NC}"
-        echo -e "${YELLOW}Script sẽ tiếp tục nhưng một số packages có thể cần driver này.${NC}"
+        echo -e "${YELLOW}Warning: setup.sh file not found at: $DRIVE_WS_SETUP_SCRIPT${NC}"
+        echo -e "${YELLOW}livox_ros_driver2 may not have been built.${NC}"
+        echo -e "${YELLOW}Script will continue but some packages may require this driver.${NC}"
         echo ""
     else
         source "$DRIVE_WS_SETUP_SCRIPT"
-        echo -e "${GREEN}Đã source livox_ros_driver2 setup thành công!${NC}"
+        echo -e "${GREEN}Successfully sourced livox_ros_driver2 setup!${NC}"
         echo ""
     fi
 }
 
-# Hàm chuẩn bị thư mục Log cho FAST-LIVO2
+# Function to prepare Log directories for FAST-LIVO2
 prepare_log_directories() {
-    # Kiểm tra xem có build fast_livo không
+    # Check if fast_livo will be built
     local build_fast_livo=0
     for i in "${!PACKAGES[@]}"; do
         if [ "${SELECTED[$i]}" -eq 1 ] && [ "${PACKAGES[$i]}" = "fast_livo" ]; then
@@ -226,45 +267,45 @@ prepare_log_directories() {
         fi
     done
     
-    # Chỉ tạo thư mục Log nếu build fast_livo
+    # Only create Log directory if building fast_livo
     if [ $build_fast_livo -eq 1 ]; then
         echo -e "${BLUE}========================================${NC}"
-        echo -e "${BLUE}Chuẩn bị thư mục Log cho FAST-LIVO2...${NC}"
+        echo -e "${BLUE}Preparing Log directories for FAST-LIVO2...${NC}"
         echo -e "${BLUE}========================================${NC}"
         
-        # Đường dẫn đến thư mục Log
+        # Path to Log directory
         local log_dir="$WS_DIR/src/FAST-LIVO2/Log"
         local pcd_dir="$log_dir/PCD"
         local colmap_dir="$log_dir/Colmap/sparse/0"
         
-        # Tạo các thư mục cần thiết
+        # Create necessary directories
         mkdir -p "$pcd_dir"
         mkdir -p "$colmap_dir"
         mkdir -p "$log_dir"
         
-        # Set quyền (755 cho thư mục, 644 cho file nếu có)
+        # Set permissions (755 for directories, 644 for files if any)
         chmod -R 755 "$log_dir" 2>/dev/null || true
         
-        # Kiểm tra quyền ghi
+        # Check write permissions
         if [ -w "$pcd_dir" ]; then
-            echo -e "${GREEN}✅ Đã tạo và cấp quyền cho thư mục Log${NC}"
+            echo -e "${GREEN}✅ Created and set permissions for Log directory${NC}"
             echo -e "   - PCD directory: $pcd_dir"
             echo -e "   - Colmap directory: $colmap_dir"
         else
-            echo -e "${YELLOW}⚠️  Cảnh báo: Không thể ghi vào thư mục Log${NC}"
-            echo -e "   Thử chạy: chmod -R 755 $log_dir"
+            echo -e "${YELLOW}⚠️  Warning: Cannot write to Log directory${NC}"
+            echo -e "   Try running: chmod -R 755 $log_dir"
         fi
         echo ""
     fi
 }
 
-# Hàm build packages
+# Function to build packages
 build_packages() {
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}Bắt đầu build các packages đã chọn...${NC}"
+    echo -e "${BLUE}Starting build of selected packages...${NC}"
     echo -e "${BLUE}========================================${NC}"
     
-    # Tạo danh sách packages cần build
+    # Create list of packages to build
     local packages_to_build=()
     local build_hba=0
     
@@ -279,68 +320,68 @@ build_packages() {
     done
     
     if [ ${#packages_to_build[@]} -eq 0 ] && [ $build_hba -eq 0 ]; then
-        echo -e "${RED}Không có package nào được chọn để build!${NC}"
+        echo -e "${RED}No packages selected to build!${NC}"
         return 1
     fi
 
-    # 1. Build HBA standalone nếu được chọn
+    # 1. Build HBA standalone if selected
     if [ $build_hba -eq 1 ]; then
-        echo -e "${YELLOW}>>> Đang build HBA standalone...${NC}"
+        echo -e "${YELLOW}>>> Building HBA standalone...${NC}"
         local hba_script="$SCRIPT_DIR/scripts/build_hba_standalone.sh"
         if [ -f "$hba_script" ]; then
-            # Chạy script build HBA hiện có
+            # Run existing HBA build script
             set +e
             bash "$hba_script"
             local hba_status=$?
             set -e
             if [ $hba_status -ne 0 ]; then
-                echo -e "${RED}Build HBA thất bại!${NC}"
+                echo -e "${RED}HBA build failed!${NC}"
                 return $hba_status
             fi
         else
-            echo -e "${RED}Lỗi: Không tìm thấy script build HBA tại $hba_script${NC}"
+            echo -e "${RED}Error: HBA build script not found at $hba_script${NC}"
             return 1
         fi
         echo ""
     fi
 
-    # 2. Build ROS2 packages với colcon
+    # 2. Build ROS2 packages with colcon
     local build_status=0
     if [ ${#packages_to_build[@]} -gt 0 ]; then
-        echo -e "${GREEN}ROS2 Packages sẽ được build:${NC}"
+        echo -e "${GREEN}ROS2 Packages to be built:${NC}"
         for pkg in "${packages_to_build[@]}"; do
             echo -e "  - ${GREEN}$pkg${NC}"
         done
         echo ""
         
-        # Chuyển đến thư mục ws
+        # Change to ws directory
         cd "$WS_DIR" || return 1
         
-        # Build với colcon
+        # Build with colcon
         local packages_arg="--packages-select"
         for pkg in "${packages_to_build[@]}"; do
             packages_arg="$packages_arg $pkg"
         done
         
-        echo -e "${BLUE}Chạy lệnh: colcon build $packages_arg --symlink-install${NC}"
+        echo -e "${BLUE}Running command: colcon build $packages_arg --symlink-install${NC}"
         echo ""
         
-        # Tắt set -e tạm thời để bắt lỗi build và hiển thị đầy đủ error messages
+        # Temporarily disable set -e to catch build errors and display full error messages
         set +e
         colcon build $packages_arg --symlink-install 2>&1
         build_status=$?
-        # Không bật lại set -e ở đây để tránh exit sớm
+        # Don't re-enable set -e here to avoid early exit
     fi
     
     echo ""
     if [ $build_status -eq 0 ]; then
         echo -e "${GREEN}========================================${NC}"
-        echo -e "${GREEN}Build hoàn tất thành công!${NC}"
+        echo -e "${GREEN}Build completed successfully!${NC}"
         echo -e "${GREEN}========================================${NC}"
     else
         echo -e "${RED}========================================${NC}"
-        echo -e "${RED}Build thất bại!${NC}"
-        echo -e "${RED}Vui lòng kiểm tra các thông báo lỗi ở trên.${NC}"
+        echo -e "${RED}Build failed!${NC}"
+        echo -e "${RED}Please check the error messages above.${NC}"
         echo -e "${RED}========================================${NC}"
     fi
     
@@ -352,41 +393,46 @@ main() {
     echo -e "${BLUE}ROS2 Workspace Build Script${NC}"
     echo ""
     
-    # Source ROS2 base setup (cần thiết cho colcon build, đặc biệt khi chạy "as program")
+    # Source ROS2 base setup (required for colcon build, especially when running "as program")
     source_ros2_base
     
     # Source livox driver 2 setup
     source_livox_driver
     
-    # Chọn packages
-    echo -e "${YELLOW}Chọn packages để build${NC}"
-    handle_menu_input
+    # Auto-select all packages
+    echo -e "${YELLOW}Auto-selecting all packages to build...${NC}"
+    select_all
+    echo -e "${GREEN}All packages selected:${NC}"
+    for i in "${!PACKAGES[@]}"; do
+        echo -e "  - ${GREEN}${PACKAGES[$i]}${NC}"
+    done
+    echo ""
     
-    # Chuẩn bị thư mục Log (trước khi build)
+    # Prepare Log directories (before building)
     prepare_log_directories
     
     # Build packages
     echo -e "${YELLOW}Build packages${NC}"
-    # Tắt set -e để không thoát ngay khi build fail và có thể hiển thị đầy đủ errors
+    # Disable set -e to avoid immediate exit on build failure and display full errors
     set +e
     build_packages
     local build_result=$?
-    # Giữ set +e để đảm bảo phần "press enter to exit" luôn được thực thi
+    # Keep set +e to ensure "press enter to exit" is always executed
     
-    # Tạm dừng trước khi thoát (luôn hiển thị dù build thành công hay thất bại)
+    # Pause before exiting (always display whether build succeeded or failed)
     echo ""
     echo -e "${BLUE}========================================${NC}"
     if [ $build_result -eq 0 ]; then
-        echo -e "${GREEN}Nhấn Enter để thoát...${NC}"
+        echo -e "${GREEN}Press Enter to exit...${NC}"
     else
-        echo -e "${RED}Nhấn Enter để thoát...${NC}"
+        echo -e "${RED}Press Enter to exit...${NC}"
     fi
     read -r
     
-    # Trả về exit code tương ứng với kết quả build
+    # Return exit code corresponding to build result
     exit $build_result
 }
 
-# Chạy main function
+# Run main function
 main
 

@@ -131,7 +131,7 @@ run_step() {
 }
 
 # Function to handle script that requires Enter press
-# This function runs script and automatically provides Enter when script succeeds
+# This function runs script and automatically skips "Press Enter" prompts via SKIP_EXIT_PROMPT
 run_step_with_auto_continue() {
     local step_name=$1
     local script_path=$2
@@ -157,29 +157,26 @@ run_step_with_auto_continue() {
     print_info "Running: ${script_path}"
     echo ""
     
-    # Run script with automatic Enter input for "Press Enter" prompts
-    # Use yes command to provide continuous empty input
-    # The scripts use "read -p" or "read -r" which will consume input from stdin
+    # Export SKIP_EXIT_PROMPT to skip "Press Enter to exit" prompts in child scripts
+    export SKIP_EXIT_PROMPT=1
+    
+    # Run script and capture exit code
+    # Scripts will check SKIP_EXIT_PROMPT and skip the "Press Enter" prompt
     local exit_code=0
     
-    # Use yes "" to provide continuous newlines for "Press Enter" prompts
     # Use timeout to prevent script from hanging indefinitely
     if command -v timeout >/dev/null 2>&1; then
-        # Use timeout with yes command to provide input
-        # yes "" generates infinite empty lines, timeout prevents hanging
-        # Run script and capture exit code properly
-        yes "" | timeout 3600 bash "${script_path}" 2>&1
-        exit_code=${PIPESTATUS[1]}
+        timeout 3600 bash "${script_path}" 2>&1
+        exit_code=$?
         # Check if timeout occurred (exit code 124)
         if [ $exit_code -eq 124 ]; then
             print_error "Script timed out after 1 hour"
             exit_code=1
         fi
     else
-        # Fallback: run without timeout, use yes to provide input
-        # Note: This may hang if script waits for input indefinitely
-        yes "" | bash "${script_path}" 2>&1
-        exit_code=${PIPESTATUS[1]}
+        # Fallback: run without timeout
+        bash "${script_path}" 2>&1
+        exit_code=$?
     fi
     
     # Check exit code
@@ -320,33 +317,26 @@ main() {
     print_info "This step will help you find and configure the backend server in your LAN."
     print_info "It will scan the network and update /etc/hosts with frontend.lidar.tm and backend.lidar.tm"
     echo ""
-    read -p "Do you want to run LAN Backend Discovery now? (y/N): " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        if [ ! -f "${FIND_BACKEND_SCRIPT}" ]; then
-            print_error "Script not found: ${FIND_BACKEND_SCRIPT}"
-            OVERALL_SUCCESS=false
-            FAILED_STEPS+=("LAN Backend Discovery (script not found)")
-        else
-            chmod +x "${FIND_BACKEND_SCRIPT}"
-            print_info "Running: ${FIND_BACKEND_SCRIPT}"
-            echo ""
-            # Run find_backend_lan.sh - it will request sudo itself
-            # Use yes to provide Enter input for "Press Enter to exit" prompts
-            if yes "" | bash "${FIND_BACKEND_SCRIPT}" 2>&1; then
-                print_success "LAN Backend Discovery completed successfully!"
-                echo ""
-            else
-                local exit_code=${PIPESTATUS[1]}
-                print_warning "LAN Backend Discovery completed with exit code: ${exit_code}"
-                print_info "You can run this manually later with: sudo ./dependencies/find_backend_lan.sh"
-                echo ""
-            fi
-        fi
+    if [ ! -f "${FIND_BACKEND_SCRIPT}" ]; then
+        print_error "Script not found: ${FIND_BACKEND_SCRIPT}"
+        OVERALL_SUCCESS=false
+        FAILED_STEPS+=("LAN Backend Discovery (script not found)")
     else
-        print_info "Skipping LAN Backend Discovery setup."
-        print_info "You can run it manually later with: sudo ./dependencies/find_backend_lan.sh"
+        chmod +x "${FIND_BACKEND_SCRIPT}"
+        print_info "Running: ${FIND_BACKEND_SCRIPT}"
         echo ""
+        # Export SKIP_EXIT_PROMPT to skip "Press Enter to exit" prompts
+        export SKIP_EXIT_PROMPT=1
+        # Run find_backend_lan.sh - it will request sudo itself
+        if bash "${FIND_BACKEND_SCRIPT}" 2>&1; then
+            print_success "LAN Backend Discovery completed successfully!"
+            echo ""
+        else
+            local exit_code=$?
+            print_warning "LAN Backend Discovery completed with exit code: ${exit_code}"
+            print_info "You can run this manually later with: sudo ./dependencies/find_backend_lan.sh"
+            echo ""
+        fi
     fi
     
     # Final summary

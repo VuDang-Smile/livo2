@@ -36,8 +36,10 @@ print_warning() {
 
 # Wait for user to press Enter before exiting
 wait_for_exit() {
-    echo ""
-    read -p "Press Enter to exit..."
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        echo ""
+        read -p "Press Enter to exit..."
+    fi
     exit 1
 }
 

@@ -310,6 +310,34 @@ echo "To stop services:"
 echo "  $DOCKER_CMD compose down"
 echo ""
 
+# Run find_backend_lan.sh to setup LAN backend discovery
+echo ""
+echo "=========================================="
+print_info "Setting up LAN Backend Discovery..."
+echo "=========================================="
+echo ""
+
+FIND_BACKEND_SCRIPT="${SCRIPT_DIR}/dependencies/find_backend_lan.sh"
+if [ ! -f "${FIND_BACKEND_SCRIPT}" ]; then
+    print_warning "Script not found: ${FIND_BACKEND_SCRIPT}"
+    print_info "You can run it manually later with: sudo ./dependencies/find_backend_lan.sh"
+else
+    chmod +x "${FIND_BACKEND_SCRIPT}"
+    print_info "Running: ${FIND_BACKEND_SCRIPT}"
+    echo ""
+    # Run find_backend_lan.sh - it will request sudo itself
+    # Use yes to provide Enter input for "Press Enter to exit" prompts
+    if yes "" | sudo bash "${FIND_BACKEND_SCRIPT}" 2>&1; then
+        print_success "LAN Backend Discovery completed successfully!"
+        echo ""
+    else
+        local exit_code=${PIPESTATUS[1]}
+        print_warning "LAN Backend Discovery completed with exit code: ${exit_code}"
+        print_info "You can run this manually later with: sudo ./dependencies/find_backend_lan.sh"
+        echo ""
+    fi
+fi
+
 # Wait for user to press Enter before exiting
 echo ""
 read -p "Press Enter to exit..."
