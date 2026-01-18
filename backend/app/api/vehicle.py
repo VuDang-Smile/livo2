@@ -31,6 +31,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/vehicles", tags=["vehicles"])
 
 
+@router.get("/categories")
+async def get_vehicle_categories():
+    """Get list of available vehicle categories."""
+    return {
+        "categories": [cat.value for cat in VehicleCategory]
+    }
+
+
 @router.post("", response_model=VehicleRegisterResponse)
 async def register_vehicle(vehicle_request: VehicleRegisterRequest):
     """
@@ -259,14 +267,6 @@ async def get_all_vehicles():
     except Exception as e:
         logger.error(f"Error getting all vehicles: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/categories")
-async def get_vehicle_categories():
-    """Get list of available vehicle categories."""
-    return {
-        "categories": [cat.value for cat in VehicleCategory]
-    }
 
 
 @router.get("/{vehicle_id}/poses")

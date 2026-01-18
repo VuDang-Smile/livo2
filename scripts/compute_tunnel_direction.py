@@ -450,8 +450,39 @@ Examples:
             traj_path = find_trajectory_file(pcd_path, log_result_dir)
         
         if traj_path is None or not traj_path.exists():
-            print(f"[ERROR] Trajectory file not found for {pcd_path.name}")
-            print(f"[INFO] Skipping...")
+            print(f"[WARNING] Trajectory file not found for {pcd_path.name}")
+            print(f"[INFO] Creating default direction vector [1, 0, 0] (positive X axis)...")
+            
+            # Tạo default direction data
+            default_direction_data = {
+                'direction': [1.0, 0.0, 0.0],
+                'num_poses': 0,
+                'num_vectors': 0,
+                'num_filtered_vectors': 0,
+                'total_distance_m': 0.0,
+                'stats': {
+                    'min_vector_length': 0.0,
+                    'max_vector_length': 0.0,
+                    'mean_vector_length': 0.0,
+                },
+                'method': 'default',
+                'trajectory_file': None,
+                'note': 'Default direction created because trajectory file was not found'
+            }
+            
+            # Lưu metadata
+            if args.output_dir:
+                output_dir = Path(args.output_dir)
+                if not output_dir.is_absolute():
+                    output_dir = project_root / output_dir
+            else:
+                output_dir = pcd_path.parent
+            
+            output_path = output_dir / f"{pcd_path.stem}_tunnel_direction.json"
+            save_direction_metadata(default_direction_data, output_path, pcd_path)
+            
+            print(f"[DONE] Created default tunnel direction for {pcd_path.name}")
+            print(f"[INFO] Output: {output_path}")
             continue
         
         try:
