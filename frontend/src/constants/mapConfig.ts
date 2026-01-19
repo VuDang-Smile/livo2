@@ -58,7 +58,7 @@ export function getMQTTWebSocketUrl(): string {
  * Build URL for map image based on view
  * Sử dụng URL thực tế từ storage (uploadId hiện tại không dùng)
  */
-export function getMapImageUrl(uploadId: string | undefined, view: 'top' | 'side_x' | 'side_y'): string {
+export function getMapImageUrl(uploadId: string | undefined, view: 'top' | 'side_x'): string {
   return MAP_FLOORPLAN_IMAGE_URLS[view];
 }
 

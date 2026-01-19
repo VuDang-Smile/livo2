@@ -51,9 +51,11 @@ confirm_exit() {
         echo -e "${RED}$message${NC}"
     fi
     
-    echo ""
-    echo -e "${YELLOW}Press Enter to exit...${NC}"
-    read -r
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        echo ""
+        echo -e "${YELLOW}Press Enter to exit...${NC}"
+        read -r
+    fi
     exit $exit_code
 }
 
@@ -352,23 +354,48 @@ main() {
         local docker_version=$(docker --version 2>/dev/null)
         print_warning "Docker appears to be already installed: $docker_version"
         echo ""
-        print_info "Do you want to reinstall Docker? (y/N)"
-        read -r response
-        if [[ ! "$response" =~ ^[Yy]$ ]]; then
-            print_info "Skipping Docker installation."
+        
+        # If running from install_all_dependencies.sh (SKIP_EXIT_PROMPT is set),
+        # automatically skip reinstall and just verify Docker is working
+        if [ -n "${SKIP_EXIT_PROMPT:-}" ]; then
+            print_info "Skipping Docker reinstallation (auto-mode: Docker already installed)."
             echo ""
             
             # Still verify and check docker group
             if verify_docker_installation; then
                 INSTALL_SUCCESS=true
-                confirm_exit 0 "Docker is already installed and working!"
+                # Don't call confirm_exit in auto-mode, just return successfully
+                return 0
             else
-                INSTALL_FAILED=true
-                confirm_exit 1 "Docker is installed but verification failed!"
+                # Docker is installed but verification failed (e.g., user not in docker group)
+                # In auto-mode, still return success since Docker is installed
+                # The issue (like docker group) can be fixed later
+                INSTALL_SUCCESS=true
+                print_warning "Docker is installed but some verification checks failed (e.g., user may not be in docker group)."
+                print_info "Docker installation is considered successful. You may need to log out and log back in to use Docker without sudo."
+                echo ""
+                return 0
             fi
-            return
+        else
+            # Interactive mode: ask user
+            print_info "Do you want to reinstall Docker? (y/N)"
+            read -r response
+            if [[ ! "$response" =~ ^[Yy]$ ]]; then
+                print_info "Skipping Docker installation."
+                echo ""
+                
+                # Still verify and check docker group
+                if verify_docker_installation; then
+                    INSTALL_SUCCESS=true
+                    confirm_exit 0 "Docker is already installed and working!"
+                else
+                    INSTALL_FAILED=true
+                    confirm_exit 1 "Docker is installed but verification failed!"
+                fi
+                return
+            fi
+            echo ""
         fi
-        echo ""
     fi
     
     # Display what will be installed

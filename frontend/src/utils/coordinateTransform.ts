@@ -2,18 +2,18 @@ import { Pose3D, Pose2DPixel, MapMetadata, OrientationConfig } from '../types/ma
 
 /**
  * Transform 3D pose (world coordinates) to 2D pixel coordinates on floorplan image
- * Supports multiple views: top (XY), side_x (YZ), side_y (XZ)
+ * Supports multiple views: top (XY), side_x (YZ)
  * 
  * @param pose - 3D pose from localization (in map frame)
  * @param metadata - Complete map metadata with all views
- * @param view - View to use: 'top', 'side_x', or 'side_y'
+ * @param view - View to use: 'top' or 'side_x'
  * @param debugMode - Enable console logging for debugging
  * @returns Pixel coordinates and orientation, or null if transformation fails
  */
 export function transformPoseToPixel(
   pose: Pose3D,
   metadata: MapMetadata,
-  view: 'top' | 'side_x' | 'side_y' = 'top',
+  view: 'top' | 'side_x' = 'top',
   debugMode: boolean = false
 ): Pose2DPixel | null {
   
@@ -229,14 +229,14 @@ export function quaternionToYaw(q: { x: number; y: number; z: number; w: number 
  * @param pixel_x - Pixel X coordinate
  * @param pixel_y - Pixel Y coordinate
  * @param metadata - Complete map metadata
- * @param view - View to use: 'top', 'side_x', or 'side_y'
+ * @param view - View to use: 'top' or 'side_x'
  * @returns World coordinates for the two axes used in this view
  */
 export function pixelToWorld(
   pixel_x: number,
   pixel_y: number,
   metadata: MapMetadata,
-  view: 'top' | 'side_x' | 'side_y' = 'top'
+  view: 'top' | 'side_x' = 'top'
 ): { [key: string]: number } {
   const viewMetadata = metadata.views[view];
   if (!viewMetadata) {
@@ -283,14 +283,14 @@ export function pixelToWorld(
  * @param pose - Original 3D pose
  * @param pixel - Transformed pixel coordinates
  * @param metadata - Complete map metadata
- * @param view - View to use: 'top', 'side_x', or 'side_y'
+ * @param view - View to use: 'top' or 'side_x'
  * @returns Validation result with error distance
  */
 export function validateTransform(
   pose: Pose3D,
   pixel: Pose2DPixel,
   metadata: MapMetadata,
-  view: 'top' | 'side_x' | 'side_y' = 'top'
+  view: 'top' | 'side_x' = 'top'
 ): { isValid: boolean; error: number } {
   const viewMetadata = metadata.views[view];
   if (!viewMetadata) {

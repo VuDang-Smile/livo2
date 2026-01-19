@@ -112,6 +112,9 @@ def main():
 
     hba_work_dir = input_dir / "hba_work"
     hba_work_dir.mkdir(parents=True, exist_ok=True)
+    
+    pcd_subdir = hba_work_dir / "pcd"
+    pcd_subdir.mkdir(parents=True, exist_ok=True)
 
     # Link/Copy PCDs
     print("[INFO] Linking PCD files...")

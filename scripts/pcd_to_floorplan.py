@@ -1,11 +1,11 @@
 """
-Utility to generate 3 floorplan views (top, side_x, side_y) and rich metadata
+Utility to generate 2 floorplan views (top, side_x) and rich metadata
 from a PCD point cloud.
 
-Used by GUI through function `pcd_to_3_views` in `bag_mapping_tab.py`.
+Used by GUI through function `pcd_to_2_views` in `bag_mapping_tab.py`.
 
 Output:
-- 3 PNG files: <stem>_top.png, <stem>_side_x.png, <stem>_side_y.png
+- 2 PNG files: <stem>_top.png, <stem>_side_x.png
 - 1 JSON metadata file: <stem>_metadata.json (format matches frontend MapMetadata)
 """
 
@@ -184,7 +184,7 @@ def _make_occupancy_image(
     }
 
 
-def pcd_to_3_views(
+def pcd_to_2_views(
     input_pcd: str,
     output_dir: str,
     resolution: float = 0.05,
@@ -197,7 +197,7 @@ def pcd_to_3_views(
     outlier_percentile: float = 1.0,
 ) -> Dict[str, Any]:
     """
-    Hàm chính được GUI gọi để sinh 3 ảnh + metadata.
+    Hàm chính được GUI gọi để sinh 2 ảnh (top, side_x) + metadata.
 
     Parameters khớp với cách gọi từ GUI:
     - input_pcd: đường dẫn file PCD
@@ -257,19 +257,8 @@ def pcd_to_3_views(
         invert_colors=invert_colors,
     )
 
-    # ===== View SIDE_X (YZ, trục chiếu: X) =====
+    # ===== View SIDE_X (XZ, trục chiếu: Y) – đổi sang chiếu theo trục Y cho đúng side_y =====
     side_x_data = _make_occupancy_image(
-        u=y,
-        v=z,
-        resolution=resolution,
-        border_margin=border_margin,
-        auto_crop=auto_crop,
-        crop_margin=crop_margin,
-        invert_colors=invert_colors,
-    )
-
-    # ===== View SIDE_Y (XZ, trục chiếu: Y) =====
-    side_y_data = _make_occupancy_image(
         u=x,
         v=z,
         resolution=resolution,
@@ -282,16 +271,14 @@ def pcd_to_3_views(
     stem = input_pcd_path.stem
     top_png = output_dir_path / f"{stem}_top.png"
     side_x_png = output_dir_path / f"{stem}_side_x.png"
-    side_y_png = output_dir_path / f"{stem}_side_y.png"
     meta_json = output_dir_path / f"{stem}_metadata.json"
 
     # Ghi ảnh
     top_data["image"].save(top_png)
     side_x_data["image"].save(side_x_png)
-    side_y_data["image"].save(side_y_png)
 
     # Điều chỉnh processing cho metadata (thêm info filter, original_bounds)
-    for view_data in (top_data, side_x_data, side_y_data):
+    for view_data in (top_data, side_x_data):
         view_data["processing"]["outlier_filter"] = bool(outlier_filter)
         view_data["processing"]["outlier_percentile"] = float(outlier_percentile) if outlier_filter else None
         view_data["processing"]["colormap"] = colormap if colormap in ("binary", "density", "height") else "binary"
@@ -355,50 +342,6 @@ def pcd_to_3_views(
             "side_x": {
                 "id": "side_x",
                 "projection": {
-                    "axis": "X",
-                    "plane": "YZ",
-                    "world_axes": {
-                        "horizontal": "Y",
-                        "vertical": "Z",
-                    },
-                    "image_axes": {
-                        "x_direction": "+Y",
-                        "y_direction": "-Z",
-                    },
-                },
-                "bounds": {
-                    "world": {
-                        "Y": {
-                            "min": float(side_x_data["bounds_world"]["u_min"]),
-                            "max": float(side_x_data["bounds_world"]["u_max"]),
-                        },
-                        "Z": {
-                            "min": float(side_x_data["bounds_world"]["v_min"]),
-                            "max": float(side_x_data["bounds_world"]["v_max"]),
-                        },
-                    },
-                },
-                "image": {
-                    "width": int(side_x_data["image_width"]),
-                    "height": int(side_x_data["image_height"]),
-                },
-                "processing": side_x_data["processing"],
-                "orientation": {
-                    "source_frame": "base_link",
-                    "forward_vector_in_body": [1.0, 0.0, 0.0],
-                    "plane": "YZ",
-                    "world_u_axis": "Y",
-                    "world_v_axis": "Z",
-                    "image_mapping": {
-                        "u_to_image_x": 1.0,
-                        "v_to_image_y": 1.0,
-                    },
-                    "angle_unit": "radian",
-                },
-            },
-            "side_y": {
-                "id": "side_y",
-                "projection": {
                     "axis": "Y",
                     "plane": "XZ",
                     "world_axes": {
@@ -413,20 +356,20 @@ def pcd_to_3_views(
                 "bounds": {
                     "world": {
                         "X": {
-                            "min": float(side_y_data["bounds_world"]["u_min"]),
-                            "max": float(side_y_data["bounds_world"]["u_max"]),
+                            "min": float(side_x_data["bounds_world"]["u_min"]),
+                            "max": float(side_x_data["bounds_world"]["u_max"]),
                         },
                         "Z": {
-                            "min": float(side_y_data["bounds_world"]["v_min"]),
-                            "max": float(side_y_data["bounds_world"]["v_max"]),
+                            "min": float(side_x_data["bounds_world"]["v_min"]),
+                            "max": float(side_x_data["bounds_world"]["v_max"]),
                         },
                     },
                 },
                 "image": {
-                    "width": int(side_y_data["image_width"]),
-                    "height": int(side_y_data["image_height"]),
+                    "width": int(side_x_data["image_width"]),
+                    "height": int(side_x_data["image_height"]),
                 },
-                "processing": side_y_data["processing"],
+                "processing": side_x_data["processing"],
                 "orientation": {
                     "source_frame": "base_link",
                     "forward_vector_in_body": [1.0, 0.0, 0.0],
@@ -451,10 +394,9 @@ def pcd_to_3_views(
         "metadata_path": str(meta_json),
         "top_png": str(top_png),
         "side_x_png": str(side_x_png),
-        "side_y_png": str(side_y_png),
     }
 
 
-__all__ = ["pcd_to_3_views"]
+__all__ = ["pcd_to_2_views"]
 
 

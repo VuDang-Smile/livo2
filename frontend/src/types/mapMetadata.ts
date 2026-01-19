@@ -1,6 +1,6 @@
 /**
  * Type definitions for map metadata and coordinate transformations
- * Supports 3 views: top (XY plane), side_x (YZ plane), side_y (XZ plane)
+ * Supports 2 views: top (XY plane), side_x (YZ plane)
  */
 
 /**
@@ -34,6 +34,25 @@ export interface Pose2DPixel {
   world_y: number; // Original world Y coordinate (or Z for side views)
   is_clamped: boolean; // Whether pixel was clamped to image bounds
   is_out_of_bounds: boolean; // Whether pose was outside map bounds
+}
+
+/**
+ * Rotation metadata structure from merged_all_rotated_rotation_metadata.json
+ */
+export interface RotationMetadata {
+  rotation_info: {
+    rotation_angle_rad: number;
+    rotation_angle_deg: number;
+    rotation_axis: [number, number, number];
+    rotation_matrix: number[][]; // 4x4 matrix
+    method: string;
+  };
+  direction_before: [number, number, number];
+  direction_after: [number, number, number];
+  input_pcd?: string;
+  output_pcd?: string;
+  timestamp?: string;
+  original_metadata?: any;
 }
 
 /**
@@ -155,10 +174,10 @@ export interface ProcessingParams {
 }
 
 /**
- * Metadata for a single view (top, side_x, or side_y)
+ * Metadata for a single view (top or side_x)
  */
 export interface ViewMetadata {
-  id: 'top' | 'side_x' | 'side_y';
+  id: 'top' | 'side_x';
   projection: ProjectionInfo;
   bounds: {
     world: WorldBounds;
@@ -169,7 +188,7 @@ export interface ViewMetadata {
 }
 
 /**
- * Complete map metadata with all 3 views
+ * Complete map metadata with 2 views (top and side_x)
  */
 export interface MapMetadata {
   input_file: string;
@@ -182,7 +201,6 @@ export interface MapMetadata {
   views: {
     top: ViewMetadata;
     side_x: ViewMetadata;
-    side_y: ViewMetadata;
   };
 }
 
@@ -203,4 +221,3 @@ export interface LegacyMapMetadata {
   image_width: number;
   image_height: number;
 }
-

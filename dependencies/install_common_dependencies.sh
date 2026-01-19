@@ -20,6 +20,8 @@ INSTALL_FAILED=false
 # List of dependencies to install
 # Add more dependencies here as needed
 DEPENDENCIES=(
+    "git"
+    "python3-colcon-common-extensions"
     "ros-jazzy-ament-cmake-auto"
     "ros-jazzy-pcl-ros"
     "libgstreamer1.0-dev"
@@ -38,6 +40,7 @@ DEPENDENCIES=(
 
 # Python packages to install via pip
 PYTHON_PACKAGES=(
+    "colcon-common-extensions"
     "open3d>=0.17.0"
     "pyzbar"
 )
@@ -79,9 +82,11 @@ confirm_exit() {
         echo -e "${RED}$message${NC}"
     fi
     
-    echo ""
-    echo -e "${YELLOW}Press Enter to exit...${NC}"
-    read -r
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        echo ""
+        echo -e "${YELLOW}Press Enter to exit...${NC}"
+        read -r
+    fi
     exit $exit_code
 }
 
@@ -208,16 +213,23 @@ install_python_packages() {
         
         # Method 2: Try importing in Python (more reliable for --user installs)
         if [ "$already_installed" = false ]; then
-            local import_name="${package_name}"
+            # Special case for colcon-common-extensions: check command availability
+            if [ "${package_name}" = "colcon-common-extensions" ]; then
+                if command -v colcon &> /dev/null; then
+                    already_installed=true
+                fi
+            else
+                local import_name="${package_name}"
                 case "${package_name}" in
                     "opencv-python") import_name="cv2" ;;
                     "Pillow") import_name="PIL" ;;
                     "PyYAML") import_name="yaml" ;;
                     "pyzbar") import_name="pyzbar" ;;
                 esac
-            
-            if python3 -c "import ${import_name}" 2>/dev/null; then
-                already_installed=true
+                
+                if python3 -c "import ${import_name}" 2>/dev/null; then
+                    already_installed=true
+                fi
             fi
         fi
         
@@ -292,7 +304,18 @@ verify_installation() {
     local missing_packages=()
     
     for package in "${DEPENDENCIES[@]}"; do
-        if check_package_installed "${package}"; then
+        # Special check for python3-colcon-common-extensions: verify colcon command
+        if [ "${package}" = "python3-colcon-common-extensions" ]; then
+            if command -v colcon &> /dev/null; then
+                print_success "${package} ✓ (colcon command available)"
+            elif check_package_installed "${package}"; then
+                print_success "${package} ✓ (installed, but colcon command not in PATH)"
+            else
+                print_error "${package} ✗"
+                missing_packages+=("${package}")
+                all_installed=false
+            fi
+        elif check_package_installed "${package}"; then
             print_success "${package} ✓"
         else
             print_error "${package} ✗"
@@ -330,17 +353,24 @@ verify_installation() {
             
             # Method 2: Try importing in Python (more reliable for --user installs)
             if [ "$verified" = false ]; then
-                # Convert package name to import name (e.g., "open3d" -> "open3d", "opencv-python" -> "cv2")
-                local import_name="${package_name}"
-                case "${package_name}" in
-                    "opencv-python") import_name="cv2" ;;
-                    "Pillow") import_name="PIL" ;;
-                    "PyYAML") import_name="yaml" ;;
-                    "pyzbar") import_name="pyzbar" ;;
-                esac
-                
-                if python3 -c "import ${import_name}" 2>/dev/null; then
-                    verified=true
+                # Special case for colcon-common-extensions: check command availability
+                if [ "${package_name}" = "colcon-common-extensions" ]; then
+                    if command -v colcon &> /dev/null; then
+                        verified=true
+                    fi
+                else
+                    # Convert package name to import name (e.g., "open3d" -> "open3d", "opencv-python" -> "cv2")
+                    local import_name="${package_name}"
+                    case "${package_name}" in
+                        "opencv-python") import_name="cv2" ;;
+                        "Pillow") import_name="PIL" ;;
+                        "PyYAML") import_name="yaml" ;;
+                        "pyzbar") import_name="pyzbar" ;;
+                    esac
+                    
+                    if python3 -c "import ${import_name}" 2>/dev/null; then
+                        verified=true
+                    fi
                 fi
             fi
             

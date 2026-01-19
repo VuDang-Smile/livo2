@@ -11,15 +11,17 @@ import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { MapMetadata } from '../types/mapMetadata';
 import { MapVehicle } from '../types/vehicle';
 import VehicleStatusCard from '../components/vehicleMap/VehicleStatusCard';
+import { getVehicleCategoryLabel } from '../utils/vehicleCategoryUtils';
+import { getVehicleTypeLabel } from '../utils/vehicleTypeUtils';
 
 // Component chính cho trang
 const VehicleMap: React.FC = () => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [viewMode, setViewMode] = useState<'2D' | '3D'>('2D');
-  const [selectedView, setSelectedView] = useState<'top' | 'side_x' | 'side_y'>('top');
+  const [selectedView, setSelectedView] = useState<'top' | 'side_x'>('top');
   const [mapMetadata] = useState<MapMetadata | null>(null);
   const [uploadId] = useState<string | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
@@ -304,16 +306,6 @@ const VehicleMap: React.FC = () => {
               >
                 Side X
               </button>
-              <button
-                onClick={() => setSelectedView('side_y')}
-                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  selectedView === 'side_y'
-                    ? 'bg-white text-blue-600 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Side Y
-              </button>
             </div>
           )}
 
@@ -529,9 +521,15 @@ const VehicleMap: React.FC = () => {
                         
                         <div className="text-sm text-gray-600 space-y-1">
                           <p>
-                            <span className="font-medium">{t('type_label')}</span>{' '}
-                            {vehicle.vehicleType || t('vehicle_type_unknown')}
+                            <span className="font-medium">{t('vehicle_type_label')}</span>{' '}
+                            {getVehicleTypeLabel(vehicle.vehicleType, language) || t('vehicle_type_unknown')}
                           </p>
+                          {vehicle.vehicleCategory && (
+                            <p>
+                              <span className="font-medium">{t('equipment_category_label')}</span>{' '}
+                              {getVehicleCategoryLabel(vehicle.vehicleCategory, language)}
+                            </p>
+                          )}
                           <p><span className="font-medium">{t('status_label_short')}</span> 
                             <span className={`ml-1 ${
                               vehicle.status === 'online' ? 'text-green-600' : 'text-red-600'

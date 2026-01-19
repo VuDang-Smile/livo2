@@ -5,9 +5,11 @@
 
 # Function to display "press enter to exit" when script ends
 cleanup() {
-    echo ""
-    echo "=========================================="
-    read -p "Press Enter to exit..."
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        echo ""
+        echo "=========================================="
+        read -p "Press Enter to exit..."
+    fi
 }
 
 # Ensure cleanup is always called when script ends (success or error)

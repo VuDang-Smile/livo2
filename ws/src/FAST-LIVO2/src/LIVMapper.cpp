@@ -14,6 +14,8 @@ which is included as part of this source code package.
 #include <vikit/camera_loader.h>
 #include <fstream>
 #include <sstream>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 using namespace Sophus;
 LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name, const rclcpp::NodeOptions & options)
@@ -502,13 +504,20 @@ void LIVMapper::handleLIO()
     std::ofstream outFile, evoFile;
     if (!pos_opend) 
     {
-      evoFile.open(std::string(ROOT_DIR) + "Log/result/" + seq_name + ".txt", std::ios::out);
+      // Create trajectory directory if it doesn't exist
+      std::string traj_dir = std::string(ROOT_DIR) + "Log/trajectory_file";
+      struct stat info;
+      if (stat(traj_dir.c_str(), &info) != 0) {
+        mkdir(traj_dir.c_str(), 0755);
+      }
+      
+      evoFile.open(std::string(ROOT_DIR) + "Log/trajectory_file/" + seq_name + ".txt", std::ios::out);
       pos_opend = true;
       if (!evoFile.is_open()) RCLCPP_ERROR(this->node->get_logger(), "open fail\n");
     } 
     else 
     {
-      evoFile.open(std::string(ROOT_DIR) + "Log/result/" + seq_name + ".txt", std::ios::app);
+      evoFile.open(std::string(ROOT_DIR) + "Log/trajectory_file/" + seq_name + ".txt", std::ios::app);
       if (!evoFile.is_open()) RCLCPP_ERROR(this->node->get_logger(), "open fail\n");
     }
     Eigen::Matrix4d outT;
@@ -733,8 +742,15 @@ void LIVMapper::handleSaveResultsService(
     
     // Save trajectory
     if (LidarMeasures.last_lio_update_time > 0) {
+      // Create trajectory directory if it doesn't exist
+      std::string traj_dir = std::string(ROOT_DIR) + "Log/trajectory_file";
+      struct stat info;
+      if (stat(traj_dir.c_str(), &info) != 0) {
+        mkdir(traj_dir.c_str(), 0755);
+      }
+      
       std::ofstream evoFile;
-      std::string traj_file = std::string(ROOT_DIR) + "Log/result/" + seq_name + "_manual_save.txt";
+      std::string traj_file = std::string(ROOT_DIR) + "Log/trajectory_file/" + seq_name + "_manual_save.txt";
       evoFile.open(traj_file, std::ios::app);
       if (evoFile.is_open()) {
         Eigen::Quaterniond q(_state.rot_end);
@@ -749,7 +765,7 @@ void LIVMapper::handleSaveResultsService(
     
     response->success = true;
     std::string pcd_path = std::string(ROOT_DIR) + "Log/PCD/";
-    std::string traj_path = std::string(ROOT_DIR) + "Log/result/";
+    std::string traj_path = std::string(ROOT_DIR) + "Log/trajectory_file/";
     response->message = "Results saved successfully.\nPoint cloud: " + pcd_path + "\nTrajectory: " + traj_path;
     RCLCPP_INFO(this->node->get_logger(), "Save results completed successfully");
   }

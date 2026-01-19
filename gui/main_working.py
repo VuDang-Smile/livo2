@@ -1991,13 +1991,17 @@ class WorkerInterface:
                 
         except requests.exceptions.RequestException as e:
             # Log lỗi trong main thread (thread-safe)
-            self.root.after(0, lambda: self.log(
-                self.translator.get('log.error_connection_updating_status', '⚠️ Connection error when updating status: {error}').replace('{error}', str(e))
+            # Capture giá trị của e vào default parameter để tránh closure issue
+            error_msg = str(e)
+            self.root.after(0, lambda msg=error_msg: self.log(
+                self.translator.get('log.error_connection_updating_status', '⚠️ Connection error when updating status: {error}').replace('{error}', msg)
             ))
         except Exception as e:
             # Log lỗi trong main thread (thread-safe)
-            self.root.after(0, lambda: self.log(
-                self.translator.get('log.error_heartbeat', '⚠️ Heartbeat error: {error}').replace('{error}', str(e))
+            # Capture giá trị của e vào default parameter để tránh closure issue
+            error_msg = str(e)
+            self.root.after(0, lambda msg=error_msg: self.log(
+                self.translator.get('log.error_heartbeat', '⚠️ Heartbeat error: {error}').replace('{error}', msg)
             ))
     
     def load_qr_detect_data(self):

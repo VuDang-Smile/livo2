@@ -24,6 +24,7 @@
         "display_name": "表示名",
         "vehicle_id_system_id": "車両ID（システムID）",
         "type_category": "種別カテゴリ",
+        "vehicle_category": "車両カテゴリ",
         "description_and_notes": "説明・備考",
         "camera": "Camera",
         "execution_control": "実行制御",
@@ -565,5 +566,16 @@
         "choose_design_obj_file": "設計 OBJ ファイルを選択",
         "choose_design_pcd_file": "設計 PCD ファイルを選択",
         "low_similarity_warning_title": "類似度が低い警告"
+    },
+    "category": {
+        "roadheader": "自由断面掘削機",
+        "drill_jumbo": "ドリルジャンボ",
+        "shotcrete_machine": "吹付機",
+        "concrete_mixer_truck": "ミキサー車",
+        "wheel_loader": "ホイールローダー",
+        "dump_truck": "ダンプカー",
+        "backhoe": "バックホウ",
+        "rock_breaker": "ブレーカー",
+        "other_named": "その他(名前付き)"
     }
 }

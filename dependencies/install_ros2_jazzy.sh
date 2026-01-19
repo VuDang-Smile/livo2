@@ -54,9 +54,11 @@ confirm_exit() {
         echo -e "${RED}$message${NC}"
     fi
     
-    echo ""
-    echo -e "${YELLOW}Press Enter to exit...${NC}"
-    read -r
+    if [ -z "${SKIP_EXIT_PROMPT:-}" ]; then
+        echo ""
+        echo -e "${YELLOW}Press Enter to exit...${NC}"
+        read -r
+    fi
     exit $exit_code
 }
 
