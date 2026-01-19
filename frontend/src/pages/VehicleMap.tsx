@@ -13,6 +13,7 @@ import { MapVehicle } from '../types/vehicle';
 import VehicleStatusCard from '../components/vehicleMap/VehicleStatusCard';
 import { getVehicleCategoryLabel } from '../utils/vehicleCategoryUtils';
 import { getVehicleTypeLabel } from '../utils/vehicleTypeUtils';
+import { isValidArray } from '../utils/validationUtils';
 
 // Component chính cho trang
 const VehicleMap: React.FC = () => {
@@ -137,8 +138,16 @@ const VehicleMap: React.FC = () => {
    */
   const displayVehicles: MapVehicle[] = useMemo(() => {
     if (viewMode === '2D') {
+      // Validate markers2D is an array
+      if (!isValidArray(markers2D)) {
+        console.warn('[VehicleMap] Invalid markers2D, expected array');
+        return isValidArray(mapVehicles) ? mapVehicles : [];
+      }
+      
       // Transform markers2D (VehicleMarker2D) → MapVehicle format
-      const vehiclesFromMarkers: MapVehicle[] = markers2D.map(marker => ({
+      const vehiclesFromMarkers: MapVehicle[] = markers2D
+        .filter(marker => marker && marker.id && isValidArray(marker.position) && marker.position.length >= 2)
+        .map(marker => ({
         id: marker.id,
         name: marker.name || marker.label || marker.id,
         vehicleType: marker.vehicleType,
@@ -157,9 +166,13 @@ const VehicleMap: React.FC = () => {
       const vehiclesMap = new Map<string, MapVehicle>();
       
       // Step 1: Add all vehicles from API (base data - có thể thiếu position mới nhất)
-      mapVehicles.forEach(vehicle => {
-        vehiclesMap.set(vehicle.id, vehicle);
-      });
+      if (isValidArray(mapVehicles)) {
+        mapVehicles.forEach(vehicle => {
+          if (vehicle && vehicle.id) {
+            vehiclesMap.set(vehicle.id, vehicle);
+          }
+        });
+      }
       
       // Step 2: Overwrite với real-time data từ MQTT (nếu có)
       // Vehicles từ markers2D có position mới nhất từ MQTT, nên overwrite để ưu tiên real-time
@@ -169,8 +182,16 @@ const VehicleMap: React.FC = () => {
       
       return Array.from(vehiclesMap.values());
     } else {
+      // Validate markers3D is an array
+      if (!isValidArray(markers3D)) {
+        console.warn('[VehicleMap] Invalid markers3D, expected array');
+        return [];
+      }
+      
       // Convert 3D markers to display format
-      return markers3D.map<MapVehicle>(marker => ({
+      return markers3D
+        .filter(marker => marker && marker.id && isValidArray(marker.position) && marker.position.length >= 3)
+        .map<MapVehicle>(marker => ({
         id: marker.id,
         name: marker.name || marker.id,
         vehicleType: marker.vehicleType,
@@ -387,16 +408,16 @@ const VehicleMap: React.FC = () => {
             {viewMode === '3D' ? (
               <div className="relative w-full h-full">
                 <MapView3D
-                  vehicleMarkers={markers3D}
+                  vehicleMarkers={isValidArray(markers3D) ? markers3D : []}
                   pcdUrl={DEFAULT_PCD_URL}
-                  mapMetadata={poseMetadata || mapMetadata}
+                  mapMetadata={poseMetadata ?? mapMetadata ?? null}
                   clipXMin={realXRange ? realXRange[0] : undefined}
                   clipXMax={realXRange ? realXRange[1] : undefined}
                   clipYMin={realYRange ? realYRange[0] : undefined}
                   clipYMax={realYRange ? realYRange[1] : undefined}
                   clipZMin={realZRange ? realZRange[0] : undefined}
                   clipZMax={realZRange ? realZRange[1] : undefined}
-                  selectedVehicleId={selectedVehicleId}
+                  selectedVehicleId={selectedVehicleId ?? null}
                   onVehicleSelect={handleVehicleSelect}
                   onBoundsCalculated={handleBoundsCalculated}
                 />
@@ -443,12 +464,12 @@ const VehicleMap: React.FC = () => {
             ) : (
               <div style={{ height: isFullscreen ? '100vh' : '100%' }}>
                 <MapView2D
-                  vehicleMarkers={markers2D}
-                  mapMetadata={poseMetadata || mapMetadata}
-                  uploadId={uploadId}
+                  vehicleMarkers={isValidArray(markers2D) ? markers2D : []}
+                  mapMetadata={poseMetadata ?? mapMetadata ?? null}
+                  uploadId={uploadId ?? null}
                   view={selectedView}
                   rotation={mapRotation}
-                  selectedVehicleId={selectedVehicleId}
+                  selectedVehicleId={selectedVehicleId ?? null}
                   onVehicleSelect={handleVehicleSelect}
                 />
                 {isLoadingMetadata && (

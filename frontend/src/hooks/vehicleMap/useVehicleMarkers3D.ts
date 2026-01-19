@@ -5,6 +5,12 @@ import { VehicleMarker3D, ApiVehicle } from '../../types/vehicle';
 import { UseVehicleMarkers3DResult } from '../../types/monitoring';
 import { useMQTTPositionHandler } from '../shared/useMQTTPositionHandler';
 import { loadRotationMetadata, getRotationMatrix, applyRotationToPosition, applyRotationToOrientation } from '../../utils/rotationUtils';
+import {
+  isValidArray,
+  getSafePosition,
+  getSafeOrientation,
+  getSafeVehicleStatus,
+} from '../../utils/validationUtils';
 
 const DEBUG = process.env.REACT_APP_DEBUG_LOGS === '1';
 
@@ -61,11 +67,24 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
     try {
       const vehicles = await vehicleService.getVehicles();
       
+      // Validate vehicles is an array
+      if (!isValidArray(vehicles)) {
+        console.warn('[useVehicleMarkers3D] Invalid vehicles response, expected array');
+        setError('Invalid vehicles response format');
+        return;
+      }
+      
       // Store all vehicles from API for merging
       const vehiclesMap = new Map<string, ApiVehicle>();
       const markers: VehicleMarker3D[] = [];
       
-      (Array.isArray(vehicles) ? vehicles : []).forEach((v: ApiVehicle) => {
+      vehicles.forEach((v: ApiVehicle) => {
+        // Validate vehicle has required fields
+        if (!v || !v.vehicle_id) {
+          console.warn('[useVehicleMarkers3D] Skipping invalid vehicle:', v);
+          return;
+        }
+        
         const vehicleId = v.vehicle_id;
         
         // Skip excluded vehicles
@@ -82,8 +101,8 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
         let showOrientation = false;
 
         if (v.latest_pose?.position) {
-          const pos = v.latest_pose.position;
-          position = [pos.x, pos.y, pos.z];
+          const safePos = getSafePosition(v.latest_pose.position);
+          position = [safePos.x, safePos.y, safePos.z];
           
           // Apply rotation to position if rotation matrix is available
           if (rotationMatrix) {
@@ -91,8 +110,8 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
           }
           
           if (v.latest_pose.orientation) {
-            const orient = v.latest_pose.orientation;
-            let quat = { x: orient.x, y: orient.y, z: orient.z, w: orient.w };
+            const safeOrient = getSafeOrientation(v.latest_pose.orientation);
+            let quat = { x: safeOrient.x, y: safeOrient.y, z: safeOrient.z, w: safeOrient.w };
             
             // Apply rotation to orientation if rotation matrix is available
             if (rotationMatrix) {
@@ -105,7 +124,7 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
         }
 
         // Determine color based on status: green for online, red for offline
-        const vehicleStatus = v.status || 'offline';
+        const vehicleStatus = getSafeVehicleStatus(v.status);
         const color = getMarkerColorByStatus(vehicleStatus);
         markers.push({
           id: vehicleId,
@@ -114,9 +133,9 @@ export function useVehicleMarkers3D(): UseVehicleMarkers3DResult {
           color,
           showOrientation,
           status: vehicleStatus,
-          name: v.name || vehicleId,
-          vehicleType: v.vehicle_type,
-          vehicleCategory: v.vehicle_category
+          name: v.name ?? vehicleId,
+          vehicleType: v.vehicle_type ?? undefined,
+          vehicleCategory: v.vehicle_category ?? undefined
         });
       });
       

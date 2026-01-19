@@ -10,6 +10,7 @@
 
 import { MapInfo, MapInfoApiResponse } from '../../types/mapInfo';
 import { formatISOToLocalDisplay } from '../../utils/dateFormatters';
+import { isValidObject, isValidString, isValidNumber } from '../../utils/validationUtils';
 
 export class MapInfoService {
   constructor(private metadataUrl: string) {
@@ -39,7 +40,13 @@ export class MapInfoService {
         );
       }
 
-      const data: MapInfoApiResponse = await response.json();
+      const data = await response.json();
+      
+      // Validate response is not null/undefined
+      if (data === null || data === undefined) {
+        throw new Error('API returned null or undefined response');
+      }
+      
       return this.transformToMapInfo(data);
     } catch (error) {
       if (error instanceof Error) {
@@ -54,27 +61,41 @@ export class MapInfoService {
    * @param data - Raw API response
    * @returns Transformed MapInfo object
    */
-  private transformToMapInfo(data: MapInfoApiResponse): MapInfo {
+  private transformToMapInfo(data: unknown): MapInfo {
+    // Validate data is an object
+    if (!isValidObject(data)) {
+      throw new Error('Invalid data structure: expected an object');
+    }
+
+    const d = data as Partial<MapInfoApiResponse>;
+
     // Validate required fields
-    if (!data.vehicle_id) {
-      throw new Error('Missing required field: vehicle_id');
+    if (!isValidString(d.vehicle_id)) {
+      throw new Error('Missing or invalid required field: vehicle_id');
     }
-    if (!data.map_name) {
-      throw new Error('Missing required field: map_name');
+    
+    if (!isValidString(d.map_name)) {
+      throw new Error('Missing or invalid required field: map_name');
     }
-    if (typeof data.size_bytes !== 'number') {
-      throw new Error('Invalid size_bytes: must be a number');
+    
+    if (!isValidNumber(d.size_bytes)) {
+      throw new Error('Invalid size_bytes: must be a valid number');
     }
 
     const nowFormatted = formatISOToLocalDisplay(new Date().toISOString());
 
+    // Safely extract optional fields
+    const created_at = typeof d.created_at === 'string' ? d.created_at : null;
+    const uploaded_at = typeof d.uploaded_at === 'string' ? d.uploaded_at : null;
+    const vehicle_name = typeof d.vehicle_name === 'string' ? d.vehicle_name : null;
+
     return {
-      id: data.vehicle_id || 'unknown',
-      name: data.map_name || 'Unknown Map',
-      createdAt: data.created_at ? formatISOToLocalDisplay(data.created_at) : nowFormatted,
-      uploadedBy: data.vehicle_name || 'Unknown',
-      uploadedAt: data.uploaded_at ? formatISOToLocalDisplay(data.uploaded_at) : nowFormatted,
-      fileSize: data.size_bytes || 0,
+      id: d.vehicle_id,
+      name: d.map_name,
+      createdAt: created_at ? formatISOToLocalDisplay(created_at) : nowFormatted,
+      uploadedBy: vehicle_name ?? 'Unknown',
+      uploadedAt: uploaded_at ? formatISOToLocalDisplay(uploaded_at) : nowFormatted,
+      fileSize: d.size_bytes,
     };
   }
 }

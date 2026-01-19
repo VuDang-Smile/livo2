@@ -4,6 +4,7 @@ import { VehicleMarker2D } from '../../types/vehicle';
 import { MapMetadata } from '../../types/mapMetadata';
 import { getMapImageUrl } from '../../constants/mapConfig';
 import { useMapImage } from '../../hooks/useMapImage';
+import { isValidArray } from '../../utils/validationUtils';
 
 interface MapView2DProps {
   vehicleMarkers: VehicleMarker2D[];
@@ -119,11 +120,21 @@ const MapView2D: React.FC<MapView2DProps> = ({
     }
 
     // Draw vehicle markers
+    if (!isValidArray(vehicleMarkers)) {
+      console.warn('[MapView2D] Invalid vehicleMarkers, expected array');
+      return;
+    }
+    
     if (vehicleMarkers.length > 0) {
       console.log(`🎨 [MapView2D] Rendering ${vehicleMarkers.length} markers on ${view} view`);
     }
     
     vehicleMarkers.forEach(marker => {
+      // Validate marker structure
+      if (!marker || !marker.id || !isValidArray(marker.position) || marker.position.length < 2) {
+        console.warn('[MapView2D] Skipping invalid marker:', marker);
+        return;
+      }
       const isSelected = marker.id === selectedVehicleId;
       const isHovered = marker.id === hoveredVehicle;
       
@@ -219,7 +230,15 @@ const MapView2D: React.FC<MapView2DProps> = ({
     }
 
     // Check if click is on a vehicle
+    if (!isValidArray(vehicleMarkers)) {
+      return;
+    }
+    
     vehicleMarkers.forEach(marker => {
+      // Validate marker structure
+      if (!marker || !marker.id || !isValidArray(marker.position) || marker.position.length < 2) {
+        return;
+      }
       let markerX: number, markerY: number;
       if (mapImage && mapImage.complete && mapImage.naturalWidth > 0 && mapImage.naturalHeight > 0) {
         // Use original image size for positioning (centered on canvas)
@@ -265,8 +284,16 @@ const MapView2D: React.FC<MapView2DProps> = ({
       y = centerY + dx * sin + dy * cos;
     }
 
+    if (!isValidArray(vehicleMarkers)) {
+      return;
+    }
+    
     let foundVehicle = null;
     vehicleMarkers.forEach(marker => {
+      // Validate marker structure
+      if (!marker || !marker.id || !isValidArray(marker.position) || marker.position.length < 2) {
+        return;
+      }
       let markerX: number, markerY: number;
       if (mapImage && mapImage.complete && mapImage.naturalWidth > 0 && mapImage.naturalHeight > 0) {
         // Use original image size for positioning (centered on canvas)
