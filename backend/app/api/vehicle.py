@@ -18,6 +18,8 @@ from app.models.vehicle import (
     VehicleUpdateResponse,
     VehicleStatus,
     VehicleCategory,
+    VehicleType,
+    MissionType,
     Pose,
     Position,
     Orientation,
@@ -36,6 +38,22 @@ async def get_vehicle_categories():
     """Get list of available vehicle categories."""
     return {
         "categories": [cat.value for cat in VehicleCategory]
+    }
+
+
+@router.get("/types")
+async def get_vehicle_types():
+    """Get list of available vehicle types."""
+    return {
+        "types": [t.value for t in VehicleType]
+    }
+
+
+@router.get("/missions")
+async def get_vehicle_missions():
+    """Get list of available mission types."""
+    return {
+        "missions": [m.value for m in MissionType]
     }
 
 
@@ -72,7 +90,12 @@ async def register_vehicle(vehicle_request: VehicleRegisterRequest):
             "latest_pose": initial_pose,
             "name": vehicle_request.name,
             "description": vehicle_request.description,
-            "vehicle_type": vehicle_request.vehicle_type,
+            "vehicle_type": vehicle_request.vehicle_type.value
+            if vehicle_request.vehicle_type
+            else None,
+            "mission": vehicle_request.mission.value
+            if vehicle_request.mission
+            else None,
             "vehicle_category": vehicle_request.vehicle_category.value
             if vehicle_request.vehicle_category
             else None,
@@ -91,7 +114,12 @@ async def register_vehicle(vehicle_request: VehicleRegisterRequest):
         mqtt_service.publish_map_event("vehicle.registered", {
             "vehicle_id": vehicle_id,
             "name": vehicle_request.name,
-            "vehicle_type": vehicle_request.vehicle_type,
+            "vehicle_type": vehicle_request.vehicle_type.value
+            if vehicle_request.vehicle_type
+            else None,
+            "mission": vehicle_request.mission.value
+            if vehicle_request.mission
+            else None,
             "vehicle_category": vehicle_request.vehicle_category.value
             if vehicle_request.vehicle_category
             else None,
@@ -190,11 +218,26 @@ async def get_vehicle(vehicle_id: str):
         except ValueError:
             vehicle_category = None
 
+        type_str = vehicle.get("vehicle_type")
+        vehicle_type: VehicleType | None
+        try:
+            vehicle_type = VehicleType(type_str) if type_str else None
+        except ValueError:
+            vehicle_type = None
+
+        mission_str = vehicle.get("mission")
+        mission: MissionType | None
+        try:
+            mission = MissionType(mission_str) if mission_str else None
+        except ValueError:
+            mission = None
+
         return VehicleResponse(
             vehicle_id=vehicle["vehicle_id"],
             name=vehicle.get("name", ""),
             description=vehicle.get("description", ""),
-            vehicle_type=vehicle.get("vehicle_type", ""),
+            vehicle_type=vehicle_type,
+            mission=mission,
             vehicle_category=vehicle_category,
             metadata=vehicle.get("metadata", {}),
             latest_pose=Pose(
@@ -244,6 +287,20 @@ async def get_all_vehicles():
             except ValueError:
                 vehicle_category = None
             
+            type_str = vehicle.get("vehicle_type")
+            vehicle_type: VehicleType | None
+            try:
+                vehicle_type = VehicleType(type_str) if type_str else None
+            except ValueError:
+                vehicle_type = None
+
+            mission_str = vehicle.get("mission")
+            mission: MissionType | None
+            try:
+                mission = MissionType(mission_str) if mission_str else None
+            except ValueError:
+                mission = None
+            
             vehicle_items.append(
                 VehicleListItem(
                     vehicle_id=vehicle["vehicle_id"],
@@ -253,7 +310,8 @@ async def get_all_vehicles():
                         timestamp=latest_pose["timestamp"]
                     ),
                     name=vehicle.get("name"),
-                    vehicle_type=vehicle.get("vehicle_type"),
+                    vehicle_type=vehicle_type,
+                    mission=mission,
                     vehicle_category=vehicle_category,
                     status=status,
                     updated_at=vehicle.get("updated_at", datetime.utcnow())
@@ -358,7 +416,9 @@ async def update_vehicle(
         if vehicle_request.description is not None:
             update_data["description"] = vehicle_request.description
         if vehicle_request.vehicle_type is not None:
-            update_data["vehicle_type"] = vehicle_request.vehicle_type
+            update_data["vehicle_type"] = vehicle_request.vehicle_type.value
+        if vehicle_request.mission is not None:
+            update_data["mission"] = vehicle_request.mission.value
         if vehicle_request.status is not None:
             update_data["status"] = vehicle_request.status.value
         if vehicle_request.metadata is not None:

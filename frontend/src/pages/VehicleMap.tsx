@@ -598,7 +598,7 @@ const VehicleMap: React.FC = () => {
                         <div className="text-sm text-gray-600 space-y-1">
                           <p>
                             <span className="font-medium">{t('vehicle_type_label')}</span>{' '}
-                            {getVehicleTypeLabel(vehicle.vehicleType, language) || t('vehicle_type_unknown')}
+                            {getVehicleTypeLabel(vehicle.vehicleType, t) || t('vehicle_type_unknown')}
                           </p>
                           {vehicle.vehicleCategory && (
                             <p>

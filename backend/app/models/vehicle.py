@@ -11,6 +11,25 @@ class VehicleStatus(str, Enum):
     OFFLINE = "offline"
 
 
+class VehicleType(str, Enum):
+    """Specific vehicle roles."""
+    SCANNER = "scanner"
+    WORKER = "worker"
+
+
+class MissionType(str, Enum):
+    """Mission types for vehicles."""
+    TUNNEL_LINE_1 = "tunnel_line_1"
+    TUNNEL_LINE_2 = "tunnel_line_2"
+    MATERIAL_TRANSPORT = "material_transport"
+    CONCRETE_WALL_PUMP = "concrete_wall_pump"
+    SOIL_TRANSPORT = "soil_transport"
+    EQUIPMENT_INSTALLATION = "equipment_installation"
+    TUNNEL_MAINTENANCE = "tunnel_maintenance"
+    GEOLOGICAL_SURVEY = "geological_survey"
+    OTHER_MISSION = "other_mission"
+
+
 class VehicleCategory(str, Enum):
     """High-level vehicle category for tunnel/mining equipment."""
     ROADHEADER = "roadheader"
@@ -66,7 +85,8 @@ class VehicleResponse(BaseModel):
     latest_pose: Pose
     name: Optional[str] = None
     description: Optional[str] = None
-    vehicle_type: Optional[str] = None
+    vehicle_type: Optional[VehicleType] = None
+    mission: Optional[MissionType] = None
     vehicle_category: Optional[VehicleCategory] = None
     status: VehicleStatus = VehicleStatus.OFFLINE
     metadata: Optional[dict] = None
@@ -79,7 +99,8 @@ class VehicleListItem(BaseModel):
     vehicle_id: str
     latest_pose: Pose
     name: Optional[str] = None
-    vehicle_type: Optional[str] = None
+    vehicle_type: Optional[VehicleType] = None
+    mission: Optional[MissionType] = None
     vehicle_category: Optional[VehicleCategory] = None
     status: VehicleStatus = VehicleStatus.OFFLINE
     updated_at: datetime
@@ -96,7 +117,8 @@ class VehicleRegisterRequest(BaseModel):
     vehicle_id: str = Field(..., description="MAC address (đã bỏ dấu :, ví dụ: aa11bb22cc33dd44)")
     name: Optional[str] = Field(None, description="Vehicle name")
     description: Optional[str] = Field(None, description="Vehicle description")
-    vehicle_type: Optional[str] = Field(None, description="Vehicle type (e.g., robot, drone, car)")
+    vehicle_type: Optional[VehicleType] = Field(None, description="Vehicle type (scanner, worker, etc.)")
+    mission: Optional[MissionType] = Field(None, description="Mission type")
     vehicle_category: Optional[VehicleCategory] = Field(
         None,
         description=(
@@ -126,7 +148,8 @@ class VehicleUpdateRequest(BaseModel):
     """Request model for updating vehicle information."""
     name: Optional[str] = Field(None, description="Vehicle name")
     description: Optional[str] = Field(None, description="Vehicle description")
-    vehicle_type: Optional[str] = Field(None, description="Vehicle type (e.g., robot, drone, car)")
+    vehicle_type: Optional[VehicleType] = Field(None, description="Vehicle type")
+    mission: Optional[MissionType] = Field(None, description="Mission type")
     status: Optional[VehicleStatus] = Field(None, description="Vehicle status: online or offline")
     metadata: Optional[dict] = Field(None, description="Additional metadata")
     vehicle_category: Optional[VehicleCategory] = Field(
