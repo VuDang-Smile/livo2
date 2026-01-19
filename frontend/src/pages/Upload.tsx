@@ -19,6 +19,7 @@ import { getPCDRotation, transformWorldToScene, transformSceneToWorld } from '..
 import { MAP_FLOORPLAN_METADATA_URL } from '../config/dataSources';
 import { BACKEND_API_BASE } from '../constants/apiConfig';
 import { extract2DFrom3DScene, convert2DTo3DScene, convert2DTo3DObject, extract2DFrom3DWorld } from '../utils/qrCoordinateHelper';
+import { loadRotationMetadata, getRotationMatrix, applyRotationToPosition, applyInverseRotationToPosition } from '../utils/rotationUtils';
 
 // Component cho đường hầm (copy từ VehicleMap)
 const Tunnel: React.FC = () => {
@@ -827,6 +828,8 @@ const Upload: React.FC = () => {
   const [mapMetadata, setMapMetadata] = useState<MapMetadata | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState<boolean>(false);
   const [mapMetadataError, setMapMetadataError] = useState<string | null>(null);
+  // Rotation matrix for applying to QR codes
+  const [rotationMatrix, setRotationMatrix] = useState<number[][] | null>(null);
   // Fetch QR codes from storage using hook
   const { qrCodes: apiQRCodes, isLoading: isLoadingQRCodes, error: qrCodesError, refetch: refetchQRCodes } = useQRCodes();
   // State quản lý các QR code đang được chỉnh sửa (từ previewQRCodes)
@@ -1188,13 +1191,19 @@ const Upload: React.FC = () => {
           // Use position3D if available (in scene coordinates), convert to world coordinates for backend
           let coords3d: [number, number, number];
           if (qr.position3D) {
-            // Convert from scene coordinates to world coordinates
+            // Convert from scene coordinates to world coordinates (đã xoay)
             coords3d = transformSceneToWorld(qr.position3D, coordinateConfig);
           } else {
-            // Fallback: convert 2D to 3D scene, then to world
+            // Fallback: convert 2D to 3D scene, then to world (đã xoay)
             const scenePos3D = convert2DTo3DScene(qr.position, qr.surface || 'floor', mapMetadata, 'top');
             coords3d = transformSceneToWorld(scenePos3D, coordinateConfig);
           }
+          
+          // Đảo ngược rotation để lưu về backend (world coordinates, chưa xoay)
+          if (rotationMatrix) {
+            coords3d = applyInverseRotationToPosition(coords3d, rotationMatrix);
+          }
+          
           payload[qr.code] = coords3d;
         });
 
@@ -1300,13 +1309,19 @@ const Upload: React.FC = () => {
         // Use position3D if available (in scene coordinates), convert to world coordinates for backend
         let coords3d: [number, number, number];
         if (editedQR.position3D) {
-          // Convert from scene coordinates to world coordinates
+          // Convert from scene coordinates to world coordinates (đã xoay)
           coords3d = transformSceneToWorld(editedQR.position3D, coordinateConfig);
         } else {
-          // Fallback: convert 2D to 3D scene, then to world
+          // Fallback: convert 2D to 3D scene, then to world (đã xoay)
           const scenePos3D = convert2DTo3DScene(editedQR.position, editedQR.surface || 'floor', mapMetadata, 'top');
           coords3d = transformSceneToWorld(scenePos3D, coordinateConfig);
         }
+        
+        // Đảo ngược rotation để lưu về backend (world coordinates, chưa xoay)
+        if (rotationMatrix) {
+          coords3d = applyInverseRotationToPosition(coords3d, rotationMatrix);
+        }
+        
         const payload: { [key: string]: number[] } = {};
         payload[code] = coords3d;
 
@@ -1412,14 +1427,25 @@ const Upload: React.FC = () => {
     // Load QR codes from API (already fetched by useQRCodes hook)
     // Refresh QR codes when loading ZIP to ensure latest data
     if (apiQRCodes.length > 0) {
-      // Convert QR codes from API (world coordinates) to scene coordinates (our standard)
+      // Convert QR codes from API (world coordinates, chưa xoay) to scene coordinates (our standard)
       const coordinateConfig = mapMetadata?.coordinate_system;
       const convertedQRCodes = apiQRCodes.map(qr => {
         if (qr.position3D) {
-          // Convert world coordinates to scene coordinates
-          const scenePos3D = transformWorldToScene(qr.position3D, coordinateConfig);
+          // Apply rotation to position3D (world coordinates, chưa xoay -> đã xoay)
+          let rotatedPosition3D = qr.position3D;
+          if (rotationMatrix) {
+            rotatedPosition3D = applyRotationToPosition(qr.position3D, rotationMatrix);
+          }
+          
+          // Convert rotated world coordinates to scene coordinates
+          const scenePos3D = transformWorldToScene(rotatedPosition3D, coordinateConfig);
+          
+          // Extract 2D position from rotated world coordinates
+          const position2D = extract2DFrom3DWorld(rotatedPosition3D, mapMetadata, 'top');
+          
           return {
             ...qr,
+            position: position2D,
             position3D: scenePos3D
           };
         }
@@ -1433,7 +1459,7 @@ const Upload: React.FC = () => {
 
     // Map info is now loaded automatically via useMapInfo hook
     // No need to manually set it here
-  }, [apiQRCodes, isLoadingQRCodes, qrCodesError, refetchQRCodes, mapMetadata]);
+  }, [apiQRCodes, isLoadingQRCodes, qrCodesError, refetchQRCodes, mapMetadata, rotationMatrix]);
 
   const loadLastZip = useCallback(() => {
     if (isLoadingLastZip) return; // Tránh race/đúp click
@@ -1477,6 +1503,20 @@ const Upload: React.FC = () => {
     fetchMapMetadata();
   }, [fetchMapMetadata]);
 
+  // Load rotation metadata when component mounts
+  useEffect(() => {
+    loadRotationMetadata().then(metadata => {
+      if (metadata) {
+        const matrix = getRotationMatrix(metadata);
+        setRotationMatrix(matrix);
+        console.log('✅ [Upload] Rotation matrix loaded:', matrix ? 'available' : 'invalid');
+      } else {
+        console.log('ℹ️ [Upload] No rotation metadata available, QR codes will not be rotated');
+        setRotationMatrix(null);
+      }
+    });
+  }, []);
+
   // Commented out: 2D picking functionality - no longer used
   // useEffect(() => {
   //   document.body.style.overflow = isPickingPosition ? 'hidden' : '';
@@ -1488,14 +1528,25 @@ const Upload: React.FC = () => {
   // Auto-sync QR codes from API when available (only if previewQRCodes is empty)
   useEffect(() => {
     if (apiQRCodes.length > 0 && previewQRCodes.length === 0 && !isLoadingQRCodes) {
-      // Convert QR codes from API (world coordinates) to scene coordinates (our standard)
+      // Convert QR codes from API (world coordinates, chưa xoay) to scene coordinates (our standard)
       const coordinateConfig = mapMetadata?.coordinate_system;
       const convertedQRCodes = apiQRCodes.map(qr => {
         if (qr.position3D) {
-          // Convert world coordinates to scene coordinates
-          const scenePos3D = transformWorldToScene(qr.position3D, coordinateConfig);
+          // Apply rotation to position3D (world coordinates, chưa xoay -> đã xoay)
+          let rotatedPosition3D = qr.position3D;
+          if (rotationMatrix) {
+            rotatedPosition3D = applyRotationToPosition(qr.position3D, rotationMatrix);
+          }
+          
+          // Convert rotated world coordinates to scene coordinates
+          const scenePos3D = transformWorldToScene(rotatedPosition3D, coordinateConfig);
+          
+          // Extract 2D position from rotated world coordinates
+          const position2D = extract2DFrom3DWorld(rotatedPosition3D, mapMetadata, 'top');
+          
           return {
             ...qr,
+            position: position2D,
             position3D: scenePos3D
           };
         }
@@ -1503,7 +1554,7 @@ const Upload: React.FC = () => {
       });
       setPreviewQRCodes(convertedQRCodes);
     }
-  }, [apiQRCodes, previewQRCodes.length, isLoadingQRCodes, mapMetadata]);
+  }, [apiQRCodes, previewQRCodes.length, isLoadingQRCodes, mapMetadata, rotationMatrix]);
 
   useEffect(() => {
     if (pickingRowId) {
@@ -1559,7 +1610,7 @@ const Upload: React.FC = () => {
     previewQRCodes
       .filter(qr => !deletedQRCodeIds.has(qr.id))
       .forEach(qr => {
-        // position3D is now in scene coordinates (our standard)
+        // position3D is now in scene coordinates (from rotated world coordinates)
         // If not available, convert from 2D world position to scene coordinates
         const scenePos3d = qr.position3D
           ? { x: qr.position3D[0], y: qr.position3D[1], z: qr.position3D[2] }
@@ -1569,6 +1620,7 @@ const Upload: React.FC = () => {
         const editedQR = editingExistingQRCodes.get(qr.id);
         
         // Extract 2D world position from scene coordinates
+        // scenePos3d -> world (đã xoay) -> 2D
         const worldPair = editedQR 
           ? editedQR.position 
           : extract2DFrom3DScene([scenePos3d.x, scenePos3d.y, scenePos3d.z], mapMetadata, 'top');
@@ -1579,7 +1631,8 @@ const Upload: React.FC = () => {
           { x: editedQR.position3D[0], y: editedQR.position3D[1], z: editedQR.position3D[2] } :
           (editedQR ? convert2DTo3DObject(editedQR.position, editedQR.surface || 'floor', mapMetadata, 'top') : scenePos3d);
         
-        // Convert scene coordinates to world coordinates for transformPoseToPixel
+        // Convert scene coordinates to world coordinates (đã xoay) for transformPoseToPixel
+        // QR code position3D đã là scene coordinates từ world đã xoay, nên khi convert về world sẽ được world đã xoay
         const coordinateConfig = mapMetadata?.coordinate_system;
         const worldPos3D = transformSceneToWorld(
           [effectivePos3D.x, effectivePos3D.y, effectivePos3D.z],
@@ -1607,12 +1660,14 @@ const Upload: React.FC = () => {
         ? `TM:${String(parseInt(row.codeIndex, 10)).padStart(3, '0')}`
         : undefined;
 
-      // row.position3D is in scene coordinates (our standard)
+      // row.position3D is in scene coordinates (from rotated world coordinates when picked)
+      // If not available, convert from 2D world position (đã xoay) to scene coordinates
       const scenePos3D = row.position3D
         ? { x: row.position3D[0], y: row.position3D[1], z: row.position3D[2] }
         : convert2DTo3DObject(row.position, row.surface || 'floor', mapMetadata, 'top');
       
-      // Convert scene coordinates to world coordinates for transformPoseToPixel
+      // Convert scene coordinates to world coordinates (đã xoay) for transformPoseToPixel
+      // row.position3D đã là scene coordinates từ world đã xoay (khi picked), nên khi convert về world sẽ được world đã xoay
       const coordinateConfig = mapMetadata?.coordinate_system;
       const worldPos3D = transformSceneToWorld(
         [scenePos3D.x, scenePos3D.y, scenePos3D.z],
@@ -1633,7 +1688,7 @@ const Upload: React.FC = () => {
     });
 
     return pins;
-  }, [previewQRCodes, editingRows, editingExistingQRCodes, deletedQRCodeIds, pickingRowId, mapMetadata]);
+  }, [previewQRCodes, editingRows, editingExistingQRCodes, deletedQRCodeIds, pickingRowId, mapMetadata, rotationMatrix]);
 
   // Convert 2D QR pins to 3D markers for 3D view
   const qrMarkers3D = useMemo<Array<{ position: [number, number, number]; id: string; label?: string; isActive?: boolean; surface?: 'floor' | 'ceiling' | 'left' | 'right' }>>(() => {
@@ -1690,7 +1745,7 @@ const Upload: React.FC = () => {
 
     console.log(`📍 qrMarkers3D updated: ${markers.length} markers`, markers);
     return markers;
-  }, [previewQRCodes, editingRows, deletedQRCodeIds, pickingRowId, mapMetadata]);
+  }, [previewQRCodes, editingRows, deletedQRCodeIds, pickingRowId, mapMetadata, rotationMatrix]);
 
   return (
     <div className="space-y-6">

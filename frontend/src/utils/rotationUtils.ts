@@ -276,3 +276,38 @@ export function applyRotationToOrientation(
   const combinedMatrix = multiplyMatrices(rotationMatrix, poseMatrix);
   return matrixToQuaternion(combinedMatrix);
 }
+
+/**
+ * Tính transpose của rotation matrix 3x3 (inverse cho orthogonal matrix)
+ * 
+ * @param matrix - Rotation matrix 3x3
+ * @returns Transpose matrix 3x3
+ */
+function transposeMatrix(matrix: number[][]): number[][] {
+  return [
+    [matrix[0][0], matrix[1][0], matrix[2][0]],
+    [matrix[0][1], matrix[1][1], matrix[2][1]],
+    [matrix[0][2], matrix[1][2], matrix[2][2]]
+  ];
+}
+
+/**
+ * Đảo ngược rotation vào position vector (unrotate)
+ * Dùng khi lưu QR code mới được pick trên bản đồ đã xoay
+ * 
+ * @param position - Position vector [x, y, z] (world coordinates, đã xoay)
+ * @param rotationMatrix - Rotation matrix 3x3 từ metadata
+ * @returns Unrotated position [x, y, z] (world coordinates, chưa xoay)
+ */
+export function applyInverseRotationToPosition(
+  position: [number, number, number],
+  rotationMatrix: number[][] | null
+): [number, number, number] {
+  if (!rotationMatrix) {
+    return position;
+  }
+
+  // Inverse rotation matrix = transpose (vì rotation matrix là orthogonal)
+  const inverseMatrix = transposeMatrix(rotationMatrix);
+  return multiplyMatrixVector(inverseMatrix, position);
+}
