@@ -9,6 +9,7 @@
  */
 
 import { QRCodeInfo, QRCodeApiResponse } from '../../types/qrCode';
+import { isValidObject, isValidArray, isValidNumber } from '../../utils/validationUtils';
 
 export class QRCodeService {
   constructor(private qrDetectUrl: string) {
@@ -34,7 +35,13 @@ export class QRCodeService {
         );
       }
 
-      const data: QRCodeApiResponse = await response.json();
+      const data = await response.json();
+      
+      // Validate response is not null/undefined
+      if (data === null || data === undefined) {
+        throw new Error('API returned null or undefined response');
+      }
+      
       return this.transformToQRCodeInfoArray(data);
     } catch (error) {
       // Handle abort errors gracefully
@@ -63,9 +70,10 @@ export class QRCodeService {
    * @param data - Raw API response object
    * @returns Array of transformed QRCodeInfo objects
    */
-  private transformToQRCodeInfoArray(data: QRCodeApiResponse): QRCodeInfo[] {
-    // Handle empty response
-    if (!data || typeof data !== 'object') {
+  private transformToQRCodeInfoArray(data: unknown): QRCodeInfo[] {
+    // Handle empty or invalid response
+    if (!isValidObject(data)) {
+      console.warn('[QRCodeService] Invalid data structure, returning empty array');
       return [];
     }
 
@@ -74,27 +82,27 @@ export class QRCodeService {
     // Iterate through object entries
     for (const [code, position] of Object.entries(data)) {
       // Validate code
-      if (!code || typeof code !== 'string') {
+      if (!code || typeof code !== 'string' || code.length === 0) {
         console.warn(`[QRCodeService] Invalid QR code key: ${code}`);
         continue;
       }
 
       // Validate position array
-      if (!Array.isArray(position) || position.length < 2) {
+      if (!isValidArray(position) || position.length < 2) {
         console.warn(`[QRCodeService] Invalid position for QR code ${code}:`, position);
         continue;
       }
 
-      const [x, y, z] = position;
+      // Extract coordinates with safe defaults
+      const x = position[0];
+      const y = position[1] ?? 0;
+      const z = position[2] ?? 0;
 
       // Validate all coordinates are numbers (even though y is not used in output)
       if (
-        typeof x !== 'number' ||
-        typeof y !== 'number' ||
-        typeof z !== 'number' ||
-        !isFinite(x) ||
-        !isFinite(y) ||
-        !isFinite(z)
+        !isValidNumber(x) ||
+        !isValidNumber(y) ||
+        !isValidNumber(z)
       ) {
         console.warn(`[QRCodeService] Invalid coordinates for QR code ${code}:`, position);
         continue;

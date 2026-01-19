@@ -8,6 +8,13 @@ import { MAP_FLOORPLAN_METADATA_URL } from '../../config/dataSources';
 import { useVehicleService } from '../api/useVehicleService';
 import { useMQTTPositionHandler } from '../shared/useMQTTPositionHandler';
 import { loadRotationMetadata, getRotationMatrix, applyRotationToPose } from '../../utils/rotationUtils';
+import {
+  isValidArray,
+  validatePose3D,
+  getSafePosition,
+  getSafeOrientation,
+  getSafeVehicleStatus,
+} from '../../utils/validationUtils';
 
 /**
  * Helper function to get marker color based on status
@@ -113,10 +120,23 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
     
     try {
       const vehicles = await vehicleService.getVehicles();
+      
+      // Validate vehicles is an array
+      if (!isValidArray(vehicles)) {
+        console.warn('[useVehiclePose2D] Invalid vehicles response, expected array');
+        return;
+      }
+      
       const vehiclesMap = new Map<string, ApiVehicle>();
       const markers: VehicleMarker2D[] = [];
       
-      (Array.isArray(vehicles) ? vehicles : []).forEach((v: ApiVehicle) => {
+      vehicles.forEach((v: ApiVehicle) => {
+        // Validate vehicle has required fields
+        if (!v || !v.vehicle_id) {
+          console.warn('[useVehiclePose2D] Skipping invalid vehicle:', v);
+          return;
+        }
+        
         const vehicleId = v.vehicle_id;
         
         // Skip excluded vehicles
@@ -130,11 +150,15 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
         // Create marker for all vehicles (even without position) to show in sidebar
         if (v.latest_pose?.position) {
           // Vehicle has position - transform to 2D pixel coordinates
+          const safePosition = getSafePosition(v.latest_pose.position);
+          const safeOrientation = getSafeOrientation(v.latest_pose.orientation);
+          const timestamp = v.latest_pose.timestamp ?? v.updated_at ?? new Date().toISOString();
+          
           let pose: Pose3D = {
-            position: v.latest_pose.position,
-            orientation: v.latest_pose.orientation || { x: 0, y: 0, z: 0, w: 1 },
+            position: safePosition,
+            orientation: safeOrientation,
             frame_id: 'map',
-            timestamp: v.latest_pose.timestamp || v.updated_at || new Date().toISOString()
+            timestamp
           };
           
           // Apply rotation to pose if rotation matrix is available
@@ -142,14 +166,19 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
             pose = applyRotationToPose(pose, rotationMatrix);
           }
           
-          // Transform 3D pose → 2D pixel coordinates
-          const debugMode = process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEBUG_LOGS === '1';
-          const pixel = transformPoseToPixel(pose, mapMetadata, view, debugMode);
-          
-          if (pixel) {
-            // Determine marker color based on status: green for online, red for offline
-            // But keep special colors for out of bounds and clamped
-            const vehicleStatus = v.status || 'offline';
+          // Validate pose before transformation
+          if (!validatePose3D(pose)) {
+            console.warn('[useVehiclePose2D] Invalid pose structure for vehicle:', vehicleId);
+            // Fall through to create default marker
+          } else {
+            // Transform 3D pose → 2D pixel coordinates
+            const debugMode = process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEBUG_LOGS === '1';
+            const pixel = transformPoseToPixel(pose, mapMetadata, view, debugMode);
+            
+            if (pixel) {
+              // Determine marker color based on status: green for online, red for offline
+              // But keep special colors for out of bounds and clamped
+              const vehicleStatus = getSafeVehicleStatus(v.status);
             let markerColor = getMarkerColorByStatus(vehicleStatus);
             if (pixel.is_out_of_bounds) {
               markerColor = '#fbbf24'; // Yellow for out of bounds
@@ -157,41 +186,43 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
               markerColor = '#f97316'; // Orange for clamped
             }
             
-            const yawHalf = pixel.yaw / 2;
-            markers.push({
-              id: vehicleId,
-              position: [pixel.pixel_x, pixel.pixel_y, 0],
-              orientation: [Math.cos(yawHalf), 0, 0, Math.sin(yawHalf)],
-              color: markerColor,
-              showOrientation: true,
-              label: v.name || vehicleId,
-              lastUpdate: new Date(pose.timestamp || Date.now()),
-              name: v.name,
-              vehicleType: v.vehicle_type,
-              vehicleCategory: v.vehicle_category,
-              status: vehicleStatus
-            });
-          } else {
-            // Transform failed - create marker with default position for sidebar display
-            const vehicleStatus = v.status || 'offline';
-            const markerColor = getMarkerColorByStatus(vehicleStatus);
-            markers.push({
-              id: vehicleId,
-              position: [0, 0, 0],
-              orientation: [1, 0, 0, 0],
-              color: markerColor,
-              showOrientation: false,
-              label: v.name || vehicleId,
-              lastUpdate: new Date(),
-              name: v.name,
-              vehicleType: v.vehicle_type,
-              vehicleCategory: v.vehicle_category,
-              status: vehicleStatus
-            });
+              const yawHalf = pixel.yaw / 2;
+              markers.push({
+                id: vehicleId,
+                position: [pixel.pixel_x, pixel.pixel_y, 0],
+                orientation: [Math.cos(yawHalf), 0, 0, Math.sin(yawHalf)],
+                color: markerColor,
+                showOrientation: true,
+                label: v.name ?? vehicleId,
+                lastUpdate: new Date(typeof pose.timestamp === 'string' ? pose.timestamp : Date.now()),
+                name: v.name ?? undefined,
+                vehicleType: v.vehicle_type ?? undefined,
+                vehicleCategory: v.vehicle_category ?? undefined,
+                status: vehicleStatus
+              });
+              return; // Successfully created marker, skip default marker creation
+            }
           }
+          
+          // Transform failed or invalid pose - create marker with default position for sidebar display
+          const vehicleStatus = getSafeVehicleStatus(v.status);
+          const markerColor = getMarkerColorByStatus(vehicleStatus);
+          markers.push({
+            id: vehicleId,
+            position: [0, 0, 0],
+            orientation: [1, 0, 0, 0],
+            color: markerColor,
+            showOrientation: false,
+            label: v.name ?? vehicleId,
+            lastUpdate: new Date(),
+            name: v.name ?? undefined,
+            vehicleType: v.vehicle_type ?? undefined,
+            vehicleCategory: v.vehicle_category ?? undefined,
+            status: vehicleStatus
+          });
         } else {
           // Vehicle has no position - create marker with default position for sidebar display
-          const vehicleStatus = v.status || 'offline';
+          const vehicleStatus = getSafeVehicleStatus(v.status);
           const markerColor = vehicleStatus === 'online' ? '#22c55e' : '#ef4444'; // Green for online, red for offline
           markers.push({
             id: vehicleId,
@@ -199,11 +230,11 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
             orientation: [1, 0, 0, 0],
             color: markerColor,
             showOrientation: false,
-            label: v.name || vehicleId,
+            label: v.name ?? vehicleId,
             lastUpdate: new Date(),
-            name: v.name,
-            vehicleType: v.vehicle_type,
-            vehicleCategory: v.vehicle_category,
+            name: v.name ?? undefined,
+            vehicleType: v.vehicle_type ?? undefined,
+            vehicleCategory: v.vehicle_category ?? undefined,
             status: vehicleStatus
           });
         }
@@ -234,19 +265,35 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
   
   // Helper function to transform a pose update to marker
   const transformPoseToMarker = useCallback((update: PositionUpdateNotification, metadata: MapMetadata): VehicleMarker2D | null => {
-    if (!update.vehicle_id) return null;
+    if (!update || !update.vehicle_id) {
+      console.warn('[useVehiclePose2D] Invalid update: missing vehicle_id');
+      return null;
+    }
     
-    // Extract pose from MQTT message
+    // Extract pose from MQTT message with safe fallbacks
+    const posePosition = update.pose?.position ?? update.position;
+    const poseOrientation = update.pose?.orientation;
+    
+    // Validate position exists
+    if (!posePosition) {
+      console.warn('⚠️ [useVehiclePose2D] Pose missing position:', update);
+      return null;
+    }
+    
+    const safePosition = getSafePosition(posePosition);
+    const safeOrientation = getSafeOrientation(poseOrientation);
+    const timestamp = update.pose?.timestamp ?? update.position.timestamp ?? new Date().toISOString();
+    
     let pose: Pose3D = {
-      position: update.pose?.position || update.position,
-      orientation: update.pose?.orientation || { x: 0, y: 0, z: 0, w: 1 },
-      frame_id: update.pose?.frame_id || 'map',
-      timestamp: update.pose?.timestamp || update.position.timestamp
+      position: safePosition,
+      orientation: safeOrientation,
+      frame_id: update.pose?.frame_id ?? 'map',
+      timestamp
     };
     
     // Validate pose data
-    if (!pose.position || !pose.orientation) {
-      console.warn('⚠️ [useVehiclePose2D] Pose missing position or orientation:', update);
+    if (!validatePose3D(pose)) {
+      console.warn('⚠️ [useVehiclePose2D] Invalid pose structure:', update);
       return null;
     }
     
@@ -369,7 +416,9 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
   
   // Handle vehicle status updates - update status instead of removing when offline
   useEffect(() => {
-    if (!lastVehicleStatus) return;
+    if (!lastVehicleStatus || !lastVehicleStatus.vehicle_id) {
+      return;
+    }
 
     const vehicleId = lastVehicleStatus.vehicle_id;
     const newStatus = lastVehicleStatus.status;
@@ -381,10 +430,7 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
       
       if (existingMarker) {
         // Marker exists - update status and color
-        const validStatus: 'online' | 'offline' =
-          newStatus === 'online' ? 'online'
-          : newStatus === 'offline' ? 'offline'
-          : existingMarker.status || 'offline';
+        const validStatus = getSafeVehicleStatus(newStatus, existingMarker.status ?? 'offline');
         
         // Update color based on status: green for online, red for offline
         // But keep special colors (yellow/orange) if they exist
@@ -398,13 +444,23 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
       } else if (newStatus === 'online' && mapMetadata) {
         // Marker doesn't exist but coming online - create from API data
         const apiVehicle = apiVehicles.get(vehicleId);
-        if (apiVehicle && apiVehicle.latest_pose?.position) {
+        if (apiVehicle?.latest_pose?.position) {
+          const safePosition = getSafePosition(apiVehicle.latest_pose.position);
+          const safeOrientation = getSafeOrientation(apiVehicle.latest_pose.orientation);
+          const timestamp = apiVehicle.latest_pose.timestamp ?? apiVehicle.updated_at ?? new Date().toISOString();
+          
           let pose: Pose3D = {
-            position: apiVehicle.latest_pose.position,
-            orientation: apiVehicle.latest_pose.orientation || { x: 0, y: 0, z: 0, w: 1 },
+            position: safePosition,
+            orientation: safeOrientation,
             frame_id: 'map',
-            timestamp: apiVehicle.latest_pose.timestamp || apiVehicle.updated_at || new Date().toISOString()
+            timestamp
           };
+          
+          // Validate pose before transformation
+          if (!validatePose3D(pose)) {
+            console.warn('[useVehiclePose2D] Invalid pose structure for vehicle coming online:', vehicleId);
+            return prev;
+          }
           
           // Apply rotation to pose if rotation matrix is available
           if (rotationMatrix) {
@@ -430,11 +486,11 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
               orientation: [Math.cos(yawHalf), 0, 0, Math.sin(yawHalf)],
               color: markerColor,
               showOrientation: true,
-              label: apiVehicle.name || vehicleId,
-              lastUpdate: new Date(pose.timestamp || Date.now()),
-              name: apiVehicle.name,
-              vehicleType: apiVehicle.vehicle_type,
-              vehicleCategory: apiVehicle.vehicle_category,
+              label: apiVehicle.name ?? vehicleId,
+              lastUpdate: new Date(typeof pose.timestamp === 'string' ? pose.timestamp : Date.now()),
+              name: apiVehicle.name ?? undefined,
+              vehicleType: apiVehicle.vehicle_type ?? undefined,
+              vehicleCategory: apiVehicle.vehicle_category ?? undefined,
               status: 'online'
             };
             
