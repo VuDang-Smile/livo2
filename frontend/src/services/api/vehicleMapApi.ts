@@ -166,7 +166,7 @@ export class VehicleMapService {
           throw new Error('Vehicle missing required vehicle_id field');
         }
 
-        const latest = vehicle.latest_pose;
+      const latest = vehicle.latest_pose;
         const position = isValidObject(latest) && isValidObject(latest.position)
           ? getSafePosition(latest.position)
           : getSafePosition(undefined);
@@ -179,15 +179,15 @@ export class VehicleMapService {
 
         const status = getSafeVehicleStatus(vehicle.status);
 
-        return {
+      return {
           id: vehicleId,
           name: typeof vehicle.name === 'string' ? vehicle.name : vehicleId,
           vehicleType: typeof vehicle.vehicle_type === 'string' ? vehicle.vehicle_type : undefined,
           vehicleCategory: vehicle.vehicle_category as MapVehicle['vehicleCategory'] | undefined,
           status,
-          position,
-          timestamp: normalizeTimestamp(rawTimestamp, true) as string,
-        };
-      });
+        position,
+        timestamp: normalizeTimestamp(rawTimestamp, true) as string,
+      };
+    });
   }
 }

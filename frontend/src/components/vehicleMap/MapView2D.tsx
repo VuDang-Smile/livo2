@@ -287,7 +287,7 @@ const MapView2D: React.FC<MapView2DProps> = ({
     if (!isValidArray(vehicleMarkers)) {
       return;
     }
-    
+
     let foundVehicle = null;
     vehicleMarkers.forEach(marker => {
       // Validate marker structure
@@ -318,6 +318,23 @@ const MapView2D: React.FC<MapView2DProps> = ({
   const scrollClass = rotation === 90 
     ? 'overflow-y-auto overflow-x-hidden' // Vertical scroll when rotated 90°
     : 'overflow-x-auto overflow-y-hidden'; // Horizontal scroll when 0°
+
+  // Hiển thị UI "chưa có" nếu không có metadata
+  if (!mapMetadata) {
+    return (
+      <div className="relative w-full h-full flex items-center justify-center bg-gray-50">
+        <div className="text-center p-8">
+          <div className="mb-4">
+            <svg className="w-16 h-16 mx-auto text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m-6 3l6-3" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">{t('no_map_data') || 'Chưa có dữ liệu bản đồ'}</h3>
+          <p className="text-sm text-gray-600">{t('map_metadata_not_available') || 'Metadata bản đồ chưa được tải lên. Vui lòng tải lên bản đồ trước.'}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative w-full h-full">

@@ -61,6 +61,14 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
       
       const response = await fetch(MAP_FLOORPLAN_METADATA_URL);
       
+      // Handle 404 gracefully - file không tồn tại
+      if (response.status === 404) {
+        console.warn('⚠️ [useVehiclePose2D] Map metadata file not found (404)');
+        setError('MAP_METADATA_NOT_FOUND'); // Special error code để UI hiển thị "chưa có"
+        setMapMetadata(null);
+        return;
+      }
+      
       if (!response.ok) {
         throw new Error(`Failed to load metadata: ${response.statusText}`);
       }
@@ -80,6 +88,7 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
       });
       
       setMapMetadata(metadata);
+      setError(null); // Clear error nếu load thành công
       console.log('✅ [useVehiclePose2D] Map metadata loaded, ready to transform poses');
       
       // If we have a pending pose update, transform it now
@@ -88,7 +97,13 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
       }
     } catch (err: any) {
       console.error('❌ [useVehiclePose2D] Failed to load map metadata:', err);
-      setError(err.message || 'Failed to load map metadata');
+      // Nếu là network error hoặc 404, set special error code
+      if (err.message?.includes('404') || err.message?.includes('Not Found')) {
+        setError('MAP_METADATA_NOT_FOUND');
+      } else {
+        setError(err.message || 'Failed to load map metadata');
+      }
+      setMapMetadata(null);
     } finally {
       setIsLoading(false);
     }
@@ -171,13 +186,13 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
             console.warn('[useVehiclePose2D] Invalid pose structure for vehicle:', vehicleId);
             // Fall through to create default marker
           } else {
-            // Transform 3D pose → 2D pixel coordinates
-            const debugMode = process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEBUG_LOGS === '1';
-            const pixel = transformPoseToPixel(pose, mapMetadata, view, debugMode);
-            
-            if (pixel) {
-              // Determine marker color based on status: green for online, red for offline
-              // But keep special colors for out of bounds and clamped
+          // Transform 3D pose → 2D pixel coordinates
+          const debugMode = process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEBUG_LOGS === '1';
+          const pixel = transformPoseToPixel(pose, mapMetadata, view, debugMode);
+          
+          if (pixel) {
+            // Determine marker color based on status: green for online, red for offline
+            // But keep special colors for out of bounds and clamped
               const vehicleStatus = getSafeVehicleStatus(v.status);
             let markerColor = getMarkerColorByStatus(vehicleStatus);
             if (pixel.is_out_of_bounds) {
@@ -186,40 +201,40 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
               markerColor = '#f97316'; // Orange for clamped
             }
             
-              const yawHalf = pixel.yaw / 2;
-              markers.push({
-                id: vehicleId,
-                position: [pixel.pixel_x, pixel.pixel_y, 0],
-                orientation: [Math.cos(yawHalf), 0, 0, Math.sin(yawHalf)],
-                color: markerColor,
-                showOrientation: true,
+            const yawHalf = pixel.yaw / 2;
+            markers.push({
+              id: vehicleId,
+              position: [pixel.pixel_x, pixel.pixel_y, 0],
+              orientation: [Math.cos(yawHalf), 0, 0, Math.sin(yawHalf)],
+              color: markerColor,
+              showOrientation: true,
                 label: v.name ?? vehicleId,
                 lastUpdate: new Date(typeof pose.timestamp === 'string' ? pose.timestamp : Date.now()),
                 name: v.name ?? undefined,
                 vehicleType: v.vehicle_type ?? undefined,
                 vehicleCategory: v.vehicle_category ?? undefined,
-                status: vehicleStatus
-              });
+              status: vehicleStatus
+            });
               return; // Successfully created marker, skip default marker creation
             }
           }
           
           // Transform failed or invalid pose - create marker with default position for sidebar display
           const vehicleStatus = getSafeVehicleStatus(v.status);
-          const markerColor = getMarkerColorByStatus(vehicleStatus);
-          markers.push({
-            id: vehicleId,
-            position: [0, 0, 0],
-            orientation: [1, 0, 0, 0],
-            color: markerColor,
-            showOrientation: false,
+            const markerColor = getMarkerColorByStatus(vehicleStatus);
+            markers.push({
+              id: vehicleId,
+              position: [0, 0, 0],
+              orientation: [1, 0, 0, 0],
+              color: markerColor,
+              showOrientation: false,
             label: v.name ?? vehicleId,
-            lastUpdate: new Date(),
+              lastUpdate: new Date(),
             name: v.name ?? undefined,
             vehicleType: v.vehicle_type ?? undefined,
             vehicleCategory: v.vehicle_category ?? undefined,
-            status: vehicleStatus
-          });
+              status: vehicleStatus
+            });
         } else {
           // Vehicle has no position - create marker with default position for sidebar display
           const vehicleStatus = getSafeVehicleStatus(v.status);

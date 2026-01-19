@@ -38,18 +38,18 @@ export class VehicleService {
     console.log(`[VehicleService] Making request to: ${url}`);
     
     try {
-      const response = await fetch(url, {
-        ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(options.headers || {}),
-        },
-      });
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+    });
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `HTTP error! status: ${response.status}`);
-      }
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `HTTP error! status: ${response.status}`);
+    }
 
       const data = await response.json();
       

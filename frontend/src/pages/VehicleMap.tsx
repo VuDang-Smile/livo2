@@ -44,8 +44,11 @@ const VehicleMap: React.FC = () => {
 
   // Hooks for data
   const { vehicleMarkers: markers3D } = useVehicleMarkers3D();
-  const { vehicleMarkers: markers2D, mapMetadata: poseMetadata } = useVehiclePose2D(selectedView);
+  const { vehicleMarkers: markers2D, mapMetadata: poseMetadata, error: poseError, isLoading: isLoadingPose } = useVehiclePose2D(selectedView);
   const { mapVehicles } = useVehicleMap2D();
+  
+  // Kiểm tra nếu metadata không tồn tại
+  const isMetadataNotFound = poseError === 'MAP_METADATA_NOT_FOUND';
 
   // Khoá scroll toàn bộ trang khi vào VehicleMap, trả lại trạng thái cũ khi rời trang
   useEffect(() => {
@@ -167,11 +170,11 @@ const VehicleMap: React.FC = () => {
       
       // Step 1: Add all vehicles from API (base data - có thể thiếu position mới nhất)
       if (isValidArray(mapVehicles)) {
-        mapVehicles.forEach(vehicle => {
+      mapVehicles.forEach(vehicle => {
           if (vehicle && vehicle.id) {
-            vehiclesMap.set(vehicle.id, vehicle);
+        vehiclesMap.set(vehicle.id, vehicle);
           }
-        });
+      });
       }
       
       // Step 2: Overwrite với real-time data từ MQTT (nếu có)
@@ -463,19 +466,43 @@ const VehicleMap: React.FC = () => {
               </div>
             ) : (
               <div style={{ height: isFullscreen ? '100vh' : '100%' }}>
-                <MapView2D
-                  vehicleMarkers={isValidArray(markers2D) ? markers2D : []}
-                  mapMetadata={poseMetadata ?? mapMetadata ?? null}
-                  uploadId={uploadId ?? null}
-                  view={selectedView}
-                  rotation={mapRotation}
-                  selectedVehicleId={selectedVehicleId ?? null}
-                  onVehicleSelect={handleVehicleSelect}
-                />
-                {isLoadingMetadata && (
-                  <div className="absolute top-4 right-4 bg-white bg-opacity-90 p-2 rounded-lg shadow-sm">
-                    <span className="text-sm text-gray-600">Loading map metadata...</span>
+                {isLoadingPose ? (
+                  <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                      <p className="text-gray-600">{t('loading_map') || 'Đang tải bản đồ...'}</p>
+                    </div>
                   </div>
+                ) : isMetadataNotFound ? (
+                  <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                    <div className="text-center p-8 max-w-md">
+                      <div className="mb-4">
+                        <svg className="w-16 h-16 mx-auto text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m-6 3l6-3" />
+                        </svg>
+                      </div>
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">{t('no_map_data') || 'Chưa có dữ liệu bản đồ'}</h3>
+                      <p className="text-sm text-gray-600 mb-4">{t('map_metadata_not_available') || 'Metadata bản đồ chưa được tải lên. Vui lòng tải lên bản đồ trước.'}</p>
+                      <p className="text-xs text-gray-500">{t('map_upload_hint') || 'Bạn có thể tải lên bản đồ từ trang Upload.'}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <MapView2D
+                      vehicleMarkers={isValidArray(markers2D) ? markers2D : []}
+                      mapMetadata={poseMetadata ?? mapMetadata ?? null}
+                      uploadId={uploadId ?? null}
+                      view={selectedView}
+                      rotation={mapRotation}
+                      selectedVehicleId={selectedVehicleId ?? null}
+                      onVehicleSelect={handleVehicleSelect}
+                    />
+                    {isLoadingMetadata && (
+                      <div className="absolute top-4 right-4 bg-white bg-opacity-90 p-2 rounded-lg shadow-sm">
+                        <span className="text-sm text-gray-600">Loading map metadata...</span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}

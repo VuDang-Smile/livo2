@@ -33,6 +33,12 @@ export async function loadRotationMetadata(): Promise<RotationMetadata | null> {
     try {
       const response = await fetch(ROTATION_METADATA_URL);
       
+      // Handle 404 gracefully - file không tồn tại
+      if (response.status === 404) {
+        console.warn('⚠️ [rotationUtils] Rotation metadata file not found (404) - continuing without rotation');
+        return null;
+      }
+      
       if (!response.ok) {
         console.warn('⚠️ [rotationUtils] Failed to load rotation metadata:', response.statusText);
         return null;
