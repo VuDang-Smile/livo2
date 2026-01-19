@@ -30,6 +30,12 @@ const MapView2D: React.FC<MapView2DProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredVehicle, setHoveredVehicle] = useState<string | null>(null);
   
+  // Refs để preserve scroll position khi chỉ vehicleMarkers thay đổi
+  const scrollPositionRef = useRef<{ scrollLeft: number; scrollTop: number } | null>(null);
+  const previousCanvasSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const previousViewRef = useRef<'top' | 'side_x' | null>(null);
+  const previousRotationRef = useRef<number | null>(null);
+  
   // Determine image URL - dùng floorplan từ storage khi đã có metadata
   const imageUrl = useMemo(() => {
     if (mapMetadata) {
@@ -64,6 +70,8 @@ const MapView2D: React.FC<MapView2DProps> = ({
     return { width: 1000, height: 1000 };
   }, [mapImage, rotation]);
 
+  // Effect 1: Setup canvas và vẽ background (khi view/rotation/canvasSize thay đổi)
+  // Reset scroll khi layout thay đổi
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -71,6 +79,41 @@ const MapView2D: React.FC<MapView2DProps> = ({
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    // Kiểm tra nếu layout thay đổi (view/rotation/canvasSize)
+    const canvasSizeChanged = 
+      previousCanvasSizeRef.current === null ||
+      previousCanvasSizeRef.current.width !== canvasSize.width ||
+      previousCanvasSizeRef.current.height !== canvasSize.height;
+    
+    const viewChanged = previousViewRef.current !== view;
+    const rotationChanged = previousRotationRef.current !== rotation;
+    const layoutChanged = canvasSizeChanged || viewChanged || rotationChanged;
+
+    // Chỉ reset scroll khi layout thay đổi (view/rotation/canvasSize)
+    // Không reset khi chỉ mapImage thay đổi
+    if (layoutChanged) {
+      scrollPositionRef.current = null;
+      
+      // Reset scroll về đầu khi layout thay đổi
+      requestAnimationFrame(() => {
+        if (container) {
+          container.scrollLeft = 0;
+          container.scrollTop = 0;
+        }
+      });
+    }
+    
+    // Update refs
+    if (canvasSizeChanged) {
+      previousCanvasSizeRef.current = { width: canvasSize.width, height: canvasSize.height };
+    }
+    if (viewChanged) {
+      previousViewRef.current = view;
+    }
+    if (rotationChanged) {
+      previousRotationRef.current = rotation;
+    }
 
     // Set canvas size (will be at least container size, but larger if image is bigger)
     canvas.width = canvasSize.width;
@@ -119,9 +162,82 @@ const MapView2D: React.FC<MapView2DProps> = ({
       }
     }
 
+    // Restore context state
+    ctx.restore();
+  }, [mapImage, imageError, view, rotation, canvasSize]);
+
+  // Effect 2: Vẽ vehicle markers (khi vehicleMarkers thay đổi)
+  // Preserve scroll position khi chỉ markers update
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Lưu scroll position trước khi re-render markers
+    // Nếu scrollPositionRef.current === null, có nghĩa là layout đã thay đổi (effect 1 đã reset)
+    // Trong trường hợp đó, không preserve scroll lần này (để scroll về đầu)
+    // Nhưng sau khi vẽ xong, lưu scroll position hiện tại để preserve cho các lần update tiếp theo
+    // Nếu scrollPositionRef.current !== null, có nghĩa là chỉ markers update, preserve scroll
+    const shouldPreserveScroll = scrollPositionRef.current !== null;
+    
+    if (shouldPreserveScroll) {
+      // Chỉ markers update - lưu scroll position hiện tại để preserve
+      scrollPositionRef.current = {
+        scrollLeft: container.scrollLeft,
+        scrollTop: container.scrollTop
+      };
+    }
+
+    // Clear canvas để xóa markers cũ trước khi vẽ lại
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Calculate rotation in radians
+    const rotationRad = (rotation * Math.PI) / 180;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+
+    // Save context state
+    ctx.save();
+
+    // Apply rotation transformation
+    if (rotation !== 0) {
+      ctx.translate(centerX, centerY);
+      ctx.rotate(rotationRad);
+      ctx.translate(-centerX, -centerY);
+    }
+
+    // Vẽ lại background image để xóa markers cũ
+    if (mapImage && mapImage.complete && !imageError) {
+      // Draw image at full size, centered
+      const x = (canvas.width - mapImage.naturalWidth) / 2;
+      const y = (canvas.height - mapImage.naturalHeight) / 2;
+      ctx.drawImage(mapImage, x, y, mapImage.naturalWidth, mapImage.naturalHeight);
+    } else {
+      // Fallback: Draw grid
+      ctx.strokeStyle = '#ecf0f1';
+      ctx.lineWidth = 1;
+      const gridSize = 20;
+      for (let x = 0; x < canvas.width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+    }
+
     // Draw vehicle markers
     if (!isValidArray(vehicleMarkers)) {
       console.warn('[MapView2D] Invalid vehicleMarkers, expected array');
+      ctx.restore();
       return;
     }
     
@@ -199,7 +315,25 @@ const MapView2D: React.FC<MapView2DProps> = ({
 
     // Restore context state
     ctx.restore();
-  }, [vehicleMarkers, selectedVehicleId, hoveredVehicle, mapImage, imageError, mapMetadata, view, rotation, canvasSize]);
+
+    // Khôi phục scroll position sau khi vẽ xong
+    requestAnimationFrame(() => {
+      if (container) {
+        if (shouldPreserveScroll && scrollPositionRef.current) {
+          // Preserve scroll position khi chỉ markers update
+          container.scrollLeft = scrollPositionRef.current.scrollLeft;
+          container.scrollTop = scrollPositionRef.current.scrollTop;
+        } else {
+          // Sau khi vẽ markers lần đầu (sau layout change), lưu scroll position hiện tại
+          // để preserve scroll cho các lần update tiếp theo
+          scrollPositionRef.current = {
+            scrollLeft: container.scrollLeft,
+            scrollTop: container.scrollTop
+          };
+        }
+      }
+    });
+  }, [vehicleMarkers, selectedVehicleId, hoveredVehicle, mapImage, imageError, rotation]);
 
   const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;

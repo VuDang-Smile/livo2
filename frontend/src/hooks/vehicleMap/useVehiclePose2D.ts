@@ -107,7 +107,7 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
     } finally {
       setIsLoading(false);
     }
-  }, [view, lastPositionUpdate]);
+  }, [view]);
   
   useEffect(() => {
     fetchMetadata();
