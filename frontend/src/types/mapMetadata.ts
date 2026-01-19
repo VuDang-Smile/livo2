@@ -37,6 +37,25 @@ export interface Pose2DPixel {
 }
 
 /**
+ * Rotation metadata structure from merged_all_rotated_rotation_metadata.json
+ */
+export interface RotationMetadata {
+  rotation_info: {
+    rotation_angle_rad: number;
+    rotation_angle_deg: number;
+    rotation_axis: [number, number, number];
+    rotation_matrix: number[][]; // 4x4 matrix
+    method: string;
+  };
+  direction_before: [number, number, number];
+  direction_after: [number, number, number];
+  input_pcd?: string;
+  output_pcd?: string;
+  timestamp?: string;
+  original_metadata?: any;
+}
+
+/**
  * Coordinate system convention definition
  * Dùng để mô tả hệ trục của dữ liệu bản đồ/PCD so với chuẩn ROS hoặc Three.js.
  */
@@ -202,4 +221,3 @@ export interface LegacyMapMetadata {
   image_width: number;
   image_height: number;
 }
-

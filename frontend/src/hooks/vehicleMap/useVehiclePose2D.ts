@@ -7,6 +7,7 @@ import { UseVehiclePose2DResult } from '../../types/monitoring';
 import { MAP_FLOORPLAN_METADATA_URL } from '../../config/dataSources';
 import { useVehicleService } from '../api/useVehicleService';
 import { useMQTTPositionHandler } from '../shared/useMQTTPositionHandler';
+import { loadRotationMetadata, getRotationMatrix, applyRotationToPose } from '../../utils/rotationUtils';
 
 /**
  * Helper function to get marker color based on status
@@ -40,6 +41,8 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
   const { isExcludedVehicle } = useMQTTPositionHandler();
   // Store vehicles from API for merging with MQTT updates
   const [apiVehicles, setApiVehicles] = useState<Map<string, ApiVehicle>>(new Map());
+  // Store rotation matrix for applying to poses
+  const [rotationMatrix, setRotationMatrix] = useState<number[][] | null>(null);
   
   // Fetch map metadata từ storage thực tế
   const fetchMetadata = useCallback(async () => {
@@ -87,6 +90,20 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
   useEffect(() => {
     fetchMetadata();
   }, [fetchMetadata]);
+
+  // Load rotation metadata when hook initializes
+  useEffect(() => {
+    loadRotationMetadata().then(metadata => {
+      if (metadata) {
+        const matrix = getRotationMatrix(metadata);
+        setRotationMatrix(matrix);
+        console.log('✅ [useVehiclePose2D] Rotation matrix loaded:', matrix ? 'available' : 'invalid');
+      } else {
+        console.log('ℹ️ [useVehiclePose2D] No rotation metadata available, poses will not be rotated');
+        setRotationMatrix(null);
+      }
+    });
+  }, []);
   
   /**
    * Fetch vehicles from API and transform to 2D markers
@@ -113,12 +130,17 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
         // Create marker for all vehicles (even without position) to show in sidebar
         if (v.latest_pose?.position) {
           // Vehicle has position - transform to 2D pixel coordinates
-          const pose: Pose3D = {
+          let pose: Pose3D = {
             position: v.latest_pose.position,
             orientation: v.latest_pose.orientation || { x: 0, y: 0, z: 0, w: 1 },
             frame_id: 'map',
             timestamp: v.latest_pose.timestamp || v.updated_at || new Date().toISOString()
           };
+          
+          // Apply rotation to pose if rotation matrix is available
+          if (rotationMatrix) {
+            pose = applyRotationToPose(pose, rotationMatrix);
+          }
           
           // Transform 3D pose → 2D pixel coordinates
           const debugMode = process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEBUG_LOGS === '1';
@@ -201,7 +223,7 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
     } catch (err) {
       console.error('❌ [useVehiclePose2D] Failed to fetch vehicles from API:', err);
     }
-  }, [vehicleService, mapMetadata, view, isExcludedVehicle]);
+  }, [vehicleService, mapMetadata, view, isExcludedVehicle, rotationMatrix]);
   
   // Fetch vehicles from API when metadata is loaded
   useEffect(() => {
@@ -215,7 +237,7 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
     if (!update.vehicle_id) return null;
     
     // Extract pose from MQTT message
-    const pose: Pose3D = {
+    let pose: Pose3D = {
       position: update.pose?.position || update.position,
       orientation: update.pose?.orientation || { x: 0, y: 0, z: 0, w: 1 },
       frame_id: update.pose?.frame_id || 'map',
@@ -237,6 +259,11 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
       w: orient.w ?? 1
     };
     pose.orientation = normalizedOrientation;
+    
+    // Apply rotation to pose if rotation matrix is available
+    if (rotationMatrix) {
+      pose = applyRotationToPose(pose, rotationMatrix);
+    }
     
     // Transform 3D pose → 2D pixel coordinates
     const debugMode = process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEBUG_LOGS === '1';
@@ -274,7 +301,7 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
       vehicleCategory: apiVehicle?.vehicle_category,
       status: 'online' // Position update means vehicle is online
     };
-  }, [view, apiVehicles]);
+  }, [view, apiVehicles, rotationMatrix]);
   
   // Transform pose when MQTT update arrives
   useEffect(() => {
@@ -372,12 +399,17 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
         // Marker doesn't exist but coming online - create from API data
         const apiVehicle = apiVehicles.get(vehicleId);
         if (apiVehicle && apiVehicle.latest_pose?.position) {
-          const pose: Pose3D = {
+          let pose: Pose3D = {
             position: apiVehicle.latest_pose.position,
             orientation: apiVehicle.latest_pose.orientation || { x: 0, y: 0, z: 0, w: 1 },
             frame_id: 'map',
             timestamp: apiVehicle.latest_pose.timestamp || apiVehicle.updated_at || new Date().toISOString()
           };
+          
+          // Apply rotation to pose if rotation matrix is available
+          if (rotationMatrix) {
+            pose = applyRotationToPose(pose, rotationMatrix);
+          }
           
           const debugMode = process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEBUG_LOGS === '1';
           const pixel = transformPoseToPixel(pose, mapMetadata, view, debugMode);
@@ -414,7 +446,7 @@ export function useVehiclePose2D(view: 'top' | 'side_x' = 'top'): UseVehiclePose
       
       return prev;
     });
-  }, [lastVehicleStatus, mapMetadata, view, apiVehicles]);
+  }, [lastVehicleStatus, mapMetadata, view, apiVehicles, rotationMatrix]);
 
   // Log MQTT connection status changes
   useEffect(() => {
