@@ -211,6 +211,48 @@ export class VehicleService {
   }
 
   /**
+   * Cập nhật thông tin vehicle (name, description, vehicle_type, metadata ...)
+   * Thực hiện PATCH tới /api/v1/vehicles/{id} nếu backend hỗ trợ, trả về vehicle đã cập nhật.
+   * Nếu backend không hỗ trợ, method sẽ ném lỗi từ makeRequest.
+   */
+  async updateVehicle(vehicleId: string, data: Partial<VehicleApi> & { metadata?: any } = {}): Promise<ApiVehicle | void> {
+    // Use PATCH to partially update vehicle resource
+    const updated = await this.makeRequest<VehicleApi>(`/api/v1/vehicles/${vehicleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+
+    // Normalize and return as ApiVehicle
+    if (updated) {
+      const status: 'online' | 'offline' =
+        (updated.status && updated.status.toLowerCase() === 'online') ? 'online' : 'offline';
+
+      const latest_pose = updated.latest_pose
+        ? {
+            position: updated.latest_pose.position,
+            orientation: updated.latest_pose.orientation,
+            timestamp: updated.latest_pose.timestamp,
+          }
+        : undefined;
+
+      return {
+        vehicle_id: updated.vehicle_id,
+        name: updated.name,
+        description: updated.description,
+        vehicle_type: updated.vehicle_type,
+        vehicle_category: updated.vehicle_category,
+        status,
+        metadata: updated.metadata ?? {},
+        latest_pose,
+        created_at: updated.created_at,
+        updated_at: updated.updated_at ?? updated.latest_pose?.timestamp,
+      };
+    }
+
+    return;
+  }
+
+  /**
    * Lấy danh sách online scanners
    */
   async getOnlineScanners(): Promise<ApiVehicle[]> {

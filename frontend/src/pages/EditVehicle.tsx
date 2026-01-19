@@ -155,16 +155,16 @@ const EditVehicle: React.FC = () => {
       await vehicleService.updateVehicleStatus(formData.id, formData.status as 'online' | 'offline');
       
       // TODO: Khi backend có endpoint UPDATE vehicle info, gọi API ở đây
-      // await vehicleService.updateVehicle(formData.id, {
-      //   name: formData.driver,
-      //   description: formData.mission,
-      //   vehicle_type: formData.vehicleType,
-      //   metadata: {
-      //     licensePlate: formData.licensePlate,
-      //     driver: formData.driver,
-      //     mission: formData.mission
-      //   }
-      // });
+      await vehicleService.updateVehicle(formData.id, {
+        name: formData.driver,
+        description: formData.mission,
+        vehicle_type: formData.vehicleType,
+        metadata: {
+          licensePlate: formData.licensePlate,
+          driver: formData.driver,
+          mission: formData.mission
+        }
+      });
       
       console.log('Updated vehicle data:', formData);
       

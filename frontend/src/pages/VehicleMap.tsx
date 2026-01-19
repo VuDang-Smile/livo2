@@ -319,7 +319,7 @@ const VehicleMap: React.FC = () => {
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                Top
+                {t('view_top')}
               </button>
               <button
                 onClick={() => setSelectedView('side_x')}
@@ -329,7 +329,7 @@ const VehicleMap: React.FC = () => {
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                Side X
+                {t('view_side_x')}
               </button>
             </div>
           )}
@@ -345,7 +345,7 @@ const VehicleMap: React.FC = () => {
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                Horizontal
+                {t('view_horizontal')}
               </button>
               <button
                 onClick={() => setMapRotation(90)}
@@ -355,7 +355,7 @@ const VehicleMap: React.FC = () => {
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                Vertical
+                {t('view_vertical')}
               </button>
             </div>
           )}
