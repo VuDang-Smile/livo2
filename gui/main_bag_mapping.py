@@ -474,6 +474,8 @@ class BagMappingInterface:
         self.design_file_path = None
         self.comparison_result = None
         self.comparison_threshold = 90.0  # % khớp tối thiểu khuyến nghị
+        # File config để lưu đường dẫn design file mặc định
+        self.design_config_path = Path(__file__).parent / "design_map_config.json"
         
         # QR code scanning - chỉ khởi tạo nếu tất cả dependencies có sẵn
         try:
@@ -1535,6 +1537,10 @@ class BagMappingInterface:
             self.comparison_status_label.config(text=msg, fg="blue", font=("Arial", 11, "bold"))
         self.add_log(self.translator.get('log.design_type_set', 
             'CONFIG: Design map type set to {type}').replace('{type}', self.design_file_type.upper()))
+        
+        # Lưu lại config nếu đã có design file path
+        if self.design_file_path:
+            self._save_design_file_config(self.design_file_path, self.design_file_type)
 
     def browse_design_file(self):
         """Chọn file bản thiết kế (PCD hoặc OBJ) để so sánh."""
@@ -1570,6 +1576,9 @@ class BagMappingInterface:
                     fg="green",
                     font=("Arial", 11, "bold"),
                 )
+            
+            # Lưu đường dẫn vào config để dùng lần sau
+            self._save_design_file_config(filename, self.design_file_type)
 
     def launch_rviz_cmd(self):
         self.add_log(self.translator.get('log.system_launching_rviz2', 'SYSTEM: Launching RViz2...'))
@@ -2035,6 +2044,81 @@ class BagMappingInterface:
             self.add_log_success('message.default_config_selected', name=default_config.name)
         else:
             self.add_log_warning('message.default_config_not_found', name='mid360_equirectangular_stable.yaml')
+        
+        # Load design file config sau khi setup UI
+        self._load_design_file_config()
+    
+    def _load_design_file_config(self):
+        """Tải đường dẫn design file đã lưu từ config"""
+        try:
+            if not self.design_config_path.exists():
+                return
+            
+            with open(self.design_config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            design_path = config.get('design_file_path')
+            design_type = config.get('design_file_type', 'pcd')
+            
+            # Kiểm tra file có tồn tại không
+            if design_path and Path(design_path).exists():
+                self.design_file_path = design_path
+                self.design_file_type = design_type
+                
+                # Cập nhật UI nếu đã được khởi tạo
+                if hasattr(self, 'design_path_var'):
+                    self.design_path_var.set(design_path)
+                
+                if hasattr(self, 'design_type_var'):
+                    self.design_type_var.set(design_type)
+                
+                # Cập nhật status label
+                if hasattr(self, 'comparison_status_label'):
+                    file_name = Path(design_path).name
+                    status_text = self.translator.get('label.design_file_selected', 
+                        'Design file: {filename}').replace('{filename}', file_name)
+                    self.comparison_status_label.config(
+                        text=status_text,
+                        fg="green",
+                        font=("Arial", 11, "bold"),
+                    )
+                
+                self.add_log(self.translator.get('log.design_file_loaded_from_config', 
+                    '✅ Design file loaded from config: {filename}').replace('{filename}', Path(design_path).name))
+            else:
+                # File không tồn tại, xóa config cũ
+                if design_path:
+                    self.add_log(self.translator.get('log.design_file_not_found_removing_config', 
+                        '⚠️ Saved design file not found, removing from config: {path}').replace('{path}', design_path))
+                    self._save_design_file_config(None, None)
+                    
+        except json.JSONDecodeError as e:
+            self.add_log(self.translator.get('log.design_config_invalid_json', 
+                '⚠️ Invalid design config JSON, ignoring: {error}').replace('{error}', str(e)))
+        except Exception as e:
+            self.add_log(self.translator.get('log.design_config_load_error', 
+                '⚠️ Error loading design config: {error}').replace('{error}', str(e)))
+    
+    def _save_design_file_config(self, file_path, file_type):
+        """Lưu đường dẫn design file vào config"""
+        try:
+            config = {}
+            
+            if file_path and Path(file_path).exists():
+                config['design_file_path'] = str(file_path)
+                config['design_file_type'] = file_type or self.design_file_type
+            else:
+                # Nếu file_path là None, xóa config
+                if self.design_config_path.exists():
+                    self.design_config_path.unlink()
+                return
+            
+            with open(self.design_config_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+            
+        except Exception as e:
+            self.add_log(self.translator.get('log.design_config_save_error', 
+                '⚠️ Error saving design config: {error}').replace('{error}', str(e)))
     
     def _validate_config_file(self, config_path_obj):
         """Validate YAML config file trước khi sử dụng"""
