@@ -22,6 +22,7 @@ const VehicleMap: React.FC = () => {
   const [showFilter, setShowFilter] = useState(false);
   const [viewMode, setViewMode] = useState<'2D' | '3D'>('2D');
   const [selectedView, setSelectedView] = useState<'top' | 'side_x'>('top');
+  const [mapRotation, setMapRotation] = useState<0 | 90>(0);
   const [mapMetadata] = useState<MapMetadata | null>(null);
   const [uploadId] = useState<string | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
@@ -309,6 +310,32 @@ const VehicleMap: React.FC = () => {
             </div>
           )}
 
+          {/* Map Rotation Toggle (only for 2D) */}
+          {viewMode === '2D' && (
+            <div className="flex bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={() => setMapRotation(0)}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  mapRotation === 0
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Horizontal
+              </button>
+              <button
+                onClick={() => setMapRotation(90)}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  mapRotation === 90
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Vertical
+              </button>
+            </div>
+          )}
+
           {/* Fullscreen Toggle */}
           <button
             onClick={toggleFullscreen}
@@ -420,6 +447,7 @@ const VehicleMap: React.FC = () => {
                   mapMetadata={poseMetadata || mapMetadata}
                   uploadId={uploadId}
                   view={selectedView}
+                  rotation={mapRotation}
                   selectedVehicleId={selectedVehicleId}
                   onVehicleSelect={handleVehicleSelect}
                 />
