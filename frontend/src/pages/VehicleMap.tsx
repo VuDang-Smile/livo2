@@ -603,7 +603,7 @@ const VehicleMap: React.FC = () => {
                           {vehicle.vehicleCategory && (
                             <p>
                               <span className="font-medium">{t('equipment_category_label')}</span>{' '}
-                              {getVehicleCategoryLabel(vehicle.vehicleCategory, language)}
+                              {getVehicleCategoryLabel(vehicle.vehicleCategory, t)}
                             </p>
                           )}
                           <p><span className="font-medium">{t('status_label_short')}</span> 
