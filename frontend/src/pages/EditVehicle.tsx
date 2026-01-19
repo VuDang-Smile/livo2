@@ -163,9 +163,7 @@ const EditVehicle: React.FC = () => {
       newErrors.vehicleType = t('vehicle_type_required');
     }
 
-    if (!formData.mission) {
-      newErrors.mission = t('mission_required');
-    }
+    // Mission is optional, no validation needed
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -353,7 +351,7 @@ const EditVehicle: React.FC = () => {
           {/* Nhiệm vụ */}
           <div>
             <label htmlFor="mission" className="block text-sm font-medium text-gray-700 mb-2">
-              {t('mission')} <span className="text-red-500">*</span>
+              {t('mission')}
             </label>
             <select
               id="mission"

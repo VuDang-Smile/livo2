@@ -52,9 +52,19 @@ const translations = {
     'cancel': 'Hủy',
     'inactive': 'Không hoạt động',
     'driver_placeholder': 'Họ và tên tài xế',
-    // Vehicle types (Enums) - chỉ có scanner và worker
-    'type.scanner': 'Thiết bị quét (Scanner)',
-    'type.worker': 'Thiết bị công nhân (Worker)',
+    // Vehicle types (Enums) - chỉ có scanner và worker (giữ nguyên tiếng Anh)
+    'type.scanner': 'scanner',
+    'type.worker': 'worker',
+    // Vehicle categories (Enums)
+    'category.roadheader': 'Máy đào tự do mặt cắt',
+    'category.drill_jumbo': 'Máy khoan jumbo',
+    'category.shotcrete_machine': 'Máy phun bê tông',
+    'category.concrete_mixer_truck': 'Xe trộn bê tông',
+    'category.wheel_loader': 'Xe xúc lật',
+    'category.dump_truck': 'Xe ben',
+    'category.backhoe': 'Máy đào gầu ngược',
+    'category.rock_breaker': 'Máy phá đá',
+    'category.other_named': 'Khác (có tên)',
     // Mission types (Enums)
     'mission.tunnel_line_1': 'Đào hầm tuyến 1',
     'mission.tunnel_line_2': 'Đào hầm tuyến 2',
@@ -304,9 +314,19 @@ const translations = {
     'cancel': 'Cancel',
     'inactive': 'Inactive',
     'driver_placeholder': 'Driver full name',
-    // Vehicle types (Enums) - chỉ có scanner và worker
-    'type.scanner': 'Scanner',
-    'type.worker': 'Worker',
+    // Vehicle types (Enums) - chỉ có scanner và worker (giữ nguyên tiếng Anh)
+    'type.scanner': 'scanner',
+    'type.worker': 'worker',
+    // Vehicle categories (Enums)
+    'category.roadheader': 'Roadheader',
+    'category.drill_jumbo': 'Drill jumbo',
+    'category.shotcrete_machine': 'Shotcrete machine',
+    'category.concrete_mixer_truck': 'Concrete mixer truck',
+    'category.wheel_loader': 'Wheel loader',
+    'category.dump_truck': 'Dump truck',
+    'category.backhoe': 'Backhoe excavator',
+    'category.rock_breaker': 'Rock breaker',
+    'category.other_named': 'Other (named)',
     // Mission types (Enums)
     'mission.tunnel_line_1': 'Tunnel excavation line 1',
     'mission.tunnel_line_2': 'Tunnel excavation line 2',
@@ -556,9 +576,19 @@ const translations = {
     'cancel': 'キャンセル',
     'inactive': '非稼働',
     'driver_placeholder': '運転手名',
-    // Vehicle types (Enums) - chỉ có scanner và worker
-    'type.scanner': 'スキャナー (Scanner)',
-    'type.worker': '作業者端末 (Worker)',
+    // Vehicle types (Enums) - chỉ có scanner và worker (giữ nguyên tiếng Anh)
+    'type.scanner': 'scanner',
+    'type.worker': 'worker',
+    // Vehicle categories (Enums)
+    'category.roadheader': '自由断面掘削機',
+    'category.drill_jumbo': 'ドリルジャンボ',
+    'category.shotcrete_machine': '吹付機',
+    'category.concrete_mixer_truck': 'ミキサー車',
+    'category.wheel_loader': 'ホイールローダー',
+    'category.dump_truck': 'ダンプカー',
+    'category.backhoe': 'バックホウ',
+    'category.rock_breaker': 'ブレーカー',
+    'category.other_named': 'その他(名前付き)',
     // Mission types (Enums)
     'mission.tunnel_line_1': 'トンネル路線1掘削',
     'mission.tunnel_line_2': 'トンネル路線2掘削',
