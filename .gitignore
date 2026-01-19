@@ -30,4 +30,8 @@ dependencies/HBA/build_standalone/**
 **/*.exe
 
 # Python cache
-scripts/__pycache__/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python
