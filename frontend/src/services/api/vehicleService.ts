@@ -11,6 +11,16 @@
  */
 
 import { ApiVehicle, VehicleApi, VehiclesListApiResponse } from '../../types/vehicle';
+import {
+  validateVehiclesListResponse,
+  validateVehicleApi,
+  validateAndNormalizeVehicles,
+  getSafeVehicleStatus,
+  getSafePosition,
+  getSafeOrientation,
+  createDefaultPosition,
+  createDefaultOrientation,
+} from '../../utils/validationUtils';
 
 export interface FetchVehiclesParams {
   type?: 'scanner' | 'worker';
@@ -26,20 +36,33 @@ export class VehicleService {
   private async makeRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.apiBaseUrl}${endpoint}`;
     console.log(`[VehicleService] Making request to: ${url}`);
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
-    });
+    
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.headers || {}),
+        },
+      });
 
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || `HTTP error! status: ${response.status}`);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Validate response is not null/undefined
+      if (data === null || data === undefined) {
+        throw new Error('API returned null or undefined response');
+      }
+
+      return data as T;
+    } catch (error) {
+      console.error(`[VehicleService] Request failed for ${url}:`, error);
+      throw error;
     }
-
-    return response.json();
   }
 
   /**
@@ -61,32 +84,49 @@ export class VehicleService {
     const endpoint = `/api/v1/vehicles${query ? `/?${query}` : ''}`;
 
     // Backend trả về VehiclesListResponse format
-    const response = await this.makeRequest<VehiclesListApiResponse>(endpoint);
+    const response = await this.makeRequest<unknown>(endpoint);
 
-    // Transform backend response to ApiVehicle (VehicleApi) format
-    let vehicles: ApiVehicle[] = response.vehicles.map((vehicle: VehicleApi) => {
-      const status: 'online' | 'offline' =
-        vehicle.status?.toLowerCase() === 'online' ? 'online' : 'offline';
+    // Validate response structure
+    if (!validateVehiclesListResponse(response)) {
+      console.warn('[VehicleService] Invalid response structure, returning empty array');
+      return [];
+    }
 
-      const latest_pose = vehicle.latest_pose
-        ? {
-            position: vehicle.latest_pose.position,
-            orientation: vehicle.latest_pose.orientation,
-            timestamp: vehicle.latest_pose.timestamp,
-          }
-        : undefined;
+    const validatedResponse = response as VehiclesListApiResponse;
+
+    // Validate and normalize vehicles array
+    const rawVehicles = validatedResponse.vehicles ?? [];
+    let vehicles: ApiVehicle[] = validateAndNormalizeVehicles(rawVehicles);
+
+    // Transform to ApiVehicle format with safe property access
+    vehicles = vehicles.map((vehicle: ApiVehicle) => {
+      const status = getSafeVehicleStatus(vehicle.status);
+
+      // Safely extract latest_pose with validation
+      let latest_pose: VehicleApi['latest_pose'] = undefined;
+      if (vehicle.latest_pose) {
+        const position = getSafePosition(vehicle.latest_pose.position);
+        const orientation = getSafeOrientation(vehicle.latest_pose.orientation);
+        const timestamp = vehicle.latest_pose.timestamp;
+
+        latest_pose = {
+          position,
+          orientation,
+          timestamp: timestamp ?? new Date().toISOString(),
+        };
+      }
 
       return {
-        vehicle_id: vehicle.vehicle_id,
-        name: vehicle.name,
-        description: vehicle.description,
-        vehicle_type: vehicle.vehicle_type,
-        vehicle_category: vehicle.vehicle_category,
+        vehicle_id: vehicle.vehicle_id ?? '',
+        name: vehicle.name ?? undefined,
+        description: vehicle.description ?? undefined,
+        vehicle_type: vehicle.vehicle_type ?? undefined,
+        vehicle_category: vehicle.vehicle_category ?? undefined,
         status,
-        metadata: vehicle.metadata,
+        metadata: vehicle.metadata ?? undefined,
         latest_pose,
-        created_at: vehicle.created_at,
-        updated_at: vehicle.updated_at ?? vehicle.latest_pose?.timestamp,
+        created_at: vehicle.created_at ?? undefined,
+        updated_at: vehicle.updated_at ?? vehicle.latest_pose?.timestamp ?? undefined,
       };
     });
 
@@ -110,30 +150,45 @@ export class VehicleService {
    * Backend trả về VehicleResponse format
    */
   async getVehicleById(vehicleId: string): Promise<ApiVehicle> {
-    const vehicle = await this.makeRequest<VehicleApi>(`/api/v1/vehicles/${vehicleId}`);
+    if (!vehicleId || typeof vehicleId !== 'string') {
+      throw new Error('Invalid vehicle ID provided');
+    }
 
-    const status: 'online' | 'offline' =
-      vehicle.status?.toLowerCase() === 'online' ? 'online' : 'offline';
+    const vehicle = await this.makeRequest<unknown>(`/api/v1/vehicles/${vehicleId}`);
 
-    const latest_pose = vehicle.latest_pose
-      ? {
-          position: vehicle.latest_pose.position,
-          orientation: vehicle.latest_pose.orientation,
-          timestamp: vehicle.latest_pose.timestamp,
-        }
-      : undefined;
+    // Validate vehicle structure
+    if (!validateVehicleApi(vehicle)) {
+      throw new Error(`Invalid vehicle data received for ID: ${vehicleId}`);
+    }
+
+    const validatedVehicle = vehicle as VehicleApi;
+    const status = getSafeVehicleStatus(validatedVehicle.status);
+
+    // Safely extract latest_pose with validation
+    let latest_pose: VehicleApi['latest_pose'] = undefined;
+    if (validatedVehicle.latest_pose) {
+      const position = getSafePosition(validatedVehicle.latest_pose.position);
+      const orientation = getSafeOrientation(validatedVehicle.latest_pose.orientation);
+      const timestamp = validatedVehicle.latest_pose.timestamp;
+
+      latest_pose = {
+        position,
+        orientation,
+        timestamp: timestamp ?? new Date().toISOString(),
+      };
+    }
 
     return {
-      vehicle_id: vehicle.vehicle_id,
-      name: vehicle.name,
-      description: vehicle.description,
-      vehicle_type: vehicle.vehicle_type,
-      vehicle_category: vehicle.vehicle_category,
+      vehicle_id: validatedVehicle.vehicle_id ?? vehicleId,
+      name: validatedVehicle.name ?? undefined,
+      description: validatedVehicle.description ?? undefined,
+      vehicle_type: validatedVehicle.vehicle_type ?? undefined,
+      vehicle_category: validatedVehicle.vehicle_category ?? undefined,
       status,
-      metadata: vehicle.metadata ?? {},
+      metadata: validatedVehicle.metadata ?? undefined,
       latest_pose,
-      created_at: vehicle.created_at,
-      updated_at: vehicle.updated_at ?? vehicle.latest_pose?.timestamp,
+      created_at: validatedVehicle.created_at ?? undefined,
+      updated_at: validatedVehicle.updated_at ?? validatedVehicle.latest_pose?.timestamp ?? undefined,
     };
   }
 
@@ -141,6 +196,14 @@ export class VehicleService {
    * Cập nhật vehicle status
    */
   async updateVehicleStatus(vehicleId: string, status: 'online' | 'offline'): Promise<void> {
+    if (!vehicleId || typeof vehicleId !== 'string') {
+      throw new Error('Invalid vehicle ID provided');
+    }
+
+    if (status !== 'online' && status !== 'offline') {
+      throw new Error('Invalid status: must be "online" or "offline"');
+    }
+
     await this.makeRequest<void>(`/api/v1/vehicles/${vehicleId}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),

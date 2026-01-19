@@ -10,6 +10,11 @@ import {
 } from '../../utils/timestampHelpers';
 import { useVehicleService } from '../api/useVehicleService';
 import { ApiVehicle } from '../../types/vehicle';
+import {
+  isValidArray,
+  getSafePosition,
+  getSafeVehicleStatus,
+} from '../../utils/validationUtils';
 
 const DEBUG = process.env.REACT_APP_DEBUG_LOGS === '1';
 
@@ -63,10 +68,24 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
     try {
       setLoading(true);
       const vehicles = await vehicleService.getVehicles();
+      
+      // Validate vehicles is an array
+      if (!isValidArray(vehicles)) {
+        console.warn('[useVehicleMap2D] Invalid vehicles response, expected array');
+        setError('Invalid vehicles response format');
+        return;
+      }
+      
       const vehiclesMap = new Map<string, ApiVehicle>();
       const transformedVehicles: MapVehicle[] = [];
       
-      (Array.isArray(vehicles) ? vehicles : []).forEach((v: ApiVehicle) => {
+      vehicles.forEach((v: ApiVehicle) => {
+        // Validate vehicle has required fields
+        if (!v || !v.vehicle_id) {
+          console.warn('[useVehicleMap2D] Skipping invalid vehicle:', v);
+          return;
+        }
+        
         const vehicleId = v.vehicle_id;
         
         // Skip excluded vehicles
@@ -77,16 +96,16 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
         // Store vehicle info for merging
         vehiclesMap.set(vehicleId, v);
         
-        // Transform to Vehicle format
-        const position = v.latest_pose?.position || { x: 0, y: 0, z: 0 };
+        // Transform to Vehicle format with safe property access
+        const position = getSafePosition(v.latest_pose?.position);
         const timestamp =
-          v.latest_pose?.timestamp || v.updated_at || v.created_at || new Date().toISOString();
+          v.latest_pose?.timestamp ?? v.updated_at ?? v.created_at ?? new Date().toISOString();
         
         transformedVehicles.push({
           id: vehicleId,
-          name: v.name || vehicleId,
-          vehicleType: v.vehicle_type,
-          status: v.status || 'offline',
+          name: v.name ?? vehicleId,
+          vehicleType: v.vehicle_type ?? undefined,
+          status: getSafeVehicleStatus(v.status),
           position,
           timestamp,
           source: 'api' as const
