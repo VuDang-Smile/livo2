@@ -127,7 +127,7 @@ check_backend_health() {
     local timeout=2
     
     # Try to connect via nginx reverse proxy first (port 80 with Host header)
-    local response=$(curl -s --max-time $timeout -H "Host: backend.lidar.tm" "http://${ip}/health" 2>/dev/null)
+    local response=$(curl -s --max-time $timeout -H "Host: backend.lidar.ntm" "http://${ip}/health" 2>/dev/null)
     
     # If that fails, try direct connection to port 8000
     if [ $? -ne 0 ] || [ -z "$response" ]; then
@@ -203,20 +203,20 @@ update_hosts() {
     
     print_info "Updating /etc/hosts..."
     
-    # Remove old entries for backend.lidar.tm, frontend.lidar.tm, storage.lidar.tm and lidar.tm
+    # Remove old entries for backend.lidar.ntm, frontend.lidar.ntm, storage.lidar.tm and lidar.tm
     sed -i '/backend\.lidar\.tm/d' /etc/hosts
     sed -i '/frontend\.lidar\.tm/d' /etc/hosts
     sed -i '/storage\.lidar\.tm/d' /etc/hosts
     sed -i '/lidar\.tm/d' /etc/hosts
     
     # Add new entries for both domains pointing to same IP
-    echo "$ip    frontend.lidar.tm" >> /etc/hosts
-    echo "$ip    backend.lidar.tm" >> /etc/hosts
+    echo "$ip    frontend.lidar.ntm" >> /etc/hosts
+    echo "$ip    backend.lidar.ntm" >> /etc/hosts
     echo "$ip    storage.lidar.tm" >> /etc/hosts
     
     print_success "Updated /etc/hosts:"
-    print_info "  frontend.lidar.tm -> $ip"
-    print_info "  backend.lidar.tm -> $ip"
+    print_info "  frontend.lidar.ntm -> $ip"
+    print_info "  backend.lidar.ntm -> $ip"
     print_info "  storage.lidar.tm -> $ip"
 }
 
@@ -248,8 +248,8 @@ main() {
         echo "=========================================="
         echo ""
         echo "You can now access:"
-        echo "  Frontend: http://frontend.lidar.tm"
-        echo "  Backend:  http://backend.lidar.tm"
+        echo "  Frontend: http://frontend.lidar.ntm"
+        echo "  Backend:  http://backend.lidar.ntm"
         echo ""
         exit 0
     fi
@@ -275,8 +275,8 @@ main() {
     echo "=========================================="
     echo ""
     echo "You can now access:"
-    echo "  Frontend: http://frontend.lidar.tm"
-    echo "  Backend:  http://backend.lidar.tm"
+    echo "  Frontend: http://frontend.lidar.ntm"
+    echo "  Backend:  http://backend.lidar.ntm"
     echo ""
 }
 

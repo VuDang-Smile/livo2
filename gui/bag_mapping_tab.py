@@ -61,7 +61,7 @@ class BagMappingTab(ttk.Frame):
         self.use_rviz = False
         self.config_path = None  # Path to config file
         self.bag_rate = 0.5  # Default: 0.5x for slower playback
-        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.tm")
+        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.ntm")
         
         # Tạo UI
         self.create_widgets()

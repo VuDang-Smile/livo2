@@ -44,9 +44,9 @@ export const MAP_FLOORPLAN_IMAGE_URLS: Record<
  */
 export function getBackendApiUrl(): string {
   const hostname = window.location.hostname;
-  // If running on frontend.lidar.tm or lidar.tm, use backend.lidar.tm
-  if (hostname === 'frontend.lidar.tm' || hostname === 'lidar.tm' || hostname.includes('lidar.tm')) {
-    return 'http://backend.lidar.tm';
+  // If running on frontend.lidar.ntm or lidar.tm, use backend.lidar.ntm
+  if (hostname === 'frontend.lidar.ntm' || hostname === 'lidar.tm' || hostname.includes('lidar.tm')) {
+    return 'http://backend.lidar.ntm';
   }
   // For localhost or IP addresses, use same hostname with port 8000
   return `http://${hostname}:8000`;

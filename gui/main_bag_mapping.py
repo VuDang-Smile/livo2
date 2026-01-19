@@ -466,7 +466,7 @@ class BagMappingInterface:
         # Bag rate mặc định, dùng cho ros2 bag play
         self.bag_rate = 0.5
         # Backend URL for map upload
-        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.tm")
+        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.ntm")
         # Thư mục lưu PCD convert từ OBJ (bản thiết kế)
         self.obj_converted_dir = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "obj_converted_pcd"
         # Cấu hình so sánh bản đồ thiết kế

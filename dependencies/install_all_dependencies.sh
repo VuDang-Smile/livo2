@@ -315,7 +315,7 @@ main() {
     echo -e "${BLUE}========================================${NC}"
     echo ""
     print_info "This step will help you find and configure the backend server in your LAN."
-    print_info "It will scan the network and update /etc/hosts with frontend.lidar.tm and backend.lidar.tm"
+    print_info "It will scan the network and update /etc/hosts with frontend.lidar.ntm and backend.lidar.ntm"
     echo ""
     if [ ! -f "${FIND_BACKEND_SCRIPT}" ]; then
         print_error "Script not found: ${FIND_BACKEND_SCRIPT}"

@@ -38,7 +38,7 @@ class LocalizationTab(ttk.Frame):
         # Paths
         self.workspace_path = Path(__file__).parent.parent / "ws"
         self.default_map_root = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "fastloc_map"
-        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.tm")
+        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.ntm")
         
         # Processes
         self.loc_process = None
