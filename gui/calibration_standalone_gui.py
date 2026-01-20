@@ -1,0 +1,1454 @@
+#!/usr/bin/env python3
+"""
+Calibration Standalone GUI Module
+GUI riêng biệt cho Calibration với Converter, Replay và đầy đủ tính năng Calibration
+"""
+
+import threading
+import subprocess
+import json
+from pathlib import Path
+from datetime import datetime
+import os
+from functools import partial
+
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox, scrolledtext, filedialog
+except ImportError as e:
+    print(f"Lỗi import: {e}")
+    import sys
+    sys.exit(1)
+
+# Import các tabs
+from replay_tab import ReplayTab
+from bag_cut_tab import BagCutTab
+
+
+class CalibrationStandaloneGUI(ttk.Frame):
+    """GUI chính cho Calibration Standalone với Notebook chứa Converter, Replay và Calibration tabs"""
+    
+    def __init__(self, parent):
+        super().__init__(parent)
+        
+        self.workspace_path = Path(__file__).parent.parent / "ws"
+        self.drive_ws_path = Path(__file__).parent.parent / "dependencies" / "drive_ws"
+        
+        # Processes
+        self.record_process = None
+        self.preprocess_process = None
+        self.initial_guess_process = None
+        self.calibrate_process = None
+        self.camera_info_publisher_process = None
+        self.converter_process = None
+        
+        # Paths
+        self.bag_output_dir = None
+        self.preprocessed_dir = None
+        
+        # State
+        self.is_recording = False
+        self.is_camera_info_publisher_running = False
+        self.is_converter_running = False
+        self.current_step = "idle"  # idle, recording, preprocessing, calibrating
+        
+        # References to tabs
+        self.replay_tab = None
+        
+        self.create_widgets()
+        
+        # Tự động khởi động Converter và camera_info_publisher sau khi GUI được tạo
+        self.after(500, self.start_converter)
+        self.after(1200, self.launch_camera_info_publisher_auto)
+    
+    def create_widgets(self):
+        """Tạo các widgets cho GUI"""
+        
+        # Title
+        title_label = ttk.Label(
+            self,
+            text="Calibration Standalone GUI",
+            font=("Arial", 18, "bold")
+        )
+        title_label.pack(pady=10)
+        
+        # Main container với notebook để chia thành các tabs
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Tab 0: Replay
+        replay_frame = ttk.Frame(notebook)
+        notebook.add(replay_frame, text="Replay")
+        # ReplayTab không nhận log_callback (giữ nguyên logic cũ)
+        self.replay_tab = ReplayTab(replay_frame)
+        self.replay_tab.pack(fill=tk.BOTH, expand=True)
+
+        # Tab 1: Bag Cutter (5s)
+        bag_cut_frame = ttk.Frame(notebook)
+        notebook.add(bag_cut_frame, text="Bag Cutter")
+        self.bag_cut_tab = BagCutTab(bag_cut_frame, log_callback=self.log_global)
+        self.bag_cut_tab.pack(fill=tk.BOTH, expand=True)
+
+        # Tab 2: Record Bag
+        record_frame = ttk.Frame(notebook)
+        notebook.add(record_frame, text="Record Bag")
+        self.create_record_tab(record_frame)
+        
+        # Tab 3: Preprocessing
+        preprocess_frame = ttk.Frame(notebook)
+        notebook.add(preprocess_frame, text="Preprocessing")
+        self.create_preprocess_tab(preprocess_frame)
+        
+        # Tab 4: Initial Guess
+        initial_guess_frame = ttk.Frame(notebook)
+        notebook.add(initial_guess_frame, text="Initial Guess")
+        self.create_initial_guess_tab(initial_guess_frame)
+        
+        # Tab 5: Calibration
+        calibrate_frame = ttk.Frame(notebook)
+        notebook.add(calibrate_frame, text="Calibration")
+        self.create_calibrate_tab(calibrate_frame)
+        
+        # Tab 6: Export Results
+        export_frame = ttk.Frame(notebook)
+        notebook.add(export_frame, text="Export Results")
+        self.create_export_tab(export_frame)
+        
+        # Status bar
+        self.status_label = ttk.Label(
+            self,
+            text="Trạng thái: Sẵn sàng",
+            font=("Arial", 10)
+        )
+        self.status_label.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=5)
+        
+        # Log tổng để hiển thị thông báo từ tất cả các tabs
+        log_frame = ttk.LabelFrame(self, text="Log Tổng", padding=5)
+        log_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        self.global_log = scrolledtext.ScrolledText(
+            log_frame,
+            height=8,
+            wrap=tk.WORD,
+            state=tk.DISABLED
+        )
+        self.global_log.pack(fill=tk.BOTH, expand=True)
+    
+    def log_global(self, message, prefix=""):
+        """Log message vào log tổng (thread-safe)"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        full_message = f"[{timestamp}] {prefix}{message}" if prefix else f"[{timestamp}] {message}"
+        self.after(0, partial(self._log_global_impl, full_message))
+    
+    def _log_global_impl(self, message):
+        """Implementation của log_global (chạy trong main thread)"""
+        try:
+            self.global_log.config(state=tk.NORMAL)
+            self.global_log.insert(tk.END, f"{message}\n")
+            self.global_log.see(tk.END)
+            self.global_log.config(state=tk.DISABLED)
+        except Exception as e:
+            print(f"Lỗi khi log tổng: {e}")
+    
+    def create_record_tab(self, parent):
+        """Tạo tab record bag (chỉ cho equirectangular camera)"""
+        # Instructions
+        instructions = ttk.Label(
+            parent,
+            text="Ghi lại rosbag với topics /image_raw (equirectangular) và /livox/points2",
+            font=("Arial", 10)
+        )
+        instructions.pack(pady=10)
+        
+        # Output directory
+        dir_frame = ttk.Frame(parent)
+        dir_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        ttk.Label(dir_frame, text="Thư mục output:").pack(side=tk.LEFT, padx=5)
+        self.bag_dir_var = tk.StringVar(value=str(self.workspace_path / "calibration_data" / "bags"))
+        dir_entry = ttk.Entry(dir_frame, textvariable=self.bag_dir_var, width=50)
+        dir_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        browse_btn = ttk.Button(
+            dir_frame,
+            text="Browse",
+            command=self.browse_bag_directory
+        )
+        browse_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Topics mặc định (ẩn, không hiển thị)
+        self.topics_var = tk.StringVar(value="/image_raw /camera_info /livox/points2")
+        
+        # Record button
+        button_frame = ttk.Frame(parent)
+        button_frame.pack(pady=20)
+        
+        self.record_btn = ttk.Button(
+            button_frame,
+            text="Bắt đầu Record",
+            command=self.start_record,
+            style="Accent.TButton"
+        )
+        self.record_btn.pack(side=tk.LEFT, padx=10)
+        
+        self.stop_record_btn = ttk.Button(
+            button_frame,
+            text="Dừng Record",
+            command=self.stop_record,
+            state=tk.DISABLED
+        )
+        self.stop_record_btn.pack(side=tk.LEFT, padx=10)
+        
+        # Log
+        log_frame = ttk.LabelFrame(parent, text="Log", padding=10)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        self.record_log = scrolledtext.ScrolledText(
+            log_frame,
+            height=8,
+            wrap=tk.WORD,
+            state=tk.DISABLED
+        )
+        self.record_log.pack(fill=tk.BOTH, expand=True)
+    
+    def create_preprocess_tab(self, parent):
+        """Tạo tab preprocessing"""
+        # Instructions
+        instructions = ttk.Label(
+            parent,
+            text="Preprocessing dữ liệu từ rosbag để chuẩn bị cho calibration (equirectangular camera)",
+            font=("Arial", 10)
+        )
+        instructions.pack(pady=10)
+        
+        # Input bag directory
+        input_frame = ttk.Frame(parent)
+        input_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        ttk.Label(input_frame, text="Thư mục bags:").pack(side=tk.LEFT, padx=5)
+        self.preprocess_input_var = tk.StringVar()
+        input_entry = ttk.Entry(input_frame, textvariable=self.preprocess_input_var, width=50)
+        input_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        browse_input_btn = ttk.Button(
+            input_frame,
+            text="Browse",
+            command=self.browse_preprocess_input
+        )
+        browse_input_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Output preprocessed directory
+        output_frame = ttk.Frame(parent)
+        output_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        ttk.Label(output_frame, text="Thư mục output:").pack(side=tk.LEFT, padx=5)
+        self.preprocess_output_var = tk.StringVar(value=str(self.workspace_path / "calibration_data" / "preprocessed"))
+        output_entry = ttk.Entry(output_frame, textvariable=self.preprocess_output_var, width=50)
+        output_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        browse_output_btn = ttk.Button(
+            output_frame,
+            text="Browse",
+            command=self.browse_preprocess_output
+        )
+        browse_output_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Camera model selection
+        camera_model_frame = ttk.LabelFrame(parent, text="Camera Model", padding=10)
+        camera_model_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        ttk.Label(
+            camera_model_frame,
+            text="Select camera projection model:",
+            font=("Arial", 9)
+        ).pack(anchor=tk.W, pady=(0, 5))
+        
+        model_selection_frame = ttk.Frame(camera_model_frame)
+        model_selection_frame.pack(fill=tk.X)
+        
+        self.camera_model_var = tk.StringVar(value="equirectangular")
+        
+        ttk.Radiobutton(
+            model_selection_frame,
+            text="Equirectangular (default for 360° cameras)",
+            variable=self.camera_model_var,
+            value="equirectangular"
+        ).pack(anchor=tk.W, pady=2)
+        
+        ttk.Radiobutton(
+            model_selection_frame,
+            text="Auto-detect from camera_info topic",
+            variable=self.camera_model_var,
+            value="auto"
+        ).pack(anchor=tk.W, pady=2)
+        
+        ttk.Radiobutton(
+            model_selection_frame,
+            text="Plumb Bob (pinhole with radial/tangential distortion)",
+            variable=self.camera_model_var,
+            value="plumb_bob"
+        ).pack(anchor=tk.W, pady=2)
+        
+        ttk.Radiobutton(
+            model_selection_frame,
+            text="Fisheye (equidistant)",
+            variable=self.camera_model_var,
+            value="fisheye"
+        ).pack(anchor=tk.W, pady=2)
+        
+        ttk.Radiobutton(
+            model_selection_frame,
+            text="Omnidirectional",
+            variable=self.camera_model_var,
+            value="omnidir"
+        ).pack(anchor=tk.W, pady=2)
+        
+        # Options
+        options_frame = ttk.LabelFrame(parent, text="Options", padding=10)
+        options_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        self.auto_topic_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            options_frame,
+            text="Auto-detect topics (-a)",
+            variable=self.auto_topic_var
+        ).pack(anchor=tk.W)
+        
+        self.dynamic_lidar_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            options_frame,
+            text="Dynamic LiDAR integration (-d) - cho spinning LiDAR",
+            variable=self.dynamic_lidar_var
+        ).pack(anchor=tk.W)
+        
+        self.visualize_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            options_frame,
+            text="Visualize (-v)",
+            variable=self.visualize_var
+        ).pack(anchor=tk.W)
+        
+        # Preprocess button
+        button_frame = ttk.Frame(parent)
+        button_frame.pack(pady=20)
+        
+        self.preprocess_btn = ttk.Button(
+            button_frame,
+            text="Chạy Preprocessing",
+            command=self.start_preprocess,
+            style="Accent.TButton"
+        )
+        self.preprocess_btn.pack(side=tk.LEFT, padx=10)
+        
+        # Log
+        log_frame = ttk.LabelFrame(parent, text="Log", padding=10)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        self.preprocess_log = scrolledtext.ScrolledText(
+            log_frame,
+            height=8,
+            wrap=tk.WORD,
+            state=tk.DISABLED
+        )
+        self.preprocess_log.pack(fill=tk.BOTH, expand=True)
+    
+    def create_initial_guess_tab(self, parent):
+        """Tạo tab initial guess"""
+        # Instructions
+        instructions = ttk.Label(
+            parent,
+            text="Tạo initial guess cho calibration (manual hoặc automatic)",
+            font=("Arial", 10)
+        )
+        instructions.pack(pady=10)
+        
+        # Preprocessed directory
+        dir_frame = ttk.Frame(parent)
+        dir_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        ttk.Label(dir_frame, text="Thư mục preprocessed:").pack(side=tk.LEFT, padx=5)
+        self.initial_guess_dir_var = tk.StringVar()
+        dir_entry = ttk.Entry(dir_frame, textvariable=self.initial_guess_dir_var, width=50)
+        dir_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        browse_btn = ttk.Button(
+            dir_frame,
+            text="Browse",
+            command=self.browse_initial_guess_dir
+        )
+        browse_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Mode selection
+        mode_frame = ttk.LabelFrame(parent, text="Mode", padding=10)
+        mode_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        self.initial_guess_mode = tk.StringVar(value="manual")
+        
+        ttk.Radiobutton(
+            mode_frame,
+            text="Manual - Chọn correspondences thủ công",
+            variable=self.initial_guess_mode,
+            value="manual"
+        ).pack(anchor=tk.W, pady=5)
+        
+        ttk.Radiobutton(
+            mode_frame,
+            text="Automatic - Sử dụng SuperGlue (cần license)",
+            variable=self.initial_guess_mode,
+            value="auto"
+        ).pack(anchor=tk.W, pady=5)
+        
+        # Buttons
+        button_frame = ttk.Frame(parent)
+        button_frame.pack(pady=20)
+        
+        self.initial_guess_btn = ttk.Button(
+            button_frame,
+            text="Chạy Initial Guess",
+            command=self.start_initial_guess,
+            style="Accent.TButton"
+        )
+        self.initial_guess_btn.pack(side=tk.LEFT, padx=10)
+        
+        # Log
+        log_frame = ttk.LabelFrame(parent, text="Log", padding=10)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        self.initial_guess_log = scrolledtext.ScrolledText(
+            log_frame,
+            height=8,
+            wrap=tk.WORD,
+            state=tk.DISABLED
+        )
+        self.initial_guess_log.pack(fill=tk.BOTH, expand=True)
+    
+    def create_calibrate_tab(self, parent):
+        """Tạo tab calibration"""
+        # Instructions
+        instructions = ttk.Label(
+            parent,
+            text="Chạy fine registration để tinh chỉnh calibration",
+            font=("Arial", 10)
+        )
+        instructions.pack(pady=10)
+        
+        # Preprocessed directory
+        dir_frame = ttk.Frame(parent)
+        dir_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        ttk.Label(dir_frame, text="Thư mục preprocessed:").pack(side=tk.LEFT, padx=5)
+        self.calibrate_dir_var = tk.StringVar()
+        dir_entry = ttk.Entry(dir_frame, textvariable=self.calibrate_dir_var, width=50)
+        dir_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        browse_btn = ttk.Button(
+            dir_frame,
+            text="Browse",
+            command=self.browse_calibrate_dir
+        )
+        browse_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Options
+        options_frame = ttk.LabelFrame(parent, text="Options", padding=10)
+        options_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        self.auto_quit_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            options_frame,
+            text="Auto quit sau khi calibration xong (khuyến nghị)",
+            variable=self.auto_quit_var
+        ).pack(anchor=tk.W)
+        
+        self.background_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            options_frame,
+            text="Chạy background (không hiển thị viewer) - khuyến nghị",
+            variable=self.background_var
+        ).pack(anchor=tk.W)
+        
+        # Registration type
+        reg_frame = ttk.Frame(options_frame)
+        reg_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(reg_frame, text="Registration type:").pack(side=tk.LEFT, padx=5)
+        self.registration_type_var = tk.StringVar(value="nid_bfgs")
+        ttk.Radiobutton(
+            reg_frame,
+            text="NID-BFGS (nhanh hơn, khuyến nghị)",
+            variable=self.registration_type_var,
+            value="nid_bfgs"
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(
+            reg_frame,
+            text="NID-Nelder-Mead (chậm hơn nhưng ổn định hơn)",
+            variable=self.registration_type_var,
+            value="nid_nelder_mead"
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # Button
+        button_frame = ttk.Frame(parent)
+        button_frame.pack(pady=20)
+        
+        self.calibrate_btn = ttk.Button(
+            button_frame,
+            text="Chạy Calibration",
+            command=self.start_calibrate,
+            style="Accent.TButton"
+        )
+        self.calibrate_btn.pack(side=tk.LEFT, padx=10)
+        
+        self.stop_calibrate_btn = ttk.Button(
+            button_frame,
+            text="Dừng Calibration",
+            command=self.stop_calibrate,
+            state=tk.DISABLED
+        )
+        self.stop_calibrate_btn.pack(side=tk.LEFT, padx=10)
+        
+        # Log
+        log_frame = ttk.LabelFrame(parent, text="Log", padding=10)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        self.calibrate_log = scrolledtext.ScrolledText(
+            log_frame,
+            height=8,
+            wrap=tk.WORD,
+            state=tk.DISABLED
+        )
+        self.calibrate_log.pack(fill=tk.BOTH, expand=True)
+    
+    def create_export_tab(self, parent):
+        """Tạo tab export results"""
+        # Instructions
+        instructions = ttk.Label(
+            parent,
+            text="Export và convert kết quả calibration sang format FAST-LIVO2",
+            font=("Arial", 10)
+        )
+        instructions.pack(pady=10)
+        
+        # Calib.json path
+        calib_frame = ttk.Frame(parent)
+        calib_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        ttk.Label(calib_frame, text="File calib.json:").pack(side=tk.LEFT, padx=5)
+        self.calib_json_var = tk.StringVar()
+        calib_entry = ttk.Entry(calib_frame, textvariable=self.calib_json_var, width=50)
+        calib_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        browse_calib_btn = ttk.Button(
+            calib_frame,
+            text="Browse",
+            command=self.browse_calib_json
+        )
+        browse_calib_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Output YAML path
+        yaml_frame = ttk.Frame(parent)
+        yaml_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        ttk.Label(yaml_frame, text="Output YAML:").pack(side=tk.LEFT, padx=5)
+        self.output_yaml_var = tk.StringVar()
+        yaml_entry = ttk.Entry(yaml_frame, textvariable=self.output_yaml_var, width=50)
+        yaml_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        # Buttons
+        button_frame = ttk.Frame(parent)
+        button_frame.pack(pady=20)
+        
+        self.convert_btn = ttk.Button(
+            button_frame,
+            text="Convert sang FAST-LIVO2",
+            command=self.convert_to_fast_livo2,
+            style="Accent.TButton"
+        )
+        self.convert_btn.pack(side=tk.LEFT, padx=10)
+        
+        self.view_calib_btn = ttk.Button(
+            button_frame,
+            text="Xem calib.json",
+            command=self.view_calib_json
+        )
+        self.view_calib_btn.pack(side=tk.LEFT, padx=10)
+        
+        # Results display
+        results_frame = ttk.LabelFrame(parent, text="Kết quả", padding=10)
+        results_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        self.results_text = scrolledtext.ScrolledText(
+            results_frame,
+            height=10,
+            wrap=tk.WORD,
+            state=tk.DISABLED
+        )
+        self.results_text.pack(fill=tk.BOTH, expand=True)
+    
+    # ========== Record Bag Methods ==========
+    
+    def browse_bag_directory(self):
+        """Browse cho bag output directory"""
+        directory = filedialog.askdirectory(
+            title="Chọn thư mục để lưu bag",
+            initialdir=self.bag_dir_var.get()
+        )
+        if directory:
+            self.bag_dir_var.set(directory)
+    
+    def start_record(self):
+        """Bắt đầu record rosbag"""
+        if self.is_recording:
+            messagebox.showwarning("Cảnh báo", "Đang record, vui lòng dừng trước")
+            return
+        
+        bag_dir = Path(self.bag_dir_var.get())
+        if not bag_dir.exists():
+            try:
+                bag_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                messagebox.showerror("Lỗi", f"Không thể tạo thư mục: {e}")
+                return
+        
+        topics = self.topics_var.get().split()
+        if not topics:
+            messagebox.showerror("Lỗi", "Vui lòng nhập ít nhất một topic")
+            return
+        
+        # Tạo tên bag file với timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        bag_name = f"calibration_{timestamp}"
+        bag_path = bag_dir / bag_name
+        
+        # Build command
+        cmd = f"ros2 bag record -o {bag_path} {' '.join(topics)}"
+        
+        self.log_record(f"Bắt đầu record bag: {bag_name}")
+        self.log_record(f"Topics: {', '.join(topics)}")
+        self.log_record(f"Output: {bag_path}")
+        
+        try:
+            self.record_process = subprocess.Popen(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1
+            )
+            
+            self.is_recording = True
+            self.record_btn.config(state=tk.DISABLED)
+            self.stop_record_btn.config(state=tk.NORMAL)
+            self.status_label.config(text=f"Trạng thái: Đang record bag...", foreground="orange")
+            
+            # Start thread để đọc output
+            threading.Thread(target=self.monitor_record_process, daemon=True).start()
+            
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể bắt đầu record: {e}")
+            self.log_record(f"Lỗi: {e}")
+    
+    def stop_record(self):
+        """Dừng record rosbag"""
+        if self.record_process:
+            try:
+                self.record_process.terminate()
+                self.record_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.record_process.kill()
+            except Exception as e:
+                self.log_record(f"Lỗi khi dừng record: {e}")
+            
+            self.record_process = None
+            self.is_recording = False
+            self.record_btn.config(state=tk.NORMAL)
+            self.stop_record_btn.config(state=tk.DISABLED)
+            self.status_label.config(text="Trạng thái: Đã dừng record", foreground="green")
+            self.log_record("Đã dừng record")
+    
+    def monitor_record_process(self):
+        """Monitor record process output"""
+        if not self.record_process:
+            return
+        
+        for line in iter(self.record_process.stdout.readline, ''):
+            if not line:
+                break
+            self.log_record(line.strip())
+        
+        if self.record_process.poll() is not None:
+            self.is_recording = False
+            self.after(0, partial(self._update_record_complete))
+    
+    def _update_record_complete(self):
+        """Helper function để update UI sau khi record hoàn thành"""
+        try:
+            self.record_btn.config(state=tk.NORMAL)
+            self.stop_record_btn.config(state=tk.DISABLED)
+            self.status_label.config(text="Trạng thái: Record đã hoàn thành", foreground="green")
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
+    
+    def log_record(self, message):
+        """Log message vào record log và log tổng (thread-safe)"""
+        self.log_global(message, "[Record] ")
+        self.after(0, partial(self._log_record_impl, message))
+    
+    def _log_record_impl(self, message):
+        """Implementation của log_record (chạy trong main thread)"""
+        try:
+            self.record_log.config(state=tk.NORMAL)
+            self.record_log.insert(tk.END, f"{message}\n")
+            self.record_log.see(tk.END)
+            self.record_log.config(state=tk.DISABLED)
+        except Exception as e:
+            print(f"Lỗi khi log: {e}")
+    
+    def launch_camera_info_publisher_auto(self):
+        """Tự động launch camera_info_publisher khi mở app"""
+        try:
+            self.launch_camera_info_publisher()
+        except Exception as e:
+            self.log_global(f"Lỗi auto launch camera_info_publisher: {e}", "[CameraInfoPublisher] ")
+    
+    def launch_camera_info_publisher(self):
+        """Launch camera_info_publisher node cho equirectangular camera"""
+        if self.is_camera_info_publisher_running:
+            messagebox.showwarning("Cảnh báo", "Camera info publisher đang chạy")
+            return
+        
+        setup_script = self.workspace_path / "install" / "setup.sh"
+        if not setup_script.exists():
+            messagebox.showerror("Lỗi", f"Không tìm thấy setup.sh tại: {setup_script}")
+            return
+        
+        # Build command để launch camera_info_publisher node
+        ros2_setup = "/opt/ros/jazzy/setup.bash"
+        cmd = f"source {ros2_setup} && source {setup_script} && ros2 run theta_driver camera_info_publisher_node --ros-args -p image_topic:=\"/image_raw\" -p camera_info_topic:=\"/camera_info\" -p camera_frame:=\"camera_link\" -p use_calibration_params:=false"
+        
+        self.log_global("🚀 Đang launch camera_info_publisher cho equirectangular camera...", "[CameraInfoPublisher] ")
+        
+        try:
+            # Sử dụng env để đảm bảo clean environment
+            env = os.environ.copy()
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
+            self.camera_info_publisher_process = subprocess.Popen(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1,
+                env=env
+            )
+            
+            self.is_camera_info_publisher_running = True
+            self.log_global("Camera info publisher đã được launch (equirectangular)", "[CameraInfoPublisher] ")
+            
+            # Start thread để monitor process
+            threading.Thread(target=self.monitor_camera_info_publisher_process, daemon=True).start()
+            
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể launch camera_info_publisher: {e}")
+            self.log_global(f"Lỗi: {e}", "[CameraInfoPublisher] ")
+    
+    def stop_camera_info_publisher(self):
+        """Stop camera_info_publisher node"""
+        if self.camera_info_publisher_process:
+            try:
+                self.camera_info_publisher_process.terminate()
+                self.camera_info_publisher_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.camera_info_publisher_process.kill()
+            except Exception as e:
+                self.log_record(f"Lỗi khi dừng camera_info_publisher: {e}")
+            
+            self.camera_info_publisher_process = None
+            self.is_camera_info_publisher_running = False
+            self.log_global("Camera info publisher đã dừng", "[CameraInfoPublisher] ")
+    
+    def monitor_camera_info_publisher_process(self):
+        """Monitor camera_info_publisher process"""
+        if not self.camera_info_publisher_process:
+            return
+        
+        for line in iter(self.camera_info_publisher_process.stdout.readline, ''):
+            if not line:
+                break
+            # Log important messages
+            if "error" in line.lower() or "warn" in line.lower() or "info" in line.lower():
+                self.log_global(line.strip(), "[CameraInfoPublisher] ")
+        
+        if self.camera_info_publisher_process.poll() is not None:
+            self.is_camera_info_publisher_running = False
+            self.after(0, partial(self._update_camera_info_publisher_stopped))
+    
+    def _update_camera_info_publisher_stopped(self):
+        """Helper function để update UI sau khi camera_info_publisher dừng"""
+        try:
+            self.log_global("Camera info publisher đã dừng", "[CameraInfoPublisher] ")
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
+    
+    # ========== Preprocessing Methods ==========
+    
+    def browse_preprocess_input(self):
+        """Browse cho preprocess input directory"""
+        directory = filedialog.askdirectory(
+            title="Chọn thư mục chứa bags",
+            initialdir=self.preprocess_input_var.get() or str(self.workspace_path)
+        )
+        if directory:
+            self.preprocess_input_var.set(directory)
+    
+    def browse_preprocess_output(self):
+        """Browse cho preprocess output directory"""
+        directory = filedialog.askdirectory(
+            title="Chọn thư mục output",
+            initialdir=self.preprocess_output_var.get() or str(self.workspace_path)
+        )
+        if directory:
+            self.preprocess_output_var.set(directory)
+    
+    def start_preprocess(self):
+        """Chạy preprocessing"""
+        input_dir = self.preprocess_input_var.get()
+        output_dir = self.preprocess_output_var.get()
+        
+        if not input_dir or not Path(input_dir).exists():
+            messagebox.showerror("Lỗi", "Vui lòng chọn thư mục input hợp lệ")
+            return
+        
+        if not output_dir:
+            messagebox.showerror("Lỗi", "Vui lòng chọn thư mục output")
+            return
+        
+        # Tạo output directory nếu chưa có
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Build command
+        setup_script = self.workspace_path / "install" / "setup.sh"
+        if not setup_script.exists():
+            messagebox.showerror("Lỗi", f"Không tìm thấy setup.sh tại: {setup_script}")
+            return
+        
+        cmd_parts = ["ros2", "run", "direct_visual_lidar_calibration", "preprocess"]
+        
+        # Add camera model parameter
+        camera_model = self.camera_model_var.get()
+        if camera_model:
+            cmd_parts.extend(["--camera_model", camera_model])
+        
+        if self.auto_topic_var.get():
+            cmd_parts.append("-a")
+        if self.dynamic_lidar_var.get():
+            cmd_parts.append("-d")
+        if self.visualize_var.get():
+            cmd_parts.append("-v")
+        
+        cmd_parts.extend([input_dir, output_dir])
+        
+        # Build command với đầy đủ ROS2 environment
+        # Cần source cả ROS2 base và workspace setup
+        ros2_setup = "/opt/ros/jazzy/setup.bash"
+        cmd = f"source {ros2_setup} && source {setup_script} && {' '.join(cmd_parts)}"
+        
+        self.log_preprocess(f"Bắt đầu preprocessing...")
+        self.log_preprocess(f"Input: {input_dir}")
+        self.log_preprocess(f"Output: {output_dir}")
+        self.log_preprocess(f"Camera model: {camera_model}")
+        self.log_preprocess(f"Command: {' '.join(cmd_parts)}")
+        
+        try:
+            # Sử dụng env để đảm bảo clean environment
+            env = os.environ.copy()
+            # Đảm bảo không có ROS_DOMAIN_ID conflict
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
+            self.preprocess_process = subprocess.Popen(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1,
+                env=env
+            )
+            
+            self.preprocess_btn.config(state=tk.DISABLED)
+            self.status_label.config(text="Trạng thái: Đang preprocessing...", foreground="orange")
+            
+            # Start thread để đọc output
+            threading.Thread(target=self.monitor_preprocess_process, daemon=True).start()
+            
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể chạy preprocessing: {e}")
+            self.log_preprocess(f"Lỗi: {e}")
+    
+    def monitor_preprocess_process(self):
+        """Monitor preprocess process output"""
+        if not self.preprocess_process:
+            return
+        
+        try:
+            for line in iter(self.preprocess_process.stdout.readline, ''):
+                if not line:
+                    break
+                self.log_preprocess(line.strip())
+        except Exception as e:
+            self.log_preprocess(f"Lỗi khi đọc output: {e}")
+        
+        if self.preprocess_process.poll() is not None:
+            exit_code = self.preprocess_process.poll()
+            if exit_code == 0:
+                # Sử dụng helper functions thay vì lambda để tránh closure issues
+                self.after(0, partial(self._update_preprocess_success))
+            else:
+                self.after(0, partial(self._update_preprocess_failure))
+    
+    def _update_preprocess_success(self):
+        """Helper function để update UI sau khi preprocessing thành công"""
+        try:
+            self.status_label.config(text="Trạng thái: Preprocessing hoàn thành", foreground="green")
+            self.preprocess_btn.config(state=tk.NORMAL)
+            # Auto-fill initial guess directory
+            output_dir = self.preprocess_output_var.get()
+            self.initial_guess_dir_var.set(output_dir)
+            self.calibrate_dir_var.set(output_dir)
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
+    
+    def _update_preprocess_failure(self):
+        """Helper function để update UI sau khi preprocessing thất bại"""
+        try:
+            self.status_label.config(text="Trạng thái: Preprocessing thất bại", foreground="red")
+            self.preprocess_btn.config(state=tk.NORMAL)
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
+    
+    def log_preprocess(self, message):
+        """Log message vào preprocess log và log tổng (thread-safe)"""
+        self.log_global(message, "[Preprocessing] ")
+        # Sử dụng after để đảm bảo thread-safe
+        self.after(0, partial(self._log_preprocess_impl, message))
+    
+    def _log_preprocess_impl(self, message):
+        """Implementation của log_preprocess (chạy trong main thread)"""
+        try:
+            self.preprocess_log.config(state=tk.NORMAL)
+            self.preprocess_log.insert(tk.END, f"{message}\n")
+            self.preprocess_log.see(tk.END)
+            self.preprocess_log.config(state=tk.DISABLED)
+        except Exception as e:
+            print(f"Lỗi khi log: {e}")
+    
+    # ========== Initial Guess Methods ==========
+    
+    def browse_initial_guess_dir(self):
+        """Browse cho initial guess directory"""
+        directory = filedialog.askdirectory(
+            title="Chọn thư mục preprocessed",
+            initialdir=self.initial_guess_dir_var.get() or str(self.workspace_path)
+        )
+        if directory:
+            self.initial_guess_dir_var.set(directory)
+    
+    def start_initial_guess(self):
+        """Chạy initial guess"""
+        preprocessed_dir = self.initial_guess_dir_var.get()
+        
+        if not preprocessed_dir or not Path(preprocessed_dir).exists():
+            messagebox.showerror("Lỗi", "Vui lòng chọn thư mục preprocessed hợp lệ")
+            return
+        
+        setup_script = self.workspace_path / "install" / "setup.sh"
+        if not setup_script.exists():
+            messagebox.showerror("Lỗi", f"Không tìm thấy setup.sh tại: {setup_script}")
+            return
+        
+        mode = self.initial_guess_mode.get()
+        
+        if mode == "manual":
+            ros2_setup = "/opt/ros/jazzy/setup.bash"
+            cmd = f"source {ros2_setup} && source {setup_script} && ros2 run direct_visual_lidar_calibration initial_guess_manual {preprocessed_dir}"
+        else:  # auto
+            # Cần chạy find_matches_superglue trước
+            messagebox.showinfo("Thông tin", "Automatic mode cần SuperGlue. Vui lòng chạy find_matches_superglue trước.")
+            return
+        
+        self.log_initial_guess(f"Bắt đầu initial guess ({mode})...")
+        self.log_initial_guess(f"Directory: {preprocessed_dir}")
+        
+        try:
+            # Sử dụng env để đảm bảo clean environment
+            env = os.environ.copy()
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
+            self.initial_guess_process = subprocess.Popen(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1,
+                env=env
+            )
+            
+            self.initial_guess_btn.config(state=tk.DISABLED)
+            self.status_label.config(text="Trạng thái: Đang chạy initial guess...", foreground="orange")
+            
+            # Start thread để đọc output
+            threading.Thread(target=self.monitor_initial_guess_process, daemon=True).start()
+            
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể chạy initial guess: {e}")
+            self.log_initial_guess(f"Lỗi: {e}")
+    
+    def monitor_initial_guess_process(self):
+        """Monitor initial guess process output"""
+        if not self.initial_guess_process:
+            return
+        
+        try:
+            for line in iter(self.initial_guess_process.stdout.readline, ''):
+                if not line:
+                    break
+                self.log_initial_guess(line.strip())
+        except Exception as e:
+            self.log_initial_guess(f"Lỗi khi đọc output: {e}")
+        
+        if self.initial_guess_process.poll() is not None:
+            exit_code = self.initial_guess_process.poll()
+            if exit_code == 0:
+                self.after(0, partial(self._update_initial_guess_success))
+            else:
+                self.after(0, partial(self._update_initial_guess_failure))
+    
+    def _update_initial_guess_success(self):
+        """Helper function để update UI sau khi initial guess thành công"""
+        try:
+            self.status_label.config(text="Trạng thái: Initial guess hoàn thành", foreground="green")
+            self.initial_guess_btn.config(state=tk.NORMAL)
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
+    
+    def _update_initial_guess_failure(self):
+        """Helper function để update UI sau khi initial guess thất bại"""
+        try:
+            self.status_label.config(text="Trạng thái: Initial guess thất bại", foreground="red")
+            self.initial_guess_btn.config(state=tk.NORMAL)
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
+    
+    def log_initial_guess(self, message):
+        """Log message vào initial guess log và log tổng (thread-safe)"""
+        self.log_global(message, "[Initial Guess] ")
+        self.after(0, partial(self._log_initial_guess_impl, message))
+    
+    def _log_initial_guess_impl(self, message):
+        """Implementation của log_initial_guess (chạy trong main thread)"""
+        try:
+            self.initial_guess_log.config(state=tk.NORMAL)
+            self.initial_guess_log.insert(tk.END, f"{message}\n")
+            self.initial_guess_log.see(tk.END)
+            self.initial_guess_log.config(state=tk.DISABLED)
+        except Exception as e:
+            print(f"Lỗi khi log: {e}")
+    
+    # ========== Calibration Methods ==========
+    
+    def browse_calibrate_dir(self):
+        """Browse cho calibrate directory"""
+        directory = filedialog.askdirectory(
+            title="Chọn thư mục preprocessed",
+            initialdir=self.calibrate_dir_var.get() or str(self.workspace_path)
+        )
+        if directory:
+            self.calibrate_dir_var.set(directory)
+    
+    def start_calibrate(self):
+        """Chạy calibration"""
+        preprocessed_dir = self.calibrate_dir_var.get()
+        
+        if not preprocessed_dir or not Path(preprocessed_dir).exists():
+            messagebox.showerror("Lỗi", "Vui lòng chọn thư mục preprocessed hợp lệ")
+            return
+        
+        setup_script = self.workspace_path / "install" / "setup.sh"
+        if not setup_script.exists():
+            messagebox.showerror("Lỗi", f"Không tìm thấy setup.sh tại: {setup_script}")
+            return
+        
+        cmd_parts = ["ros2", "run", "direct_visual_lidar_calibration", "calibrate", preprocessed_dir]
+        
+        # Add registration type
+        registration_type = self.registration_type_var.get()
+        cmd_parts.extend(["--registration_type", registration_type])
+        
+        if self.auto_quit_var.get():
+            cmd_parts.append("--auto_quit")
+        if self.background_var.get():
+            cmd_parts.append("--background")
+        
+        # Build command với đầy đủ ROS2 environment
+        ros2_setup = "/opt/ros/jazzy/setup.bash"
+        cmd = f"source {ros2_setup} && source {setup_script} && {' '.join(cmd_parts)}"
+        
+        self.log_calibrate(f"Bắt đầu calibration...")
+        self.log_calibrate(f"Directory: {preprocessed_dir}")
+        
+        try:
+            # Sử dụng env để đảm bảo clean environment
+            env = os.environ.copy()
+            # Đảm bảo không có ROS_DOMAIN_ID conflict
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
+            self.calibrate_process = subprocess.Popen(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1,
+                env=env
+            )
+            
+            self.calibrate_btn.config(state=tk.DISABLED)
+            self.stop_calibrate_btn.config(state=tk.NORMAL)
+            self.status_label.config(text="Trạng thái: Đang calibration...", foreground="orange")
+            
+            # Start thread để đọc output
+            threading.Thread(target=self.monitor_calibrate_process, daemon=True).start()
+            
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể chạy calibration: {e}")
+            self.log_calibrate(f"Lỗi: {e}")
+    
+    def monitor_calibrate_process(self):
+        """Monitor calibrate process output"""
+        if not self.calibrate_process:
+            return
+        
+        try:
+            for line in iter(self.calibrate_process.stdout.readline, ''):
+                if not line:
+                    break
+                self.log_calibrate(line.strip())
+        except Exception as e:
+            self.log_calibrate(f"Lỗi khi đọc output: {e}")
+        
+        if self.calibrate_process.poll() is not None:
+            exit_code = self.calibrate_process.poll()
+            if exit_code == 0:
+                self.after(0, partial(self._update_calibrate_success))
+            else:
+                self.after(0, partial(self._update_calibrate_failure))
+    
+    def stop_calibrate(self):
+        """Dừng calibration process"""
+        if self.calibrate_process:
+            try:
+                self.log_calibrate("Đang dừng calibration...")
+                self.calibrate_process.terminate()
+                self.calibrate_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    self.calibrate_process.kill()
+                except:
+                    pass
+            except Exception as e:
+                self.log_calibrate(f"Lỗi khi dừng calibration: {e}")
+            finally:
+                self.calibrate_process = None
+                self.calibrate_btn.config(state=tk.NORMAL)
+                self.stop_calibrate_btn.config(state=tk.DISABLED)
+                self.status_label.config(text="Trạng thái: Calibration đã dừng", foreground="orange")
+                self.log_calibrate("Calibration đã dừng")
+    
+    def _update_calibrate_success(self):
+        """Helper function để update UI sau khi calibration thành công"""
+        try:
+            self.status_label.config(text="Trạng thái: Calibration hoàn thành", foreground="green")
+            self.calibrate_btn.config(state=tk.NORMAL)
+            self.stop_calibrate_btn.config(state=tk.DISABLED)
+            # Auto-fill calib.json path
+            calib_json_path = Path(self.calibrate_dir_var.get()) / "calib.json"
+            if calib_json_path.exists():
+                self.calib_json_var.set(str(calib_json_path))
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
+    
+    def _update_calibrate_failure(self):
+        """Helper function để update UI sau khi calibration thất bại"""
+        try:
+            self.status_label.config(text="Trạng thái: Calibration thất bại", foreground="red")
+            self.calibrate_btn.config(state=tk.NORMAL)
+            self.stop_calibrate_btn.config(state=tk.DISABLED)
+        except Exception as e:
+            print(f"Lỗi khi update UI: {e}")
+    
+    def log_calibrate(self, message):
+        """Log message vào calibrate log và log tổng (thread-safe)"""
+        self.log_global(message, "[Calibration] ")
+        self.after(0, partial(self._log_calibrate_impl, message))
+    
+    def _log_calibrate_impl(self, message):
+        """Implementation của log_calibrate (chạy trong main thread)"""
+        try:
+            self.calibrate_log.config(state=tk.NORMAL)
+            self.calibrate_log.insert(tk.END, f"{message}\n")
+            self.calibrate_log.see(tk.END)
+            self.calibrate_log.config(state=tk.DISABLED)
+        except Exception as e:
+            print(f"Lỗi khi log: {e}")
+    
+    # ========== Export Methods ==========
+    
+    def browse_calib_json(self):
+        """Browse cho calib.json file"""
+        file_path = filedialog.askopenfilename(
+            title="Chọn file calib.json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialdir=self.calib_json_var.get() or str(self.workspace_path)
+        )
+        if file_path:
+            self.calib_json_var.set(file_path)
+    
+    def view_calib_json(self):
+        """Xem nội dung calib.json"""
+        calib_json_path = self.calib_json_var.get()
+        
+        if not calib_json_path or not Path(calib_json_path).exists():
+            messagebox.showerror("Lỗi", "Vui lòng chọn file calib.json hợp lệ")
+            return
+        
+        try:
+            with open(calib_json_path, 'r') as f:
+                calib_data = json.load(f)
+            
+            self.results_text.config(state=tk.NORMAL)
+            self.results_text.delete(1.0, tk.END)
+            self.results_text.insert(tk.END, json.dumps(calib_data, indent=2))
+            self.results_text.config(state=tk.DISABLED)
+            
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể đọc file: {e}")
+    
+    def convert_to_fast_livo2(self):
+        """Convert calib.json sang FAST-LIVO2 format"""
+        calib_json_path = self.calib_json_var.get()
+        
+        if not calib_json_path or not Path(calib_json_path).exists():
+            messagebox.showerror("Lỗi", "Vui lòng chọn file calib.json hợp lệ")
+            return
+        
+        # Sử dụng script conversion đã tạo
+        convert_script = self.workspace_path / "src" / "FAST-LIVO2" / "scripts" / "convert_calib_to_fast_livo2.py"
+        
+        if not convert_script.exists():
+            messagebox.showerror("Lỗi", f"Không tìm thấy script conversion tại: {convert_script}")
+            return
+        
+        output_yaml = self.output_yaml_var.get()
+        if not output_yaml:
+            # Tạo output path mặc định
+            output_yaml = str(Path(calib_json_path).parent / "fast_livo2_calib.yaml")
+            self.output_yaml_var.set(output_yaml)
+        
+        cmd = f"python3 {convert_script} {calib_json_path} --output {output_yaml}"
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                # Đọc kết quả từ output
+                self.results_text.config(state=tk.NORMAL)
+                self.results_text.delete(1.0, tk.END)
+                self.results_text.insert(tk.END, result.stdout)
+                self.results_text.config(state=tk.DISABLED)
+                
+                messagebox.showinfo("Thành công", f"Đã convert thành công!\nKết quả đã lưu tại: {output_yaml}")
+            else:
+                messagebox.showerror("Lỗi", f"Convert thất bại:\n{result.stderr}")
+                self.results_text.config(state=tk.NORMAL)
+                self.results_text.delete(1.0, tk.END)
+                self.results_text.insert(tk.END, result.stderr)
+                self.results_text.config(state=tk.DISABLED)
+                
+        except subprocess.TimeoutExpired:
+            messagebox.showerror("Lỗi", "Convert timeout")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi khi convert: {e}")
+    
+    def start_converter(self):
+        """Tự động khởi động Converter khi mở GUI"""
+        if self.is_converter_running:
+            return
+        
+        workspace_path = self.workspace_path
+        launch_file = Path("src/livox_msg_converter/launch/livox_msg_converter.launch.py")
+        
+        setup_script = workspace_path / "install" / "setup.sh"
+        if not setup_script.exists():
+            print(f"Cảnh báo: Không tìm thấy setup.sh tại: {setup_script}")
+            return
+        
+        launch_path = workspace_path / launch_file
+        if not launch_path.exists():
+            print(f"Cảnh báo: Không tìm thấy launch file tại: {launch_path}")
+            return
+        
+        ros2_setup = "/opt/ros/jazzy/setup.bash"
+        if not Path(ros2_setup).exists():
+            print(f"Cảnh báo: Không tìm thấy ROS2 setup tại: {ros2_setup}")
+            return
+        
+        # Xác định package name
+        parts = launch_file.parts
+        if len(parts) >= 2 and parts[0] == "src":
+            package_name = parts[1]
+        else:
+            package_name = launch_path.parent.parent.name
+        
+        launch_filename = launch_path.name
+        cmd = f"source {ros2_setup} && source {setup_script} && ros2 launch {package_name} {launch_filename}"
+        
+        self.log_global("🚀 Đang khởi động Converter...", "[Converter] ")
+        
+        try:
+            env = os.environ.copy()
+            if 'ROS_DOMAIN_ID' not in env:
+                env['ROS_DOMAIN_ID'] = '0'
+            
+            self.converter_process = subprocess.Popen(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1,
+                env=env
+            )
+            
+            self.is_converter_running = True
+            self.log_global("✓ Converter đã được khởi động", "[Converter] ")
+            
+            # Start thread để monitor (không cần log, chỉ để biết khi nào dừng)
+            threading.Thread(target=self._monitor_converter_process, daemon=True).start()
+            
+        except Exception as e:
+            self.log_global(f"❌ Lỗi khi khởi động Converter: {e}", "[Converter] ")
+    
+    def _monitor_converter_process(self):
+        """Monitor converter process (silent)"""
+        if not self.converter_process:
+            return
+        
+        try:
+            for line in iter(self.converter_process.stdout.readline, ''):
+                if not line:
+                    break
+                # Không log, chỉ monitor
+                pass
+        except Exception:
+            pass
+        
+        # Kiểm tra exit code
+        if self.converter_process.poll() is not None:
+            self.is_converter_running = False
+    
+    def stop_converter(self):
+        """Dừng Converter"""
+        if not self.is_converter_running or not self.converter_process:
+            return
+        
+        try:
+            self.converter_process.terminate()
+            try:
+                self.converter_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.converter_process.kill()
+                self.converter_process.wait()
+        except Exception as e:
+            print(f"Lỗi khi dừng Converter: {e}")
+        
+        self.converter_process = None
+        self.is_converter_running = False
+        self.log_global("✓ Converter đã dừng", "[Converter] ")
+    
+    def cleanup_all_processes(self):
+        """Dừng tất cả processes khi đóng GUI"""
+        # Dừng Converter
+        if self.is_converter_running:
+            self.stop_converter()
+        
+        # Dừng Replay
+        if self.replay_tab and self.replay_tab.is_replaying:
+            self.replay_tab.stop_replay()
+
+        # Dừng Bag Cutter nếu đang chạy
+        if hasattr(self, "bag_cut_tab") and self.bag_cut_tab:
+            try:
+                self.bag_cut_tab.stop_cut()
+            except Exception:
+                pass
+        
+        # Dừng Record
+        if self.is_recording and self.record_process:
+            self.stop_record()
+        
+        # Dừng Camera Info Publisher
+        if self.is_camera_info_publisher_running and self.camera_info_publisher_process:
+            self.stop_camera_info_publisher()
+        
+        # Dừng Preprocessing
+        if self.preprocess_process:
+            try:
+                self.preprocess_process.terminate()
+                self.preprocess_process.wait(timeout=2)
+            except:
+                try:
+                    self.preprocess_process.kill()
+                except:
+                    pass
+            self.preprocess_process = None
+        
+        # Dừng Initial Guess
+        if self.initial_guess_process:
+            try:
+                self.initial_guess_process.terminate()
+                self.initial_guess_process.wait(timeout=2)
+            except:
+                try:
+                    self.initial_guess_process.kill()
+                except:
+                    pass
+            self.initial_guess_process = None
+        
+        # Dừng Calibration
+        if self.calibrate_process:
+            try:
+                self.calibrate_process.terminate()
+                self.calibrate_process.wait(timeout=2)
+            except:
+                try:
+                    self.calibrate_process.kill()
+                except:
+                    pass
+            self.calibrate_process = None
+
