@@ -7,9 +7,10 @@ Tạo tab để cắt 5 giây đầu của một rosbag mà không ảnh hưởn
 import subprocess
 import threading
 import os
-import time
+import shutil
 from pathlib import Path
 from datetime import datetime
+from typing import Callable, Dict, Optional, Tuple
 
 try:
     import tkinter as tk
@@ -18,6 +19,165 @@ except ImportError as e:
     print(f"Lỗi import: {e}")
     import sys
     sys.exit(1)
+
+
+def _parse_metadata_yaml(bag_path: Path) -> Optional[Dict]:
+    """Đọc metadata.yaml để lấy storage_id, start_time_ns, duration_ns và topics."""
+    metadata_file = bag_path / "metadata.yaml"
+    if not metadata_file.exists():
+        return None
+    try:
+        import yaml  # type: ignore
+
+        data = yaml.safe_load(metadata_file.read_text())
+        info = data.get("rosbag2_bagfile_information", {}) or {}
+        topics_raw = info.get("topics_with_message_count", []) or []
+        topics = []
+        for t in topics_raw:
+            meta = (t or {}).get("topic_metadata", {}) or {}
+            topics.append(
+                {
+                    "name": meta.get("name"),
+                    "type": meta.get("type"),
+                    "serialization_format": meta.get("serialization_format") or "cdr",
+                    "offered_qos_profiles": meta.get("offered_qos_profiles") or "",
+                }
+            )
+        return {
+            "storage_id": info.get("storage_identifier") or "sqlite3",
+            "start_time_ns": (info.get("starting_time") or {}).get("nanoseconds_since_epoch"),
+            "duration_ns": (info.get("duration") or {}).get("nanoseconds"),
+            "topics": topics,
+        }
+    except Exception:
+        return None
+
+
+def cut_bag_5s_data(
+    bag_path: Path,
+    workspace_path: Path,
+    drive_ws_path: Path,
+    logger: Optional[Callable[[str], None]] = None,
+    duration_seconds: float = 5.0,
+) -> Tuple[bool, Optional[str], str]:
+    """
+    Cắt chính xác 5s dữ liệu dựa trên timestamp messages bằng rosbag2_py.
+
+    Returns:
+        (ok, output_dir_str, message)
+    """
+
+    def log(msg: str):
+        if logger:
+            logger(msg)
+
+    if not bag_path.exists():
+        return False, None, f"Bag folder không tồn tại: {bag_path}"
+
+    meta = _parse_metadata_yaml(bag_path)
+    if not meta:
+        return False, None, "Không đọc được metadata.yaml để lấy thời gian/metadata"
+
+    start_ns = meta.get("start_time_ns")
+    duration_ns = meta.get("duration_ns")
+    storage_id = meta.get("storage_id") or "sqlite3"
+    topics = meta.get("topics") or []
+
+    if start_ns is None or duration_ns is None:
+        return False, None, "Metadata thiếu start_time hoặc duration"
+
+    if duration_ns < duration_seconds * 1e9:
+        return False, None, f"Bag chỉ có {duration_ns/1e9:.2f}s (< {duration_seconds}s)"
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = bag_path.parent / f"{bag_path.name}_cut_{int(duration_seconds)}s_{timestamp}"
+
+    try:
+        import rosbag2_py  # type: ignore
+    except Exception as exc:
+        return False, None, f"Thiếu rosbag2_py, không thể cắt bằng timestamp: {exc}"
+
+    try:
+        if not topics:
+            return False, None, "Metadata không chứa danh sách topics, không thể tạo topic"
+
+        # Dọn output cũ nếu có
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
+
+        converter_options = rosbag2_py.ConverterOptions("", "")
+        reader = rosbag2_py.SequentialReader()
+        reader.open(
+            rosbag2_py.StorageOptions(uri=str(bag_path), storage_id=storage_id),
+            converter_options,
+        )
+
+        writer = rosbag2_py.SequentialWriter()
+        writer.open(
+            rosbag2_py.StorageOptions(uri=str(output_dir), storage_id=storage_id),
+            converter_options,
+        )
+
+        for idx, t in enumerate(topics):
+            writer.create_topic(
+                rosbag2_py.TopicMetadata(
+                    id=idx,
+                    name=t.get("name") or "",
+                    type=t.get("type") or "",
+                    serialization_format=t.get("serialization_format") or "cdr",
+                    offered_qos_profiles=[],
+                    type_description_hash="",
+                )
+            )
+
+        start_cut_ns = None
+        end_cut_ns = None
+        last_ns = None
+        duration_limit = int(duration_seconds * 1e9)
+
+        while reader.has_next():
+            topic, data, ts = reader.read_next()
+            if start_cut_ns is None:
+                start_cut_ns = ts
+                end_cut_ns = start_cut_ns + duration_limit
+            if end_cut_ns is not None and ts > end_cut_ns:
+                break
+            writer.write(topic, data, ts)
+            last_ns = ts
+
+        if start_cut_ns is None or last_ns is None:
+            return False, None, "Không đọc được message nào trong bag"
+
+        actual_duration = (last_ns - start_cut_ns) / 1e9
+        if actual_duration < duration_seconds * 0.9:
+            return False, None, f"Duration sau cắt chỉ {actual_duration:.2f}s"
+
+        # Kiểm tra lại bằng ros2 bag info (không bắt buộc, để log)
+        ros2_setup = "/opt/ros/jazzy/setup.bash"
+        ws_setup = workspace_path / "install" / "setup.sh"
+        drive_ws_setup = drive_ws_path / "install" / "setup.sh"
+        use_drive_ws = drive_ws_setup.exists()
+        check_cmd = f"source {ros2_setup} && "
+        if use_drive_ws:
+            check_cmd += f"source {drive_ws_setup} && "
+        check_cmd += f"source {ws_setup} && ros2 bag info {output_dir}"
+        try:
+            info_res = subprocess.run(
+                check_cmd,
+                shell=True,
+                executable="/bin/bash",
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if info_res.returncode == 0:
+                log(info_res.stdout.strip())
+        except Exception:
+            pass
+
+        return True, str(output_dir), f"Đã cắt {actual_duration:.2f}s dữ liệu"
+    except Exception as exc:
+        return False, None, f"Lỗi khi cắt bag bằng rosbag2_py: {exc}"
 
 
 class BagCutTab(ttk.Frame):
@@ -117,106 +277,27 @@ class BagCutTab(ttk.Frame):
             messagebox.showerror("Lỗi", f"Không tìm thấy ws/install/setup.sh tại: {ws_setup}")
             return
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = bag_path_obj.parent / f"{bag_path_obj.name}_5sec_{timestamp}"
-
-        ros2_setup = "/opt/ros/jazzy/setup.bash"
-        drive_ws_setup = self.drive_ws_path / "install" / "setup.sh"
-        use_drive_ws = drive_ws_setup.exists()
-
         self.is_cutting = True
         self.cut_output_path = None
         self.cut_status_label.config(text="Đang cắt...", foreground="orange")
         self.status_label.config(text="Trạng thái: Đang cắt...", foreground="orange")
         self.cut_btn.config(state=tk.DISABLED)
-        self.log(f"🔧 Đang cắt bag (5s) -> {output_dir}")
+        self.log("🔧 Đang cắt 5s dữ liệu (dựa trên timestamp) ...")
 
         def worker():
             try:
-                env = os.environ.copy()
-                if "ROS_DOMAIN_ID" not in env:
-                    env["ROS_DOMAIN_ID"] = "0"
-
-                record_cmd = f"source {ros2_setup} && source {ws_setup} && ros2 bag record -a -o {output_dir}"
-                play_cmd = f"source {ros2_setup} && source {ws_setup} && ros2 bag play {bag_path} --duration 5 --rate 1.0 --clock"
-                if use_drive_ws:
-                    record_cmd = f"source {ros2_setup} && source {drive_ws_setup} && source {ws_setup} && ros2 bag record -a -o {output_dir}"
-                    play_cmd = f"source {ros2_setup} && source {drive_ws_setup} && source {ws_setup} && ros2 bag play {bag_path} --duration 5 --rate 1.0 --clock"
-
-                self.log("▶️ Khởi động record...")
-                self.record_process = subprocess.Popen(
-                    record_cmd,
-                    shell=True,
-                    executable="/bin/bash",
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    env=env,
+                ok, out_path, msg = cut_bag_5s_data(
+                    bag_path=bag_path_obj,
+                    workspace_path=self.workspace_path,
+                    drive_ws_path=self.drive_ws_path,
+                    logger=self.log,
+                    duration_seconds=5.0,
                 )
-
-                time.sleep(1.0)
-
-                self.log("▶️ Play bag 5s...")
-                self.play_process = subprocess.Popen(
-                    play_cmd,
-                    shell=True,
-                    executable="/bin/bash",
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    env=env,
-                )
-
-                try:
-                    self.play_process.wait(timeout=12)
-                except subprocess.TimeoutExpired:
-                    self.log("⚠️ Play timeout, dừng play")
-                    self.play_process.terminate()
-                    self.play_process.wait()
-
-                time.sleep(0.5)
-
-                self.log("⏹️ Dừng record...")
-                self.record_process.terminate()
-                try:
-                    self.record_process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    self.record_process.kill()
-                    self.record_process.wait()
-
-                # Kiểm tra file và duration
-                duration_ok = False
-                if output_dir.exists() and (any(output_dir.glob("*.mcap")) or any(output_dir.glob("*.db3"))):
-                    check_cmd = f"source {ros2_setup} && source {ws_setup} && ros2 bag info {output_dir}"
-                    if use_drive_ws:
-                        check_cmd = f"source {ros2_setup} && source {drive_ws_setup} && source {ws_setup} && ros2 bag info {output_dir}"
-                    check_result = subprocess.run(
-                        check_cmd,
-                        shell=True,
-                        executable="/bin/bash",
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                        env=env,
-                    )
-                    if check_result.returncode == 0:
-                        duration_line = [line for line in check_result.stdout.split("\n") if "Duration:" in line]
-                        if duration_line:
-                            self.log(f"📊 {duration_line[0].strip()}")
-                            try:
-                                duration_str = duration_line[0].split(":")[1].strip()
-                                duration_seconds = float(duration_str.replace("s", "").split()[0])
-                                if duration_seconds >= 4.5:
-                                    duration_ok = True
-                                else:
-                                    self.log(f"⚠️ Duration chỉ {duration_seconds:.2f}s (bag gốc có thể thiếu dữ liệu trong 5s đầu)")
-                            except Exception:
-                                pass
-
-                if duration_ok:
-                    self.cut_output_path = str(output_dir)
-                    self.after(0, lambda: self._update_cut_status(True, str(output_dir)))
+                if ok and out_path:
+                    self.cut_output_path = out_path
+                    self.after(0, lambda: self._update_cut_status(True, out_path))
                 else:
-                    self.after(0, lambda: self._update_cut_status(False, "Duration < 5s hoặc không ghi được file"))
-
+                    self.after(0, lambda: self._update_cut_status(False, msg))
             except Exception as e:
                 self.log(f"❌ Lỗi khi cắt bag: {e}")
                 self.after(0, lambda: self._update_cut_status(False, str(e)))

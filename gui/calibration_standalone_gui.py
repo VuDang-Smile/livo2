@@ -21,8 +21,7 @@ except ImportError as e:
     sys.exit(1)
 
 # Import các tabs
-from replay_tab import ReplayTab
-from bag_cut_tab import BagCutTab
+from replay_calibration_tab import ReplayCalibrationTab
 
 
 class CalibrationStandaloneGUI(ttk.Frame):
@@ -76,40 +75,33 @@ class CalibrationStandaloneGUI(ttk.Frame):
         notebook = ttk.Notebook(self)
         notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Tab 0: Replay
-        replay_frame = ttk.Frame(notebook)
-        notebook.add(replay_frame, text="Replay")
-        # ReplayTab không nhận log_callback (giữ nguyên logic cũ)
-        self.replay_tab = ReplayTab(replay_frame)
-        self.replay_tab.pack(fill=tk.BOTH, expand=True)
+        # Tab 0: Replay Calibration
+        replay_calib_frame = ttk.Frame(notebook)
+        notebook.add(replay_calib_frame, text="Replay Calibration")
+        self.replay_calibration_tab = ReplayCalibrationTab(replay_calib_frame)
+        self.replay_calibration_tab.pack(fill=tk.BOTH, expand=True)
 
-        # Tab 1: Bag Cutter (5s)
-        bag_cut_frame = ttk.Frame(notebook)
-        notebook.add(bag_cut_frame, text="Bag Cutter")
-        self.bag_cut_tab = BagCutTab(bag_cut_frame, log_callback=self.log_global)
-        self.bag_cut_tab.pack(fill=tk.BOTH, expand=True)
-
-        # Tab 2: Record Bag
+        # Tab 1: Record Bag
         record_frame = ttk.Frame(notebook)
         notebook.add(record_frame, text="Record Bag")
         self.create_record_tab(record_frame)
         
-        # Tab 3: Preprocessing
+        # Tab 2: Preprocessing
         preprocess_frame = ttk.Frame(notebook)
         notebook.add(preprocess_frame, text="Preprocessing")
         self.create_preprocess_tab(preprocess_frame)
         
-        # Tab 4: Initial Guess
+        # Tab 3: Initial Guess
         initial_guess_frame = ttk.Frame(notebook)
         notebook.add(initial_guess_frame, text="Initial Guess")
         self.create_initial_guess_tab(initial_guess_frame)
         
-        # Tab 5: Calibration
+        # Tab 4: Calibration
         calibrate_frame = ttk.Frame(notebook)
         notebook.add(calibrate_frame, text="Calibration")
         self.create_calibrate_tab(calibrate_frame)
         
-        # Tab 6: Export Results
+        # Tab 5: Export Results
         export_frame = ttk.Frame(notebook)
         notebook.add(export_frame, text="Export Results")
         self.create_export_tab(export_frame)
@@ -667,15 +659,17 @@ class CalibrationStandaloneGUI(ttk.Frame):
     
     def monitor_record_process(self):
         """Monitor record process output"""
-        if not self.record_process:
+        proc = self.record_process
+        if not proc:
             return
-        
-        for line in iter(self.record_process.stdout.readline, ''):
+
+        for line in iter(proc.stdout.readline, ''):
             if not line:
                 break
             self.log_record(line.strip())
-        
-        if self.record_process.poll() is not None:
+
+        # Chỉ kiểm tra poll trên handle cục bộ để tránh None khi đã dừng
+        if proc.poll() is not None:
             self.is_recording = False
             self.after(0, partial(self._update_record_complete))
     
@@ -1397,17 +1391,10 @@ class CalibrationStandaloneGUI(ttk.Frame):
         if self.is_converter_running:
             self.stop_converter()
         
-        # Dừng Replay
-        if self.replay_tab and self.replay_tab.is_replaying:
-            self.replay_tab.stop_replay()
+        # Dừng Replay Calibration
+        if hasattr(self, "replay_calibration_tab") and self.replay_calibration_tab and self.replay_calibration_tab.is_replaying:
+            self.replay_calibration_tab.stop_replay()
 
-        # Dừng Bag Cutter nếu đang chạy
-        if hasattr(self, "bag_cut_tab") and self.bag_cut_tab:
-            try:
-                self.bag_cut_tab.stop_cut()
-            except Exception:
-                pass
-        
         # Dừng Record
         if self.is_recording and self.record_process:
             self.stop_record()
