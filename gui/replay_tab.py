@@ -259,12 +259,11 @@ class ReplayTab(ttk.Frame):
             self.log(f"⚠️  Lỗi khi lấy thông tin bag: {e}")
     
     def start_replay(self):
-        """Bắt đầu replay bag"""
-        if self.is_replaying:
-            messagebox.showwarning("Cảnh báo", "Đang replay, vui lòng dừng trước")
+        """Cắt 5s rồi replay ngay bag đã cắt"""
+        if self.is_replaying or self.is_cutting:
+            messagebox.showwarning("Cảnh báo", "Đang replay hoặc đang cắt, vui lòng dừng trước")
             return
         
-        # Kiểm tra bag path
         bag_path = self.bag_path_var.get()
         if not bag_path:
             messagebox.showerror("Lỗi", "Vui lòng chọn bag folder")
@@ -275,7 +274,6 @@ class ReplayTab(ttk.Frame):
             messagebox.showerror("Lỗi", f"Bag folder không tồn tại: {bag_path}")
             return
         
-        # Kiểm tra ws setup.sh
         ws_setup = self.workspace_path / "install" / "setup.sh"
         if not ws_setup.exists():
             messagebox.showerror(
@@ -285,11 +283,69 @@ class ReplayTab(ttk.Frame):
             )
             return
         
+        # UI trạng thái cắt trước khi replay
+        self.is_cutting = True
+        self.cut_output_path = None
+        self.cut_status_label.config(text="Đang cắt 5s dữ liệu trước khi replay...", foreground="orange")
+        self.start_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.DISABLED)
+        self.status_label.config(text="Trạng thái: Đang cắt 5s...", foreground="orange")
+        self.log("🔧 Đang cắt 5s dữ liệu (timestamp) trước khi replay...")
+
+        def worker():
+            try:
+                ok, out_path, msg = cut_bag_5s_data(
+                    bag_path=bag_path_obj,
+                    workspace_path=self.workspace_path,
+                    drive_ws_path=self.drive_ws_path,
+                    logger=self.log,
+                    duration_seconds=5.0,
+                )
+                self.after(0, lambda: self._after_cut_and_play(ok, out_path, msg))
+            except Exception as e:
+                self.after(0, lambda: self._after_cut_and_play(False, None, str(e)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _after_cut_and_play(self, success, out_path, message):
+        """Sau khi cắt xong, tự động replay file đã cắt"""
+        self.is_cutting = False
+        if not success or not out_path:
+            self.cut_status_label.config(text=f"Cắt thất bại: {message}", foreground="red")
+            self.status_label.config(text="Trạng thái: Sẵn sàng", foreground="gray")
+            self.start_btn.config(state=tk.NORMAL)
+            self.stop_btn.config(state=tk.DISABLED)
+            messagebox.showerror("Lỗi", f"Cắt bag thất bại: {message}")
+            return
+
+        self.cut_output_path = out_path
+        self.cut_status_label.config(text=f"Đã cắt: {out_path}", foreground="green")
+        self.bag_path_var.set(out_path)
+        self._update_bag_info(out_path)
+        self.log(f"✅ Cắt thành công -> {out_path}")
+
+        self._start_replay_with_path(Path(out_path))
+
+    def _start_replay_with_path(self, bag_path_obj: Path):
+        """Thực thi replay với path đã cho (đã cắt)"""
+        if self.is_replaying:
+            return
+
+        bag_path = str(bag_path_obj)
+        # Kiểm tra ws setup.sh
+        ws_setup = self.workspace_path / "install" / "setup.sh"
+        if not ws_setup.exists():
+            messagebox.showerror(
+                "Lỗi",
+                f"Không tìm thấy ws/install/setup.sh tại: {ws_setup}\n"
+                "Vui lòng build workspace trước."
+            )
+            return
+
         # Kiểm tra drive_ws setup.sh (có thể cần cho CustomMsg)
         drive_ws_setup = self.drive_ws_path / "install" / "setup.sh"
         use_drive_ws = drive_ws_setup.exists()
-        
-        # Lấy các options
+
         try:
             rate = float(self.rate_var.get())
             if rate <= 0:
@@ -297,17 +353,13 @@ class ReplayTab(ttk.Frame):
         except ValueError:
             rate = 1.0
             self.log("⚠️  Giá trị rate không hợp lệ, sử dụng mặc định 1.0")
-        
+
         loop = self.loop_var.get()
         clock = self.clock_var.get()
-        
-        # Build command
+
         ros2_setup = "/opt/ros/jazzy/setup.bash"
-        
-        # Build ros2 bag play command
         bag_play_cmd = f"ros2 bag play {bag_path}"
         
-        # Thêm options
         if rate != 1.0:
             bag_play_cmd += f" --rate {rate}"
         
@@ -317,7 +369,6 @@ class ReplayTab(ttk.Frame):
         if clock:
             bag_play_cmd += " --clock"
         
-        # Source theo thứ tự: ROS2 base -> drive_ws (nếu có) -> ws
         self.log("🔧 Đang chuẩn bị source environment...")
         if use_drive_ws:
             cmd = (
@@ -344,7 +395,6 @@ class ReplayTab(ttk.Frame):
         self.log(f"⚙️  Clock: {'Có' if clock else 'Không'}")
         
         try:
-            # Sử dụng env để đảm bảo clean environment
             env = os.environ.copy()
             if 'ROS_DOMAIN_ID' not in env:
                 env['ROS_DOMAIN_ID'] = '0'
@@ -372,7 +422,6 @@ class ReplayTab(ttk.Frame):
                 text=f"Đang replay: {bag_path_obj.name}\nRate: {rate}x | Loop: {'Có' if loop else 'Không'} | Clock: {'Có' if clock else 'Không'}"
             )
             
-            # Start thread để đọc output
             threading.Thread(target=self.monitor_replay_process, daemon=True).start()
             
             self.log("✅ Replay đã được khởi động")
@@ -459,6 +508,7 @@ class ReplayTab(ttk.Frame):
     def _update_replay_stopped(self):
         """Helper function để update UI sau khi replay dừng"""
         try:
+            self.replay_process = None
             self.start_btn.config(state=tk.NORMAL)
             self.stop_btn.config(state=tk.DISABLED)
             self.status_label.config(
