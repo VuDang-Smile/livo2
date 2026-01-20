@@ -81,27 +81,22 @@ class CalibrationStandaloneGUI(ttk.Frame):
         self.replay_calibration_tab = ReplayCalibrationTab(replay_calib_frame)
         self.replay_calibration_tab.pack(fill=tk.BOTH, expand=True)
 
-        # Tab 1: Record Bag
-        record_frame = ttk.Frame(notebook)
-        notebook.add(record_frame, text="Record Bag")
-        self.create_record_tab(record_frame)
-        
-        # Tab 2: Preprocessing
+        # Tab 1: Preprocessing
         preprocess_frame = ttk.Frame(notebook)
         notebook.add(preprocess_frame, text="Preprocessing")
         self.create_preprocess_tab(preprocess_frame)
         
-        # Tab 3: Initial Guess
+        # Tab 2: Initial Guess
         initial_guess_frame = ttk.Frame(notebook)
         notebook.add(initial_guess_frame, text="Initial Guess")
         self.create_initial_guess_tab(initial_guess_frame)
         
-        # Tab 4: Calibration
+        # Tab 3: Calibration
         calibrate_frame = ttk.Frame(notebook)
         notebook.add(calibrate_frame, text="Calibration")
         self.create_calibrate_tab(calibrate_frame)
         
-        # Tab 5: Export Results
+        # Tab 4: Export Results
         export_frame = ttk.Frame(notebook)
         notebook.add(export_frame, text="Export Results")
         self.create_export_tab(export_frame)
@@ -1396,10 +1391,6 @@ class CalibrationStandaloneGUI(ttk.Frame):
         if hasattr(self, "replay_calibration_tab") and self.replay_calibration_tab and self.replay_calibration_tab.is_replaying:
             self.replay_calibration_tab.stop_replay()
 
-        # Dừng Record
-        if self.is_recording and self.record_process:
-            self.stop_record()
-        
         # Dừng Camera Info Publisher
         if self.is_camera_info_publisher_running and self.camera_info_publisher_process:
             self.stop_camera_info_publisher()

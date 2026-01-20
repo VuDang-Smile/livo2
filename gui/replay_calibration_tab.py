@@ -41,6 +41,10 @@ class ReplayCalibrationTab(ttk.Frame):
         self.is_cutting = False
         self.cut_output_path = None
         self.is_recording = False
+        # Replay options (giữ mặc định, ẩn UI)
+        self.rate_var = tk.StringVar(value="1.0")
+        self.loop_var = tk.BooleanVar(value=False)
+        self.clock_var = tk.BooleanVar(value=True)
 
         # Tạo UI
         self.create_widgets()
@@ -74,64 +78,6 @@ class ReplayCalibrationTab(ttk.Frame):
             command=self.browse_bag_folder
         )
         browse_btn.pack(side=tk.LEFT, padx=5)
-
-        # Frame cấu hình replay
-        config_frame = ttk.LabelFrame(control_frame, text="Cấu hình Replay", padding="10")
-        config_frame.pack(fill=tk.X, padx=10, pady=5)
-
-        # Rate option
-        rate_frame = ttk.Frame(config_frame)
-        rate_frame.pack(fill=tk.X, padx=5, pady=2)
-
-        ttk.Label(
-            rate_frame,
-            text="Rate:",
-            font=("Arial", 10)
-        ).pack(side=tk.LEFT, padx=5)
-
-        self.rate_var = tk.StringVar(value="1.0")
-        rate_spinbox = ttk.Spinbox(
-            rate_frame,
-            from_=0.1,
-            to=10.0,
-            increment=0.1,
-            textvariable=self.rate_var,
-            width=10,
-            format="%.1f"
-        )
-        rate_spinbox.pack(side=tk.LEFT, padx=5)
-
-        ttk.Label(
-            rate_frame,
-            text="(1.0 = real-time, 2.0 = 2x speed, 0.5 = half speed)",
-            font=("Arial", 9),
-            foreground="gray"
-        ).pack(side=tk.LEFT, padx=10)
-
-        # Loop option
-        self.loop_var = tk.BooleanVar(value=False)
-        loop_checkbox = ttk.Checkbutton(
-            config_frame,
-            text="Loop (lặp lại khi kết thúc)",
-            variable=self.loop_var
-        )
-        loop_checkbox.pack(anchor=tk.W, padx=5, pady=2)
-
-        # Clock option
-        self.clock_var = tk.BooleanVar(value=True)
-        clock_checkbox = ttk.Checkbutton(
-            config_frame,
-            text="Publish clock (--clock)",
-            variable=self.clock_var
-        )
-        clock_checkbox.pack(anchor=tk.W, padx=5, pady=2)
-
-        ttk.Label(
-            config_frame,
-            text="(Publish /clock topic để đồng bộ thời gian)",
-            font=("Arial", 9),
-            foreground="gray"
-        ).pack(anchor=tk.W, padx=25, pady=0)
 
         # Frame nút điều khiển
         button_frame = ttk.Frame(control_frame)
