@@ -1350,11 +1350,12 @@ class CalibrationStandaloneGUI(ttk.Frame):
     
     def _monitor_converter_process(self):
         """Monitor converter process (silent)"""
-        if not self.converter_process:
+        proc = self.converter_process
+        if not proc:
             return
-        
+
         try:
-            for line in iter(self.converter_process.stdout.readline, ''):
+            for line in iter(proc.stdout.readline, ''):
                 if not line:
                     break
                 # Không log, chỉ monitor
@@ -1363,7 +1364,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
             pass
         
         # Kiểm tra exit code
-        if self.converter_process.poll() is not None:
+        if proc.poll() is not None:
             self.is_converter_running = False
     
     def stop_converter(self):
