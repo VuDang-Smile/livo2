@@ -129,7 +129,7 @@ class ReplayCalibrationTab(ttk.Frame):
         )
         self.cut_status_label.pack(anchor=tk.W, padx=5, pady=(2, 0))
 
-        # Text area để hiển thị log
+        # Text area để hiển thị log riêng cho tab Replay
         log_frame = ttk.LabelFrame(self, text="Log", padding="5")
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
@@ -142,12 +142,16 @@ class ReplayCalibrationTab(ttk.Frame):
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
     def log(self, message):
-        """Thêm message vào log"""
+        """Thêm message vào log của tab Replay"""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
-        self.log_text.see(tk.END)
-        self.log_text.config(state=tk.DISABLED)
+        if hasattr(self, "log_text") and self.log_text:
+            self.log_text.config(state=tk.NORMAL)
+            self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+            self.log_text.see(tk.END)
+            self.log_text.config(state=tk.DISABLED)
+        else:
+            # Fallback nếu UI chưa sẵn sàng
+            print(f"[{timestamp}] {message}")
 
     def browse_bag_folder(self):
         """Browse cho bag folder"""

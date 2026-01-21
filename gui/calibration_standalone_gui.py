@@ -109,17 +109,8 @@ class CalibrationStandaloneGUI(ttk.Frame):
         )
         self.status_label.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=5)
         
-        # Log tổng để hiển thị thông báo từ tất cả các tabs
-        log_frame = ttk.LabelFrame(self, text="Log Tổng", padding=5)
-        log_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        self.global_log = scrolledtext.ScrolledText(
-            log_frame,
-            height=8,
-            wrap=tk.WORD,
-            state=tk.DISABLED
-        )
-        self.global_log.pack(fill=tk.BOTH, expand=True)
+        # Bỏ Log Tổng UI theo yêu cầu; vẫn giữ biến để tránh lỗi tham chiếu
+        self.global_log = None
     
     def log_global(self, message, prefix=""):
         """Log message vào log tổng (thread-safe)"""
@@ -129,13 +120,8 @@ class CalibrationStandaloneGUI(ttk.Frame):
     
     def _log_global_impl(self, message):
         """Implementation của log_global (chạy trong main thread)"""
-        try:
-            self.global_log.config(state=tk.NORMAL)
-            self.global_log.insert(tk.END, f"{message}\n")
-            self.global_log.see(tk.END)
-            self.global_log.config(state=tk.DISABLED)
-        except Exception as e:
-            print(f"Lỗi khi log tổng: {e}")
+        # Không còn UI log tổng; fallback in ra console
+        print(message)
     
     def create_record_tab(self, parent):
         """Tạo tab record bag (chỉ cho equirectangular camera)"""
