@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 import os
+import time
 from functools import partial
 from bag_cut_tab import cut_bag_5s_data
 
@@ -41,6 +42,8 @@ class ReplayCalibrationTab(ttk.Frame):
         self.is_cutting = False
         self.cut_output_path = None
         self.is_recording = False
+        self.replay_start_time = None
+        self.bag_duration_seconds = None
         # Replay options (giữ mặc định, ẩn UI)
         self.rate_var = tk.StringVar(value="1.0")
         self.loop_var = tk.BooleanVar(value=False)
@@ -440,6 +443,17 @@ class ReplayCalibrationTab(ttk.Frame):
 
             self.is_replaying = True
             self.bag_path = bag_path
+            
+            # Lấy duration của bag để tự động dừng sau khi phát xong
+            self.bag_duration_seconds = self._get_bag_duration(bag_path_obj)
+            self.replay_start_time = time.time()
+            
+            if self.bag_duration_seconds:
+                expected_duration = self.bag_duration_seconds / rate + 2.0  # +2s buffer
+                self.log(f"⏱️  Bag duration: {self.bag_duration_seconds:.2f}s, sẽ tự động dừng sau ~{expected_duration:.1f}s")
+            else:
+                self.log("⚠️  Không thể lấy duration của bag, sẽ monitor process exit")
+            
             self.start_btn.config(state=tk.DISABLED)
             self.stop_btn.config(state=tk.NORMAL)
             self.status_label.config(
@@ -450,7 +464,16 @@ class ReplayCalibrationTab(ttk.Frame):
                 text=f"Đang replay: {bag_path_obj.name}\nRate: {rate}x | Loop: {'Có' if loop else 'Không'} | Clock: {'Có' if clock else 'Không'}"
             )
 
+            # Khởi chạy monitor replay process
             threading.Thread(target=self.monitor_replay_process, daemon=True).start()
+            
+            # Khởi chạy auto-stop timer nếu có duration và không loop
+            if self.bag_duration_seconds and not loop:
+                threading.Thread(
+                    target=self._auto_stop_replay_after_duration,
+                    args=(expected_duration,),
+                    daemon=True
+                ).start()
 
             self.log("✅ Replay đã được khởi động")
 
@@ -520,8 +543,81 @@ class ReplayCalibrationTab(ttk.Frame):
             self.info_label.config(text="Đã dừng replay")
             self.log("✅ Replay đã dừng")
 
+    def _get_bag_duration(self, bag_path_obj: Path) -> float:
+        """Lấy duration của bag file (seconds)"""
+        try:
+            # Thử đọc từ metadata.yaml trước
+            metadata_file = bag_path_obj / "metadata.yaml"
+            if metadata_file.exists():
+                import yaml
+                data = yaml.safe_load(metadata_file.read_text())
+                info = data.get("rosbag2_bagfile_information", {}) or {}
+                duration_ns = (info.get("duration") or {}).get("nanoseconds")
+                if duration_ns:
+                    return duration_ns / 1e9  # Convert nanoseconds to seconds
+        except Exception as e:
+            self.log(f"⚠️  Không thể lấy duration từ metadata.yaml: {e}")
+        
+        # Fallback: thử dùng ros2 bag info
+        try:
+            ws_setup = self.workspace_path / "install" / "setup.sh"
+            if not ws_setup.exists():
+                return None
+
+            ros2_setup = "/opt/ros/jazzy/setup.bash"
+            cmd = f"source {ros2_setup} && source {ws_setup} && ros2 bag info {bag_path_obj}"
+
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            if result.returncode == 0:
+                import re
+                # Tìm pattern "Duration: X.XXXs" hoặc "Duration: HH:MM:SS.mmm"
+                for line in result.stdout.split('\n'):
+                    if 'duration' in line.lower():
+                        # Tìm số giây
+                        match = re.search(r'(\d+\.\d+)\s*s', line.lower())
+                        if match:
+                            return float(match.group(1))
+                        # Hoặc format HH:MM:SS.mmm
+                        match = re.search(r'(\d+):(\d+):(\d+\.?\d*)', line)
+                        if match:
+                            hours = int(match.group(1))
+                            minutes = int(match.group(2))
+                            seconds = float(match.group(3))
+                            return hours * 3600 + minutes * 60 + seconds
+        except Exception as e:
+            self.log(f"⚠️  Không thể lấy duration từ ros2 bag info: {e}")
+        
+        return None
+
+    def _auto_stop_replay_after_duration(self, wait_seconds: float):
+        """Tự động dừng replay sau khi đã phát xong bag"""
+        try:
+            time.sleep(wait_seconds)
+            
+            # Kiểm tra xem replay còn đang chạy không
+            if self.is_replaying and self.replay_process:
+                if self.replay_process.poll() is None:
+                    # Process vẫn đang chạy, tự động dừng
+                    self.log(f"⏱️  Đã phát đủ thời gian ({wait_seconds:.1f}s), tự động dừng replay...")
+                    # Đợi thêm để đảm bảo messages cuối cùng được record
+                    time.sleep(2)
+                    self.after(0, self.stop_replay)
+                else:
+                    # Process đã kết thúc, monitor sẽ xử lý
+                    pass
+        except Exception as e:
+            self.log(f"⚠️  Lỗi trong auto-stop timer: {e}")
+
     def monitor_replay_process(self):
-        """Monitor replay process output"""
+        """Monitor replay process output và tự động dừng record khi replay kết thúc"""
         if not self.replay_process:
             return
 
@@ -541,40 +637,119 @@ class ReplayCalibrationTab(ttk.Frame):
         except Exception as e:
             self.log(f"Lỗi khi đọc output: {e}")
 
+        # Kiểm tra xem replay process đã kết thúc chưa
+        # Đợi một chút để process có thể kết thúc tự nhiên
+        time.sleep(0.5)
+        
+        # Kiểm tra nhiều lần để đảm bảo detect khi process kết thúc
+        max_checks = 10
+        for i in range(max_checks):
+            if self.replay_process.poll() is not None:
+                exit_code = self.replay_process.poll()
+                if exit_code != 0:
+                    self.log(f"✗ Replay đã dừng với exit code: {exit_code}")
+                else:
+                    self.log(f"✓ Replay đã hoàn thành (process đã exit)")
+                break
+            time.sleep(0.2)
+        
+        # Nếu process vẫn đang chạy sau khi đã đợi đủ thời gian, kiểm tra lại
+        if self.replay_process.poll() is None:
+            # Process vẫn đang chạy, có thể đã phát xong nhưng chưa exit
+            # Kiểm tra xem đã đủ thời gian chưa (nếu có duration)
+            if self.bag_duration_seconds and self.replay_start_time:
+                elapsed = time.time() - self.replay_start_time
+                rate = float(self.rate_var.get()) if self.rate_var.get() else 1.0
+                expected_duration = self.bag_duration_seconds / rate + 2.0
+                
+                if elapsed >= expected_duration:
+                    self.log(f"⏱️  Đã phát {elapsed:.1f}s (dự kiến {expected_duration:.1f}s), tự động dừng replay...")
+                    # Tự động dừng replay
+                    if self.replay_process and self.replay_process.poll() is None:
+                        self.replay_process.terminate()
+                        try:
+                            self.replay_process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            self.replay_process.kill()
+                            self.replay_process.wait()
+                    self._handle_replay_finished()
+                    return
+        
+        # Process đã kết thúc hoặc đã được dừng
         if self.replay_process.poll() is not None:
-            exit_code = self.replay_process.poll()
-            if exit_code != 0:
-                self.log(f"✗ Replay đã dừng với exit code: {exit_code}")
-            else:
-                self.log(f"✓ Replay đã hoàn thành")
+            self._handle_replay_finished()
+
+    def _handle_replay_finished(self):
+        """Xử lý khi replay kết thúc"""
+        try:
+            # Đợi một chút để đảm bảo messages cuối cùng được record
+            self.log("⏳ Đợi để đảm bảo tất cả messages đã được record...")
+            time.sleep(2)  # Đợi 2 giây để messages cuối cùng được record
 
             # Dừng record khi replay kết thúc
+            self.log("🛑 Đang dừng record vì replay đã kết thúc...")
             self._stop_record_process()
 
+            self.is_replaying = False
+            self.replay_start_time = None
+            self.bag_duration_seconds = None
+            self.after(0, partial(self._update_replay_stopped))
+        except Exception as e:
+            self.log(f"❌ Lỗi khi xử lý replay finished: {e}")
+            self._stop_record_process()
             self.is_replaying = False
             self.after(0, partial(self._update_replay_stopped))
 
     def _update_replay_stopped(self):
         """Helper function để update UI sau khi replay dừng"""
         try:
-            # Đánh dấu process đã kết thúc
-            self.replay_process = None
+            # Đảm bảo cả replay và record đều đã được dừng
+            if self.replay_process:
+                try:
+                    if self.replay_process.poll() is None:
+                        self.replay_process.terminate()
+                        try:
+                            self.replay_process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            self.replay_process.kill()
+                            self.replay_process.wait()
+                except Exception:
+                    pass
+                self.replay_process = None
+
+            # Đảm bảo record cũng đã được dừng
+            if self.is_recording or self.record_process:
+                self._stop_record_process()
+
+            # Reset state
             self.is_replaying = False
+            self.is_recording = False
+            self.replay_start_time = None
+            self.bag_duration_seconds = None
+
+            # Update UI
             self.start_btn.config(state=tk.NORMAL)
             self.stop_btn.config(state=tk.DISABLED)
             self.status_label.config(
-                text="Trạng thái: Đã dừng",
+                text="Trạng thái: Đã hoàn thành",
                 foreground="green"
             )
             if self.bag_path:
                 bag_name = Path(self.bag_path).name
                 self.info_label.config(
-                    text=f"Replay đã hoàn thành\nBag: {bag_name}"
+                    text=f"Replay đã hoàn thành\nBag: {bag_name}\nRecord đã được dừng tự động"
                 )
                 try:
-                    messagebox.showinfo("Replay hoàn thành", f"Đã phát xong: {bag_name}")
+                    messagebox.showinfo("Replay hoàn thành", f"Đã phát xong: {bag_name}\nRecord đã được dừng tự động")
                 except Exception:
                     pass
+            else:
+                self.info_label.config(text="Replay đã hoàn thành\nRecord đã được dừng")
         except Exception as e:
-            print(f"Lỗi khi update UI: {e}")
+            self.log(f"❌ Lỗi khi update UI: {e}")
+            # Đảm bảo state được reset ngay cả khi có lỗi
+            self.is_replaying = False
+            self.is_recording = False
+            self.replay_process = None
+            self.record_process = None
 
