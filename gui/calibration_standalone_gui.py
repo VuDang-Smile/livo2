@@ -7,6 +7,8 @@ GUI riêng biệt cho Calibration với Converter, Replay và đầy đủ tính
 import threading
 import subprocess
 import json
+import re
+import yaml
 from pathlib import Path
 from datetime import datetime
 import os
@@ -117,6 +119,21 @@ class CalibrationStandaloneGUI(ttk.Frame):
         timestamp = datetime.now().strftime("%H:%M:%S")
         full_message = f"[{timestamp}] {prefix}{message}" if prefix else f"[{timestamp}] {message}"
         self.after(0, partial(self._log_global_impl, full_message))
+
+    def _append_results_text(self, content, clear=False):
+        """Cập nhật ô kết quả theo cách thread-safe"""
+        def _update():
+            try:
+                self.results_text.config(state=tk.NORMAL)
+                if clear:
+                    self.results_text.delete(1.0, tk.END)
+                text_to_insert = content if content.endswith("\n") else f"{content}\n"
+                self.results_text.insert(tk.END, text_to_insert)
+                self.results_text.see(tk.END)
+                self.results_text.config(state=tk.DISABLED)
+            except Exception as exc:
+                print(f"Lỗi khi cập nhật kết quả: {exc}")
+        self.after(0, _update)
     
     def _log_global_impl(self, message):
         """Implementation của log_global (chạy trong main thread)"""
@@ -535,13 +552,6 @@ class CalibrationStandaloneGUI(ttk.Frame):
             style="Accent.TButton"
         )
         self.convert_btn.pack(side=tk.LEFT, padx=10)
-        
-        self.view_calib_btn = ttk.Button(
-            button_frame,
-            text="Xem calib.json",
-            command=self.view_calib_json
-        )
-        self.view_calib_btn.pack(side=tk.LEFT, padx=10)
         
         # Results display
         results_frame = ttk.LabelFrame(parent, text="Kết quả", padding=10)
@@ -1218,56 +1228,140 @@ class CalibrationStandaloneGUI(ttk.Frame):
             messagebox.showerror("Lỗi", f"Không thể đọc file: {e}")
     
     def convert_to_fast_livo2(self):
-        """Convert calib.json sang FAST-LIVO2 format"""
-        calib_json_path = self.calib_json_var.get()
-        
-        if not calib_json_path or not Path(calib_json_path).exists():
-            messagebox.showerror("Lỗi", "Vui lòng chọn file calib.json hợp lệ")
-            return
-        
-        # Sử dụng script conversion đã tạo
-        convert_script = self.workspace_path / "src" / "FAST-LIVO2" / "scripts" / "convert_calib_to_fast_livo2.py"
-        
-        if not convert_script.exists():
-            messagebox.showerror("Lỗi", f"Không tìm thấy script conversion tại: {convert_script}")
-            return
-        
-        output_yaml = self.output_yaml_var.get()
-        if not output_yaml:
-            # Tạo output path mặc định
-            output_yaml = str(Path(calib_json_path).parent / "fast_livo2_calib.yaml")
-            self.output_yaml_var.set(output_yaml)
-        
-        cmd = f"python3 {convert_script} {calib_json_path} --output {output_yaml}"
-        
+        """Load calib từ fast_livo2_calib.yaml, ghi đè Rcl/Pcl và build"""
+        self.convert_btn.config(state=tk.DISABLED)
+        self._append_results_text("=== Bắt đầu convert và build ===", clear=True)
+        self.after(0, lambda: self.status_label.config(text="Trạng thái: Đang convert & build...", foreground="orange"))
+        threading.Thread(target=self._convert_and_build, daemon=True).start()
+
+    def _convert_and_build(self):
         try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                # Đọc kết quả từ output
-                self.results_text.config(state=tk.NORMAL)
-                self.results_text.delete(1.0, tk.END)
-                self.results_text.insert(tk.END, result.stdout)
-                self.results_text.config(state=tk.DISABLED)
-                
-                messagebox.showinfo("Thành công", f"Đã convert thành công!\nKết quả đã lưu tại: {output_yaml}")
-            else:
-                messagebox.showerror("Lỗi", f"Convert thất bại:\n{result.stderr}")
-                self.results_text.config(state=tk.NORMAL)
-                self.results_text.delete(1.0, tk.END)
-                self.results_text.insert(tk.END, result.stderr)
-                self.results_text.config(state=tk.DISABLED)
-                
-        except subprocess.TimeoutExpired:
-            messagebox.showerror("Lỗi", "Convert timeout")
+            calib_path = self.workspace_path / "calibration_data" / "preprocessed" / "fast_livo2_calib.yaml"
+            config_path = self.workspace_path / "src" / "FAST-LIVO2" / "config" / "mid360_equirectangular_stable.yaml"
+            if not calib_path.exists():
+                raise FileNotFoundError(f"Không tìm thấy file calib: {calib_path}")
+            if not config_path.exists():
+                raise FileNotFoundError(f"Không tìm thấy file config: {config_path}")
+
+            rcl_values, pcl_values = self._load_calib_values(calib_path)
+            self._update_mid360_config(config_path, rcl_values, pcl_values)
+            self._append_results_text("✅ Đã ghi đè Rcl/Pcl vào mid360_equirectangular_stable.yaml")
+
+            build_output = self._run_build_script()
+            self._append_results_text(build_output)
+
+            self.after(0, lambda: messagebox.showinfo("Thành công", "Hoàn tất convert và build"))
+            self.after(0, lambda: self.status_label.config(text="Trạng thái: Hoàn tất", foreground="green"))
         except Exception as e:
-            messagebox.showerror("Lỗi", f"Lỗi khi convert: {e}")
+            error_msg = f"Lỗi: {e}"
+            self._append_results_text(error_msg)
+            self.after(0, lambda: messagebox.showerror("Lỗi", error_msg))
+            self.after(0, lambda: self.status_label.config(text="Trạng thái: Lỗi", foreground="red"))
+        finally:
+            self.after(0, lambda: self.convert_btn.config(state=tk.NORMAL))
+
+    def _format_num(self, value):
+        """Định dạng số gọn gàng"""
+        try:
+            return f"{float(value):.8f}".rstrip("0").rstrip(".")
+        except Exception:
+            return str(value)
+
+    def _load_calib_values(self, calib_path: Path):
+        """Đọc Rcl/Pcl từ fast_livo2_calib.yaml"""
+        with open(calib_path, "r") as f:
+            data = yaml.safe_load(f) or {}
+        extrin = data.get("extrin_calib", {})
+        rcl = extrin.get("Rcl")
+        pcl = extrin.get("Pcl")
+        if not rcl or not pcl:
+            raise ValueError("Thiếu Rcl/Pcl trong fast_livo2_calib.yaml")
+        if len(rcl) != 9 or len(pcl) != 3:
+            raise ValueError("Rcl phải có 9 phần tử và Pcl phải có 3 phần tử")
+        return rcl, pcl
+
+    def _update_mid360_config(self, config_path: Path, rcl_values, pcl_values):
+        """Ghi đè block Rcl/Pcl trong file config"""
+        with open(config_path, "r") as f:
+            content = f.read()
+
+        rcl_formatted = [self._format_num(v) for v in rcl_values]
+        pcl_formatted = [self._format_num(v) for v in pcl_values]
+
+        rcl_pattern = r"(?P<indent>\s*)Rcl:\s*\[.*?\n\s*.*?\n\s*.*?\]"
+        pcl_pattern = r"(?P<indent>\s*)Pcl:\s*\[.*?\]"
+        pcl_comment_pattern = r"\n\s*# Pcl: translation vector from lidar to camera"
+
+        rcl_match = re.search(rcl_pattern, content, flags=re.DOTALL)
+        pcl_match = re.search(pcl_pattern, content, flags=re.DOTALL)
+
+        if not rcl_match:
+            raise ValueError("Không tìm thấy block Rcl trong file config")
+        if not pcl_match:
+            raise ValueError("Không tìm thấy Pcl trong file config")
+
+        rcl_indent = rcl_match.group("indent")
+        pcl_indent = pcl_match.group("indent")
+        cont_indent = rcl_indent + "      "  # tăng thêm 6 spaces cho dòng tiếp
+
+        new_rcl_block = (
+            f"{rcl_indent}Rcl: [{rcl_formatted[0]}, {rcl_formatted[1]}, {rcl_formatted[2]},\n"
+            f"{cont_indent}{rcl_formatted[3]}, {rcl_formatted[4]}, {rcl_formatted[5]},\n"
+            f"{cont_indent}{rcl_formatted[6]}, {rcl_formatted[7]}, {rcl_formatted[8]}]"
+        )
+        new_pcl_line = f"{pcl_indent}Pcl: [{pcl_formatted[0]}, {pcl_formatted[1]}, {pcl_formatted[2]}]"
+
+        content = re.sub(rcl_pattern, new_rcl_block, content, count=1, flags=re.DOTALL)
+        content = re.sub(pcl_pattern, new_pcl_line, content, count=1, flags=re.DOTALL)
+        content = re.sub(pcl_comment_pattern, f"\n{pcl_indent}# Pcl: translation vector from lidar to camera", content, count=1)
+        # Loại bỏ dòng trống giữa Rcl và Pcl
+        content = re.sub(
+            r"\]\n\s*\n(\s*# Pcl: translation vector from lidar to camera)",
+            r"]\n\1",
+            content,
+            count=1
+        )
+        # Loại bỏ dòng trống sau Pcl (trước key kế tiếp)
+        content = re.sub(
+            r"(Pcl:\s*\[.*?\])\n\s*\n",
+            r"\1\n",
+            content,
+            count=1,
+            flags=re.DOTALL
+        )
+
+        with open(config_path, "w") as f:
+            f.write(content)
+
+    def _run_build_script(self):
+        """Chạy build.sh và trả về log"""
+        build_script = self.workspace_path.parent / "build.sh"
+        if not build_script.exists():
+            raise FileNotFoundError(f"Không tìm thấy build.sh tại: {build_script}")
+
+        cmd = f"cd {build_script.parent} && printf '\\n' | bash {build_script.name}"
+        self._append_results_text(f"▶️ Running: {cmd}")
+
+        process = subprocess.Popen(
+            cmd,
+            shell=True,
+            executable="/bin/bash",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+
+        logs = []
+        if process.stdout:
+            for line in process.stdout:
+                line = line.rstrip("\n")
+                logs.append(line)
+                self._append_results_text(line)
+
+        return_code = process.wait()
+        summary = f"✅ Build thành công" if return_code == 0 else f"❌ Build thất bại (exit {return_code})"
+        return "\n".join(logs + [summary])
     
     def start_converter(self):
         """Tự động khởi động Converter khi mở GUI"""

@@ -15,12 +15,13 @@
                     0.0, 0.0, 1.0]
       # Calibration from direct_visual_lidar_calibration
       # Rcl: rotation matrix from lidar to camera (row-major)
-      Rcl: [-0.04835443, -0.98813994, -0.14574395,
-            -0.00736797, 0.14626354, -0.98921822,
-            0.99880306, -0.04675925, -0.01435308]
-      # Pcl: translation vector from lidar to camera
-      Pcl: [0.02371284, 0.12586664, 0.08098288]
+      Rcl: [-0.2071503, -0.7731721, -0.5994111,
 
+            0.83236711, 0.18265464, -0.52326119,
+
+            0.51405617, -0.60732379, 0.60572607]
+      # Pcl: translation vector from lidar to camera
+      Pcl: [-0.05380482, -0.1009862, 0.12567473]
     time_offset: 
       # Adjusted for better IMU-LiDAR synchronization
       # If IMU is ahead of LiDAR, use negative value
@@ -68,7 +69,6 @@
       max_layer: 2  # Keep at 2 to avoid excessive memory usage
       max_points_num: 50  # Reduced from default to save memory
       layer_init_num: [5, 5, 5, 5, 5]
-
     local_map:  
       map_sliding_en: true  # CRITICAL: Must be enabled for memory management
       half_map_size: 60  # REDUCED from 90 to significantly reduce memory usage (40% reduction)
