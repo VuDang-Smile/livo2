@@ -1236,10 +1236,43 @@ class CalibrationStandaloneGUI(ttk.Frame):
 
     def _convert_and_build(self):
         try:
-            calib_path = self.workspace_path / "calibration_data" / "preprocessed" / "fast_livo2_calib.yaml"
+            preprocessed_dir = self.workspace_path / "calibration_data" / "preprocessed"
+            calib_path = preprocessed_dir / "fast_livo2_calib.yaml"
+            calib_json_path = preprocessed_dir / "calib.json"
             config_path = self.workspace_path / "src" / "FAST-LIVO2" / "config" / "mid360_equirectangular_stable.yaml"
+            
+            # Kiểm tra và convert từ calib.json nếu fast_livo2_calib.yaml chưa tồn tại
             if not calib_path.exists():
-                raise FileNotFoundError(f"Không tìm thấy file calib: {calib_path}")
+                self._append_results_text(f"⚠️  Không tìm thấy file fast_livo2_calib.yaml, đang tìm calib.json để convert...")
+                
+                if not calib_json_path.exists():
+                    raise FileNotFoundError(
+                        f"Không tìm thấy file calib.json tại: {calib_json_path}\n"
+                        f"Vui lòng chạy calibration trước để tạo file calib.json"
+                    )
+                
+                # Tự động convert từ calib.json sang fast_livo2_calib.yaml
+                convert_script = self.workspace_path / "src" / "FAST-LIVO2" / "scripts" / "convert_calib_to_fast_livo2.py"
+                if not convert_script.exists():
+                    raise FileNotFoundError(f"Không tìm thấy script conversion tại: {convert_script}")
+                
+                self._append_results_text(f"🔄 Đang convert từ calib.json sang fast_livo2_calib.yaml...")
+                cmd = f"python3 {convert_script} {calib_json_path} --output {calib_path}"
+                
+                result = subprocess.run(
+                    cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                
+                if result.returncode != 0:
+                    raise RuntimeError(f"Convert thất bại:\n{result.stderr}")
+                
+                self._append_results_text(f"✅ Đã convert thành công: {calib_path}")
+                self._append_results_text(result.stdout)
+            
             if not config_path.exists():
                 raise FileNotFoundError(f"Không tìm thấy file config: {config_path}")
 

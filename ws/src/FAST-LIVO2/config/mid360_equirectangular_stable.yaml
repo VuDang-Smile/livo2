@@ -15,13 +15,13 @@
                     0.0, 0.0, 1.0]
       # Calibration from direct_visual_lidar_calibration
       # Rcl: rotation matrix from lidar to camera (row-major)
-      Rcl: [-0.2071503, -0.7731721, -0.5994111,
+      Rcl: [-0.45731348, -0.79715328, -0.39422205,
 
-            0.83236711, 0.18265464, -0.52326119,
+            0.11961245, 0.38412866, -0.91549879,
 
-            0.51405617, -0.60732379, 0.60572607]
+            0.88122485, -0.4658238, -0.08031775]
       # Pcl: translation vector from lidar to camera
-      Pcl: [-0.05380482, -0.1009862, 0.12567473]
+      Pcl: [-0.03360329, -0.23075573, 0.06867821]
     time_offset: 
       # Adjusted for better IMU-LiDAR synchronization
       # If IMU is ahead of LiDAR, use negative value
