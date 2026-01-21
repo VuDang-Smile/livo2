@@ -35,3 +35,7 @@ dependencies/HBA/build_standalone/**
 **/*.pyo
 **/*.pyd
 .Python
+
+# ImGui config files
+imgui.ini
+**/imgui.ini
