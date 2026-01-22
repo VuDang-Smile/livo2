@@ -12,25 +12,35 @@ import yaml
 from pathlib import Path
 from datetime import datetime
 import os
+import sys
 from functools import partial
+
+# Thêm project root vào sys.path để có thể import các module
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 try:
     import tkinter as tk
     from tkinter import ttk, messagebox, scrolledtext, filedialog
 except ImportError as e:
     print(f"Lỗi import: {e}")
-    import sys
     sys.exit(1)
 
 # Import các tabs
 from replay_calibration_tab import ReplayCalibrationTab
+from languages.translate_engine import Translator
 
 
 class CalibrationStandaloneGUI(ttk.Frame):
     """GUI chính cho Calibration Standalone với Notebook chứa Converter, Replay và Calibration tabs"""
     
-    def __init__(self, parent):
+    def __init__(self, parent, translator=None):
         super().__init__(parent)
+        
+        # Translator for multi-language support
+        self.translator = translator if translator else Translator('en')
+        self.current_lang = self.translator.lang_code
         
         self.workspace_path = Path(__file__).parent.parent / "ws"
         self.drive_ws_path = Path(__file__).parent.parent / "dependencies" / "drive_ws"
@@ -66,53 +76,177 @@ class CalibrationStandaloneGUI(ttk.Frame):
         """Tạo các widgets cho GUI"""
         
         # Title
-        title_label = ttk.Label(
+        self.title_label = ttk.Label(
             self,
-            text="Calibration Standalone GUI",
+            text=self.translator.get("title.calibration_standalone_gui", "Calibration Standalone GUI"),
             font=("Arial", 18, "bold")
         )
-        title_label.pack(pady=10)
+        self.title_label.pack(pady=10)
         
         # Main container với notebook để chia thành các tabs
-        notebook = ttk.Notebook(self)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Tab 0: Replay Calibration
-        replay_calib_frame = ttk.Frame(notebook)
-        notebook.add(replay_calib_frame, text="Replay Calibration")
-        self.replay_calibration_tab = ReplayCalibrationTab(replay_calib_frame)
+        replay_calib_frame = ttk.Frame(self.notebook)
+        self.notebook.add(replay_calib_frame, text=self.translator.get("tab.replay_calibration", "Replay Calibration"))
+        self.replay_calibration_tab = ReplayCalibrationTab(replay_calib_frame, translator=self.translator)
         self.replay_calibration_tab.pack(fill=tk.BOTH, expand=True)
 
         # Tab 1: Preprocessing
-        preprocess_frame = ttk.Frame(notebook)
-        notebook.add(preprocess_frame, text="Preprocessing")
+        preprocess_frame = ttk.Frame(self.notebook)
+        self.notebook.add(preprocess_frame, text=self.translator.get("tab.preprocessing", "Preprocessing"))
         self.create_preprocess_tab(preprocess_frame)
         
         # Tab 2: Initial Guess
-        initial_guess_frame = ttk.Frame(notebook)
-        notebook.add(initial_guess_frame, text="Initial Guess")
+        initial_guess_frame = ttk.Frame(self.notebook)
+        self.notebook.add(initial_guess_frame, text=self.translator.get("tab.initial_guess", "Initial Guess"))
         self.create_initial_guess_tab(initial_guess_frame)
         
         # Tab 3: Calibration
-        calibrate_frame = ttk.Frame(notebook)
-        notebook.add(calibrate_frame, text="Calibration")
+        calibrate_frame = ttk.Frame(self.notebook)
+        self.notebook.add(calibrate_frame, text=self.translator.get("tab.calibration", "Calibration"))
         self.create_calibrate_tab(calibrate_frame)
         
         # Tab 4: Export Results
-        export_frame = ttk.Frame(notebook)
-        notebook.add(export_frame, text="Export Results")
+        export_frame = ttk.Frame(self.notebook)
+        self.notebook.add(export_frame, text=self.translator.get("tab.export_results", "Export Results"))
         self.create_export_tab(export_frame)
         
         # Status bar
         self.status_label = ttk.Label(
             self,
-            text="Trạng thái: Sẵn sàng",
+            text=self.translator.get("status.ready", "Status: Ready"),
             font=("Arial", 10)
         )
         self.status_label.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=5)
         
         # Bỏ Log Tổng UI theo yêu cầu; vẫn giữ biến để tránh lỗi tham chiếu
         self.global_log = None
+    
+    def update_ui_texts(self):
+        """Update all UI texts based on current language"""
+        # Update title
+        if hasattr(self, 'title_label'):
+            self.title_label.config(text=self.translator.get("title.calibration_standalone_gui", "Calibration Standalone GUI"))
+        
+        # Update status label
+        if hasattr(self, 'status_label'):
+            # Keep current status text if it's a dynamic status, otherwise set to ready
+            current_text = self.status_label.cget("text")
+            if "Ready" in current_text or "Sẵn sàng" in current_text:
+                self.status_label.config(text=self.translator.get("status.ready", "Status: Ready"))
+        
+        # Update notebook tabs
+        if hasattr(self, 'notebook'):
+            try:
+                self.notebook.tab(0, text=self.translator.get("tab.replay_calibration", "Replay Calibration"))
+                self.notebook.tab(1, text=self.translator.get("tab.preprocessing", "Preprocessing"))
+                self.notebook.tab(2, text=self.translator.get("tab.initial_guess", "Initial Guess"))
+                self.notebook.tab(3, text=self.translator.get("tab.calibration", "Calibration"))
+                self.notebook.tab(4, text=self.translator.get("tab.export_results", "Export Results"))
+            except:
+                pass
+        
+        # Update preprocess tab
+        if hasattr(self, 'preprocess_instructions'):
+            self.preprocess_instructions.config(text=self.translator.get("calibration.preprocess_instructions", "Preprocessing dữ liệu từ rosbag để chuẩn bị cho calibration (equirectangular camera)"))
+        if hasattr(self, 'preprocess_input_label'):
+            self.preprocess_input_label.config(text=self.translator.get("calibration.label.bags_directory", "Thư mục bags:"))
+        if hasattr(self, 'preprocess_output_label'):
+            self.preprocess_output_label.config(text=self.translator.get("calibration.label.output_directory", "Thư mục output:"))
+        if hasattr(self, 'browse_preprocess_input_btn'):
+            self.browse_preprocess_input_btn.config(text=self.translator.get("button.browse", "Browse"))
+        if hasattr(self, 'browse_preprocess_output_btn'):
+            self.browse_preprocess_output_btn.config(text=self.translator.get("button.browse", "Browse"))
+        if hasattr(self, 'camera_model_frame'):
+            self.camera_model_frame.config(text=self.translator.get("calibration.label.camera_model", "Camera Model"))
+        if hasattr(self, 'camera_model_label'):
+            self.camera_model_label.config(text=self.translator.get("calibration.label.select_camera_model", "Select camera projection model:"))
+        if hasattr(self, 'camera_model_equirectangular'):
+            self.camera_model_equirectangular.config(text=self.translator.get("calibration.camera_model.equirectangular", "Equirectangular (default for 360° cameras)"))
+        if hasattr(self, 'camera_model_auto'):
+            self.camera_model_auto.config(text=self.translator.get("calibration.camera_model.auto", "Auto-detect from camera_info topic"))
+        if hasattr(self, 'camera_model_plumb_bob'):
+            self.camera_model_plumb_bob.config(text=self.translator.get("calibration.camera_model.plumb_bob", "Plumb Bob (pinhole with radial/tangential distortion)"))
+        if hasattr(self, 'camera_model_fisheye'):
+            self.camera_model_fisheye.config(text=self.translator.get("calibration.camera_model.fisheye", "Fisheye (equidistant)"))
+        if hasattr(self, 'camera_model_omnidir'):
+            self.camera_model_omnidir.config(text=self.translator.get("calibration.camera_model.omnidir", "Omnidirectional"))
+        if hasattr(self, 'preprocess_options_frame'):
+            self.preprocess_options_frame.config(text=self.translator.get("calibration.label.options", "Options"))
+        if hasattr(self, 'auto_topic_check'):
+            self.auto_topic_check.config(text=self.translator.get("calibration.option.auto_detect_topics", "Auto-detect topics (-a)"))
+        if hasattr(self, 'dynamic_lidar_check'):
+            self.dynamic_lidar_check.config(text=self.translator.get("calibration.option.dynamic_lidar", "Dynamic LiDAR integration (-d) - cho spinning LiDAR"))
+        if hasattr(self, 'visualize_check'):
+            self.visualize_check.config(text=self.translator.get("calibration.option.visualize", "Visualize (-v)"))
+        if hasattr(self, 'preprocess_btn'):
+            self.preprocess_btn.config(text=self.translator.get("calibration.button.run_preprocessing", "Chạy Preprocessing"))
+        if hasattr(self, 'preprocess_log_frame'):
+            self.preprocess_log_frame.config(text=self.translator.get("label.log", "Log"))
+        
+        # Update initial guess tab
+        if hasattr(self, 'initial_guess_instructions'):
+            self.initial_guess_instructions.config(text=self.translator.get("calibration.initial_guess_instructions", "Tạo initial guess cho calibration (manual hoặc automatic)"))
+        if hasattr(self, 'initial_guess_dir_label'):
+            self.initial_guess_dir_label.config(text=self.translator.get("calibration.label.preprocessed_directory", "Thư mục preprocessed:"))
+        if hasattr(self, 'browse_initial_guess_btn'):
+            self.browse_initial_guess_btn.config(text=self.translator.get("button.browse", "Browse"))
+        if hasattr(self, 'initial_guess_mode_frame'):
+            self.initial_guess_mode_frame.config(text=self.translator.get("calibration.label.mode", "Mode"))
+        if hasattr(self, 'initial_guess_manual_radio'):
+            self.initial_guess_manual_radio.config(text=self.translator.get("calibration.mode.manual", "Manual - Chọn correspondences thủ công"))
+        if hasattr(self, 'initial_guess_auto_radio'):
+            self.initial_guess_auto_radio.config(text=self.translator.get("calibration.mode.automatic", "Automatic - Sử dụng SuperGlue (cần license)"))
+        if hasattr(self, 'initial_guess_btn'):
+            self.initial_guess_btn.config(text=self.translator.get("calibration.button.run_initial_guess", "Chạy Initial Guess"))
+        if hasattr(self, 'initial_guess_log_frame'):
+            self.initial_guess_log_frame.config(text=self.translator.get("label.log", "Log"))
+        
+        # Update calibrate tab
+        if hasattr(self, 'calibrate_instructions'):
+            self.calibrate_instructions.config(text=self.translator.get("calibration.calibrate_instructions", "Chạy fine registration để tinh chỉnh calibration"))
+        if hasattr(self, 'calibrate_dir_label'):
+            self.calibrate_dir_label.config(text=self.translator.get("calibration.label.preprocessed_directory", "Thư mục preprocessed:"))
+        if hasattr(self, 'browse_calibrate_btn'):
+            self.browse_calibrate_btn.config(text=self.translator.get("button.browse", "Browse"))
+        if hasattr(self, 'calibrate_options_frame'):
+            self.calibrate_options_frame.config(text=self.translator.get("calibration.label.options", "Options"))
+        if hasattr(self, 'auto_quit_check'):
+            self.auto_quit_check.config(text=self.translator.get("calibration.option.auto_quit", "Auto quit sau khi calibration xong (khuyến nghị)"))
+        if hasattr(self, 'background_check'):
+            self.background_check.config(text=self.translator.get("calibration.option.background", "Chạy background (không hiển thị viewer) - khuyến nghị"))
+        if hasattr(self, 'registration_type_label'):
+            self.registration_type_label.config(text=self.translator.get("calibration.label.registration_type", "Registration type:"))
+        if hasattr(self, 'registration_nid_bfgs'):
+            self.registration_nid_bfgs.config(text=self.translator.get("calibration.registration_type.nid_bfgs", "NID-BFGS (nhanh hơn, khuyến nghị)"))
+        if hasattr(self, 'registration_nid_nelder_mead'):
+            self.registration_nid_nelder_mead.config(text=self.translator.get("calibration.registration_type.nid_nelder_mead", "NID-Nelder-Mead (chậm hơn nhưng ổn định hơn)"))
+        if hasattr(self, 'calibrate_btn'):
+            self.calibrate_btn.config(text=self.translator.get("calibration.button.run_calibration", "Chạy Calibration"))
+        if hasattr(self, 'stop_calibrate_btn'):
+            self.stop_calibrate_btn.config(text=self.translator.get("calibration.button.stop_calibration", "Dừng Calibration"))
+        if hasattr(self, 'calibrate_log_frame'):
+            self.calibrate_log_frame.config(text=self.translator.get("label.log", "Log"))
+        
+        # Update export tab
+        if hasattr(self, 'export_instructions'):
+            self.export_instructions.config(text=self.translator.get("calibration.export_instructions", "Export và convert kết quả calibration sang format FAST-LIVO2"))
+        if hasattr(self, 'calib_json_label'):
+            self.calib_json_label.config(text=self.translator.get("calibration.label.calib_json_file", "File calib.json:"))
+        if hasattr(self, 'browse_calib_btn'):
+            self.browse_calib_btn.config(text=self.translator.get("button.browse", "Browse"))
+        if hasattr(self, 'output_yaml_label'):
+            self.output_yaml_label.config(text=self.translator.get("calibration.label.output_yaml", "Output YAML:"))
+        if hasattr(self, 'convert_btn'):
+            self.convert_btn.config(text=self.translator.get("calibration.button.convert_to_fast_livo2", "Convert sang FAST-LIVO2"))
+        if hasattr(self, 'results_frame'):
+            self.results_frame.config(text=self.translator.get("calibration.label.results", "Kết quả"))
+        
+        # Update ReplayCalibrationTab texts if it exists
+        if hasattr(self, 'replay_calibration_tab') and hasattr(self.replay_calibration_tab, 'update_ui_texts'):
+            self.replay_calibration_tab.update_ui_texts()
     
     def log_global(self, message, prefix=""):
         """Log message vào log tổng (thread-safe)"""
@@ -204,119 +338,130 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def create_preprocess_tab(self, parent):
         """Tạo tab preprocessing"""
         # Instructions
-        instructions = ttk.Label(
+        self.preprocess_instructions = ttk.Label(
             parent,
-            text="Preprocessing dữ liệu từ rosbag để chuẩn bị cho calibration (equirectangular camera)",
+            text=self.translator.get("calibration.preprocess_instructions", "Preprocessing dữ liệu từ rosbag để chuẩn bị cho calibration (equirectangular camera)"),
             font=("Arial", 10)
         )
-        instructions.pack(pady=10)
+        self.preprocess_instructions.pack(pady=10)
         
         # Input bag directory
         input_frame = ttk.Frame(parent)
         input_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        ttk.Label(input_frame, text="Thư mục bags:").pack(side=tk.LEFT, padx=5)
+        self.preprocess_input_label = ttk.Label(input_frame, text=self.translator.get("calibration.label.bags_directory", "Thư mục bags:"))
+        self.preprocess_input_label.pack(side=tk.LEFT, padx=5)
         self.preprocess_input_var = tk.StringVar()
         input_entry = ttk.Entry(input_frame, textvariable=self.preprocess_input_var, width=50)
         input_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
-        browse_input_btn = ttk.Button(
+        self.browse_preprocess_input_btn = ttk.Button(
             input_frame,
-            text="Browse",
+            text=self.translator.get("button.browse", "Browse"),
             command=self.browse_preprocess_input
         )
-        browse_input_btn.pack(side=tk.LEFT, padx=5)
+        self.browse_preprocess_input_btn.pack(side=tk.LEFT, padx=5)
         
         # Output preprocessed directory
         output_frame = ttk.Frame(parent)
         output_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        ttk.Label(output_frame, text="Thư mục output:").pack(side=tk.LEFT, padx=5)
+        self.preprocess_output_label = ttk.Label(output_frame, text=self.translator.get("calibration.label.output_directory", "Thư mục output:"))
+        self.preprocess_output_label.pack(side=tk.LEFT, padx=5)
         self.preprocess_output_var = tk.StringVar(value=str(self.workspace_path / "calibration_data" / "preprocessed"))
         output_entry = ttk.Entry(output_frame, textvariable=self.preprocess_output_var, width=50)
         output_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
-        browse_output_btn = ttk.Button(
+        self.browse_preprocess_output_btn = ttk.Button(
             output_frame,
-            text="Browse",
+            text=self.translator.get("button.browse", "Browse"),
             command=self.browse_preprocess_output
         )
-        browse_output_btn.pack(side=tk.LEFT, padx=5)
+        self.browse_preprocess_output_btn.pack(side=tk.LEFT, padx=5)
         
         # Camera model selection
-        camera_model_frame = ttk.LabelFrame(parent, text="Camera Model", padding=10)
-        camera_model_frame.pack(fill=tk.X, padx=20, pady=10)
+        self.camera_model_frame = ttk.LabelFrame(parent, text=self.translator.get("calibration.label.camera_model", "Camera Model"), padding=10)
+        self.camera_model_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        ttk.Label(
-            camera_model_frame,
-            text="Select camera projection model:",
+        self.camera_model_label = ttk.Label(
+            self.camera_model_frame,
+            text=self.translator.get("calibration.label.select_camera_model", "Select camera projection model:"),
             font=("Arial", 9)
-        ).pack(anchor=tk.W, pady=(0, 5))
+        )
+        self.camera_model_label.pack(anchor=tk.W, pady=(0, 5))
         
-        model_selection_frame = ttk.Frame(camera_model_frame)
+        model_selection_frame = ttk.Frame(self.camera_model_frame)
         model_selection_frame.pack(fill=tk.X)
         
         self.camera_model_var = tk.StringVar(value="equirectangular")
         
-        ttk.Radiobutton(
+        self.camera_model_equirectangular = ttk.Radiobutton(
             model_selection_frame,
-            text="Equirectangular (default for 360° cameras)",
+            text=self.translator.get("calibration.camera_model.equirectangular", "Equirectangular (default for 360° cameras)"),
             variable=self.camera_model_var,
             value="equirectangular"
-        ).pack(anchor=tk.W, pady=2)
+        )
+        self.camera_model_equirectangular.pack(anchor=tk.W, pady=2)
         
-        ttk.Radiobutton(
+        self.camera_model_auto = ttk.Radiobutton(
             model_selection_frame,
-            text="Auto-detect from camera_info topic",
+            text=self.translator.get("calibration.camera_model.auto", "Auto-detect from camera_info topic"),
             variable=self.camera_model_var,
             value="auto"
-        ).pack(anchor=tk.W, pady=2)
+        )
+        self.camera_model_auto.pack(anchor=tk.W, pady=2)
         
-        ttk.Radiobutton(
+        self.camera_model_plumb_bob = ttk.Radiobutton(
             model_selection_frame,
-            text="Plumb Bob (pinhole with radial/tangential distortion)",
+            text=self.translator.get("calibration.camera_model.plumb_bob", "Plumb Bob (pinhole with radial/tangential distortion)"),
             variable=self.camera_model_var,
             value="plumb_bob"
-        ).pack(anchor=tk.W, pady=2)
+        )
+        self.camera_model_plumb_bob.pack(anchor=tk.W, pady=2)
         
-        ttk.Radiobutton(
+        self.camera_model_fisheye = ttk.Radiobutton(
             model_selection_frame,
-            text="Fisheye (equidistant)",
+            text=self.translator.get("calibration.camera_model.fisheye", "Fisheye (equidistant)"),
             variable=self.camera_model_var,
             value="fisheye"
-        ).pack(anchor=tk.W, pady=2)
+        )
+        self.camera_model_fisheye.pack(anchor=tk.W, pady=2)
         
-        ttk.Radiobutton(
+        self.camera_model_omnidir = ttk.Radiobutton(
             model_selection_frame,
-            text="Omnidirectional",
+            text=self.translator.get("calibration.camera_model.omnidir", "Omnidirectional"),
             variable=self.camera_model_var,
             value="omnidir"
-        ).pack(anchor=tk.W, pady=2)
+        )
+        self.camera_model_omnidir.pack(anchor=tk.W, pady=2)
         
         # Options
-        options_frame = ttk.LabelFrame(parent, text="Options", padding=10)
-        options_frame.pack(fill=tk.X, padx=20, pady=10)
+        self.preprocess_options_frame = ttk.LabelFrame(parent, text=self.translator.get("calibration.label.options", "Options"), padding=10)
+        self.preprocess_options_frame.pack(fill=tk.X, padx=20, pady=10)
         
         self.auto_topic_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            options_frame,
-            text="Auto-detect topics (-a)",
+        self.auto_topic_check = ttk.Checkbutton(
+            self.preprocess_options_frame,
+            text=self.translator.get("calibration.option.auto_detect_topics", "Auto-detect topics (-a)"),
             variable=self.auto_topic_var
-        ).pack(anchor=tk.W)
+        )
+        self.auto_topic_check.pack(anchor=tk.W)
         
         self.dynamic_lidar_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            options_frame,
-            text="Dynamic LiDAR integration (-d) - cho spinning LiDAR",
+        self.dynamic_lidar_check = ttk.Checkbutton(
+            self.preprocess_options_frame,
+            text=self.translator.get("calibration.option.dynamic_lidar", "Dynamic LiDAR integration (-d) - cho spinning LiDAR"),
             variable=self.dynamic_lidar_var
-        ).pack(anchor=tk.W)
+        )
+        self.dynamic_lidar_check.pack(anchor=tk.W)
         
         self.visualize_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            options_frame,
-            text="Visualize (-v)",
+        self.visualize_check = ttk.Checkbutton(
+            self.preprocess_options_frame,
+            text=self.translator.get("calibration.option.visualize", "Visualize (-v)"),
             variable=self.visualize_var
-        ).pack(anchor=tk.W)
+        )
+        self.visualize_check.pack(anchor=tk.W)
         
         # Preprocess button
         button_frame = ttk.Frame(parent)
@@ -324,18 +469,18 @@ class CalibrationStandaloneGUI(ttk.Frame):
         
         self.preprocess_btn = ttk.Button(
             button_frame,
-            text="Chạy Preprocessing",
+            text=self.translator.get("calibration.button.run_preprocessing", "Chạy Preprocessing"),
             command=self.start_preprocess,
             style="Accent.TButton"
         )
         self.preprocess_btn.pack(side=tk.LEFT, padx=10)
         
         # Log
-        log_frame = ttk.LabelFrame(parent, text="Log", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        self.preprocess_log_frame = ttk.LabelFrame(parent, text=self.translator.get("label.log", "Log"), padding=10)
+        self.preprocess_log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
         self.preprocess_log = scrolledtext.ScrolledText(
-            log_frame,
+            self.preprocess_log_frame,
             height=8,
             wrap=tk.WORD,
             state=tk.DISABLED
@@ -345,48 +490,51 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def create_initial_guess_tab(self, parent):
         """Tạo tab initial guess"""
         # Instructions
-        instructions = ttk.Label(
+        self.initial_guess_instructions = ttk.Label(
             parent,
-            text="Tạo initial guess cho calibration (manual hoặc automatic)",
+            text=self.translator.get("calibration.initial_guess_instructions", "Tạo initial guess cho calibration (manual hoặc automatic)"),
             font=("Arial", 10)
         )
-        instructions.pack(pady=10)
+        self.initial_guess_instructions.pack(pady=10)
         
         # Preprocessed directory
         dir_frame = ttk.Frame(parent)
         dir_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        ttk.Label(dir_frame, text="Thư mục preprocessed:").pack(side=tk.LEFT, padx=5)
+        self.initial_guess_dir_label = ttk.Label(dir_frame, text=self.translator.get("calibration.label.preprocessed_directory", "Thư mục preprocessed:"))
+        self.initial_guess_dir_label.pack(side=tk.LEFT, padx=5)
         self.initial_guess_dir_var = tk.StringVar()
         dir_entry = ttk.Entry(dir_frame, textvariable=self.initial_guess_dir_var, width=50)
         dir_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
-        browse_btn = ttk.Button(
+        self.browse_initial_guess_btn = ttk.Button(
             dir_frame,
-            text="Browse",
+            text=self.translator.get("button.browse", "Browse"),
             command=self.browse_initial_guess_dir
         )
-        browse_btn.pack(side=tk.LEFT, padx=5)
+        self.browse_initial_guess_btn.pack(side=tk.LEFT, padx=5)
         
         # Mode selection
-        mode_frame = ttk.LabelFrame(parent, text="Mode", padding=10)
-        mode_frame.pack(fill=tk.X, padx=20, pady=10)
+        self.initial_guess_mode_frame = ttk.LabelFrame(parent, text=self.translator.get("calibration.label.mode", "Mode"), padding=10)
+        self.initial_guess_mode_frame.pack(fill=tk.X, padx=20, pady=10)
         
         self.initial_guess_mode = tk.StringVar(value="manual")
         
-        ttk.Radiobutton(
-            mode_frame,
-            text="Manual - Chọn correspondences thủ công",
+        self.initial_guess_manual_radio = ttk.Radiobutton(
+            self.initial_guess_mode_frame,
+            text=self.translator.get("calibration.mode.manual", "Manual - Chọn correspondences thủ công"),
             variable=self.initial_guess_mode,
             value="manual"
-        ).pack(anchor=tk.W, pady=5)
+        )
+        self.initial_guess_manual_radio.pack(anchor=tk.W, pady=5)
         
-        ttk.Radiobutton(
-            mode_frame,
-            text="Automatic - Sử dụng SuperGlue (cần license)",
+        self.initial_guess_auto_radio = ttk.Radiobutton(
+            self.initial_guess_mode_frame,
+            text=self.translator.get("calibration.mode.automatic", "Automatic - Sử dụng SuperGlue (cần license)"),
             variable=self.initial_guess_mode,
             value="auto"
-        ).pack(anchor=tk.W, pady=5)
+        )
+        self.initial_guess_auto_radio.pack(anchor=tk.W, pady=5)
         
         # Buttons
         button_frame = ttk.Frame(parent)
@@ -394,18 +542,18 @@ class CalibrationStandaloneGUI(ttk.Frame):
         
         self.initial_guess_btn = ttk.Button(
             button_frame,
-            text="Chạy Initial Guess",
+            text=self.translator.get("calibration.button.run_initial_guess", "Chạy Initial Guess"),
             command=self.start_initial_guess,
             style="Accent.TButton"
         )
         self.initial_guess_btn.pack(side=tk.LEFT, padx=10)
         
         # Log
-        log_frame = ttk.LabelFrame(parent, text="Log", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        self.initial_guess_log_frame = ttk.LabelFrame(parent, text=self.translator.get("label.log", "Log"), padding=10)
+        self.initial_guess_log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
         self.initial_guess_log = scrolledtext.ScrolledText(
-            log_frame,
+            self.initial_guess_log_frame,
             height=8,
             wrap=tk.WORD,
             state=tk.DISABLED
@@ -415,64 +563,70 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def create_calibrate_tab(self, parent):
         """Tạo tab calibration"""
         # Instructions
-        instructions = ttk.Label(
+        self.calibrate_instructions = ttk.Label(
             parent,
-            text="Chạy fine registration để tinh chỉnh calibration",
+            text=self.translator.get("calibration.calibrate_instructions", "Chạy fine registration để tinh chỉnh calibration"),
             font=("Arial", 10)
         )
-        instructions.pack(pady=10)
+        self.calibrate_instructions.pack(pady=10)
         
         # Preprocessed directory
         dir_frame = ttk.Frame(parent)
         dir_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        ttk.Label(dir_frame, text="Thư mục preprocessed:").pack(side=tk.LEFT, padx=5)
+        self.calibrate_dir_label = ttk.Label(dir_frame, text=self.translator.get("calibration.label.preprocessed_directory", "Thư mục preprocessed:"))
+        self.calibrate_dir_label.pack(side=tk.LEFT, padx=5)
         self.calibrate_dir_var = tk.StringVar()
         dir_entry = ttk.Entry(dir_frame, textvariable=self.calibrate_dir_var, width=50)
         dir_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
-        browse_btn = ttk.Button(
+        self.browse_calibrate_btn = ttk.Button(
             dir_frame,
-            text="Browse",
+            text=self.translator.get("button.browse", "Browse"),
             command=self.browse_calibrate_dir
         )
-        browse_btn.pack(side=tk.LEFT, padx=5)
+        self.browse_calibrate_btn.pack(side=tk.LEFT, padx=5)
         
         # Options
-        options_frame = ttk.LabelFrame(parent, text="Options", padding=10)
-        options_frame.pack(fill=tk.X, padx=20, pady=10)
+        self.calibrate_options_frame = ttk.LabelFrame(parent, text=self.translator.get("calibration.label.options", "Options"), padding=10)
+        self.calibrate_options_frame.pack(fill=tk.X, padx=20, pady=10)
         
         self.auto_quit_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            options_frame,
-            text="Auto quit sau khi calibration xong (khuyến nghị)",
+        self.auto_quit_check = ttk.Checkbutton(
+            self.calibrate_options_frame,
+            text=self.translator.get("calibration.option.auto_quit", "Auto quit sau khi calibration xong (khuyến nghị)"),
             variable=self.auto_quit_var
-        ).pack(anchor=tk.W)
+        )
+        self.auto_quit_check.pack(anchor=tk.W)
         
         self.background_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            options_frame,
-            text="Chạy background (không hiển thị viewer) - khuyến nghị",
+        self.background_check = ttk.Checkbutton(
+            self.calibrate_options_frame,
+            text=self.translator.get("calibration.option.background", "Chạy background (không hiển thị viewer) - khuyến nghị"),
             variable=self.background_var
-        ).pack(anchor=tk.W)
+        )
+        self.background_check.pack(anchor=tk.W)
         
         # Registration type
-        reg_frame = ttk.Frame(options_frame)
+        reg_frame = ttk.Frame(self.calibrate_options_frame)
         reg_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(reg_frame, text="Registration type:").pack(side=tk.LEFT, padx=5)
+        self.registration_type_label = ttk.Label(reg_frame, text=self.translator.get("calibration.label.registration_type", "Registration type:"))
+        self.registration_type_label.pack(side=tk.LEFT, padx=5)
         self.registration_type_var = tk.StringVar(value="nid_bfgs")
-        ttk.Radiobutton(
+        self.registration_nid_bfgs = ttk.Radiobutton(
             reg_frame,
-            text="NID-BFGS (nhanh hơn, khuyến nghị)",
+            text=self.translator.get("calibration.registration_type.nid_bfgs", "NID-BFGS (nhanh hơn, khuyến nghị)"),
             variable=self.registration_type_var,
             value="nid_bfgs"
-        ).pack(side=tk.LEFT, padx=5)
-        ttk.Radiobutton(
+        )
+        self.registration_nid_bfgs.pack(side=tk.LEFT, padx=5)
+        self.registration_nid_nelder_mead = ttk.Radiobutton(
             reg_frame,
-            text="NID-Nelder-Mead (chậm hơn nhưng ổn định hơn)",
+            text=self.translator.get("calibration.registration_type.nid_nelder_mead", "NID-Nelder-Mead (chậm hơn nhưng ổn định hơn)"),
             variable=self.registration_type_var,
             value="nid_nelder_mead"
-        ).pack(side=tk.LEFT, padx=5)
+        )
+        self.registration_nid_nelder_mead.pack(side=tk.LEFT, padx=5)
         
         # Button
         button_frame = ttk.Frame(parent)
@@ -480,7 +634,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
         
         self.calibrate_btn = ttk.Button(
             button_frame,
-            text="Chạy Calibration",
+            text=self.translator.get("calibration.button.run_calibration", "Chạy Calibration"),
             command=self.start_calibrate,
             style="Accent.TButton"
         )
@@ -488,18 +642,18 @@ class CalibrationStandaloneGUI(ttk.Frame):
         
         self.stop_calibrate_btn = ttk.Button(
             button_frame,
-            text="Dừng Calibration",
+            text=self.translator.get("calibration.button.stop_calibration", "Dừng Calibration"),
             command=self.stop_calibrate,
             state=tk.DISABLED
         )
         self.stop_calibrate_btn.pack(side=tk.LEFT, padx=10)
         
         # Log
-        log_frame = ttk.LabelFrame(parent, text="Log", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        self.calibrate_log_frame = ttk.LabelFrame(parent, text=self.translator.get("label.log", "Log"), padding=10)
+        self.calibrate_log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
         self.calibrate_log = scrolledtext.ScrolledText(
-            log_frame,
+            self.calibrate_log_frame,
             height=8,
             wrap=tk.WORD,
             state=tk.DISABLED
@@ -509,34 +663,36 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def create_export_tab(self, parent):
         """Tạo tab export results"""
         # Instructions
-        instructions = ttk.Label(
+        self.export_instructions = ttk.Label(
             parent,
-            text="Export và convert kết quả calibration sang format FAST-LIVO2",
+            text=self.translator.get("calibration.export_instructions", "Export và convert kết quả calibration sang format FAST-LIVO2"),
             font=("Arial", 10)
         )
-        instructions.pack(pady=10)
+        self.export_instructions.pack(pady=10)
         
         # Calib.json path
         calib_frame = ttk.Frame(parent)
         calib_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        ttk.Label(calib_frame, text="File calib.json:").pack(side=tk.LEFT, padx=5)
+        self.calib_json_label = ttk.Label(calib_frame, text=self.translator.get("calibration.label.calib_json_file", "File calib.json:"))
+        self.calib_json_label.pack(side=tk.LEFT, padx=5)
         self.calib_json_var = tk.StringVar()
         calib_entry = ttk.Entry(calib_frame, textvariable=self.calib_json_var, width=50)
         calib_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
-        browse_calib_btn = ttk.Button(
+        self.browse_calib_btn = ttk.Button(
             calib_frame,
-            text="Browse",
+            text=self.translator.get("button.browse", "Browse"),
             command=self.browse_calib_json
         )
-        browse_calib_btn.pack(side=tk.LEFT, padx=5)
+        self.browse_calib_btn.pack(side=tk.LEFT, padx=5)
         
         # Output YAML path
         yaml_frame = ttk.Frame(parent)
         yaml_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        ttk.Label(yaml_frame, text="Output YAML:").pack(side=tk.LEFT, padx=5)
+        self.output_yaml_label = ttk.Label(yaml_frame, text=self.translator.get("calibration.label.output_yaml", "Output YAML:"))
+        self.output_yaml_label.pack(side=tk.LEFT, padx=5)
         self.output_yaml_var = tk.StringVar()
         yaml_entry = ttk.Entry(yaml_frame, textvariable=self.output_yaml_var, width=50)
         yaml_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
@@ -547,18 +703,18 @@ class CalibrationStandaloneGUI(ttk.Frame):
         
         self.convert_btn = ttk.Button(
             button_frame,
-            text="Convert sang FAST-LIVO2",
+            text=self.translator.get("calibration.button.convert_to_fast_livo2", "Convert sang FAST-LIVO2"),
             command=self.convert_to_fast_livo2,
             style="Accent.TButton"
         )
         self.convert_btn.pack(side=tk.LEFT, padx=10)
         
         # Results display
-        results_frame = ttk.LabelFrame(parent, text="Kết quả", padding=10)
-        results_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        self.results_frame = ttk.LabelFrame(parent, text=self.translator.get("calibration.label.results", "Kết quả"), padding=10)
+        self.results_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
         self.results_text = scrolledtext.ScrolledText(
-            results_frame,
+            self.results_frame,
             height=10,
             wrap=tk.WORD,
             state=tk.DISABLED
@@ -570,7 +726,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def browse_bag_directory(self):
         """Browse cho bag output directory"""
         directory = filedialog.askdirectory(
-            title="Chọn thư mục để lưu bag",
+            title=self.translator.get("calibration.dialog.choose_bag_directory", "Chọn thư mục để lưu bag"),
             initialdir=self.bag_dir_var.get()
         )
         if directory:
@@ -579,7 +735,10 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def start_record(self):
         """Bắt đầu record rosbag"""
         if self.is_recording:
-            messagebox.showwarning("Cảnh báo", "Đang record, vui lòng dừng trước")
+            messagebox.showwarning(
+                self.translator.get("dialog.warning", "Warning"),
+                self.translator.get("calibration.message.recording_in_progress", "Đang record, vui lòng dừng trước")
+            )
             return
         
         bag_dir = Path(self.bag_dir_var.get())
@@ -587,12 +746,18 @@ class CalibrationStandaloneGUI(ttk.Frame):
             try:
                 bag_dir.mkdir(parents=True, exist_ok=True)
             except Exception as e:
-                messagebox.showerror("Lỗi", f"Không thể tạo thư mục: {e}")
+                messagebox.showerror(
+                    self.translator.get("dialog.error", "Error"),
+                    self.translator.get("calibration.message.cannot_create_directory", "Không thể tạo thư mục: {error}").replace("{error}", str(e))
+                )
                 return
         
         topics = self.topics_var.get().split()
         if not topics:
-            messagebox.showerror("Lỗi", "Vui lòng nhập ít nhất một topic")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.please_enter_topic", "Vui lòng nhập ít nhất một topic")
+            )
             return
         
         # Tạo tên bag file với timestamp
@@ -621,13 +786,16 @@ class CalibrationStandaloneGUI(ttk.Frame):
             self.is_recording = True
             self.record_btn.config(state=tk.DISABLED)
             self.stop_record_btn.config(state=tk.NORMAL)
-            self.status_label.config(text=f"Trạng thái: Đang record bag...", foreground="orange")
+            self.status_label.config(text=self.translator.get("calibration.status.recording_bag", "Trạng thái: Đang record bag..."), foreground="orange")
             
             # Start thread để đọc output
             threading.Thread(target=self.monitor_record_process, daemon=True).start()
             
         except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể bắt đầu record: {e}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.cannot_start_record", "Không thể bắt đầu record: {error}").replace("{error}", str(e))
+            )
             self.log_record(f"Lỗi: {e}")
     
     def stop_record(self):
@@ -645,7 +813,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
             self.is_recording = False
             self.record_btn.config(state=tk.NORMAL)
             self.stop_record_btn.config(state=tk.DISABLED)
-            self.status_label.config(text="Trạng thái: Đã dừng record", foreground="green")
+            self.status_label.config(text=self.translator.get("calibration.status.record_stopped", "Trạng thái: Đã dừng record"), foreground="green")
             self.log_record("Đã dừng record")
     
     def monitor_record_process(self):
@@ -669,7 +837,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
         try:
             self.record_btn.config(state=tk.NORMAL)
             self.stop_record_btn.config(state=tk.DISABLED)
-            self.status_label.config(text="Trạng thái: Record đã hoàn thành", foreground="green")
+            self.status_label.config(text=self.translator.get("calibration.status.record_completed", "Trạng thái: Record đã hoàn thành"), foreground="green")
         except Exception as e:
             print(f"Lỗi khi update UI: {e}")
     
@@ -698,12 +866,18 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def launch_camera_info_publisher(self):
         """Launch camera_info_publisher node cho equirectangular camera"""
         if self.is_camera_info_publisher_running:
-            messagebox.showwarning("Cảnh báo", "Camera info publisher đang chạy")
+            messagebox.showwarning(
+                self.translator.get("dialog.warning", "Warning"),
+                self.translator.get("calibration.message.camera_info_publisher_running", "Camera info publisher đang chạy")
+            )
             return
         
         setup_script = self.workspace_path / "install" / "setup.sh"
         if not setup_script.exists():
-            messagebox.showerror("Lỗi", f"Không tìm thấy setup.sh tại: {setup_script}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.setup_not_found", "Không tìm thấy setup.sh tại: {path}").replace("{path}", str(setup_script))
+            )
             return
         
         # Build command để launch camera_info_publisher node
@@ -736,7 +910,10 @@ class CalibrationStandaloneGUI(ttk.Frame):
             threading.Thread(target=self.monitor_camera_info_publisher_process, daemon=True).start()
             
         except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể launch camera_info_publisher: {e}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.cannot_launch_camera_info_publisher", "Không thể launch camera_info_publisher: {error}").replace("{error}", str(e))
+            )
             self.log_global(f"Lỗi: {e}", "[CameraInfoPublisher] ")
     
     def stop_camera_info_publisher(self):
@@ -782,7 +959,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def browse_preprocess_input(self):
         """Browse cho preprocess input directory"""
         directory = filedialog.askdirectory(
-            title="Chọn thư mục chứa bags",
+            title=self.translator.get("calibration.dialog.choose_bags_directory", "Chọn thư mục chứa bags"),
             initialdir=self.preprocess_input_var.get() or str(self.workspace_path)
         )
         if directory:
@@ -791,7 +968,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def browse_preprocess_output(self):
         """Browse cho preprocess output directory"""
         directory = filedialog.askdirectory(
-            title="Chọn thư mục output",
+            title=self.translator.get("calibration.dialog.choose_output_directory", "Chọn thư mục output"),
             initialdir=self.preprocess_output_var.get() or str(self.workspace_path)
         )
         if directory:
@@ -803,11 +980,17 @@ class CalibrationStandaloneGUI(ttk.Frame):
         output_dir = self.preprocess_output_var.get()
         
         if not input_dir or not Path(input_dir).exists():
-            messagebox.showerror("Lỗi", "Vui lòng chọn thư mục input hợp lệ")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.please_select_valid_input", "Vui lòng chọn thư mục input hợp lệ")
+            )
             return
         
         if not output_dir:
-            messagebox.showerror("Lỗi", "Vui lòng chọn thư mục output")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.please_select_output", "Vui lòng chọn thư mục output")
+            )
             return
         
         # Tạo output directory nếu chưa có
@@ -816,7 +999,10 @@ class CalibrationStandaloneGUI(ttk.Frame):
         # Build command
         setup_script = self.workspace_path / "install" / "setup.sh"
         if not setup_script.exists():
-            messagebox.showerror("Lỗi", f"Không tìm thấy setup.sh tại: {setup_script}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.setup_not_found", "Không tìm thấy setup.sh tại: {path}").replace("{path}", str(setup_script))
+            )
             return
         
         cmd_parts = ["ros2", "run", "direct_visual_lidar_calibration", "preprocess"]
@@ -865,13 +1051,16 @@ class CalibrationStandaloneGUI(ttk.Frame):
             )
             
             self.preprocess_btn.config(state=tk.DISABLED)
-            self.status_label.config(text="Trạng thái: Đang preprocessing...", foreground="orange")
+            self.status_label.config(text=self.translator.get("calibration.status.preprocessing", "Trạng thái: Đang preprocessing..."), foreground="orange")
             
             # Start thread để đọc output
             threading.Thread(target=self.monitor_preprocess_process, daemon=True).start()
             
         except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể chạy preprocessing: {e}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.cannot_run_preprocessing", "Không thể chạy preprocessing: {error}").replace("{error}", str(e))
+            )
             self.log_preprocess(f"Lỗi: {e}")
     
     def monitor_preprocess_process(self):
@@ -898,7 +1087,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def _update_preprocess_success(self):
         """Helper function để update UI sau khi preprocessing thành công"""
         try:
-            self.status_label.config(text="Trạng thái: Preprocessing hoàn thành", foreground="green")
+            self.status_label.config(text=self.translator.get("calibration.status.preprocessing_completed", "Trạng thái: Preprocessing hoàn thành"), foreground="green")
             self.preprocess_btn.config(state=tk.NORMAL)
             # Auto-fill initial guess directory
             output_dir = self.preprocess_output_var.get()
@@ -910,7 +1099,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def _update_preprocess_failure(self):
         """Helper function để update UI sau khi preprocessing thất bại"""
         try:
-            self.status_label.config(text="Trạng thái: Preprocessing thất bại", foreground="red")
+            self.status_label.config(text=self.translator.get("calibration.status.preprocessing_failed", "Trạng thái: Preprocessing thất bại"), foreground="red")
             self.preprocess_btn.config(state=tk.NORMAL)
         except Exception as e:
             print(f"Lỗi khi update UI: {e}")
@@ -936,7 +1125,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def browse_initial_guess_dir(self):
         """Browse cho initial guess directory"""
         directory = filedialog.askdirectory(
-            title="Chọn thư mục preprocessed",
+            title=self.translator.get("calibration.dialog.choose_preprocessed_directory", "Chọn thư mục preprocessed"),
             initialdir=self.initial_guess_dir_var.get() or str(self.workspace_path)
         )
         if directory:
@@ -947,12 +1136,18 @@ class CalibrationStandaloneGUI(ttk.Frame):
         preprocessed_dir = self.initial_guess_dir_var.get()
         
         if not preprocessed_dir or not Path(preprocessed_dir).exists():
-            messagebox.showerror("Lỗi", "Vui lòng chọn thư mục preprocessed hợp lệ")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.please_select_valid_preprocessed", "Vui lòng chọn thư mục preprocessed hợp lệ")
+            )
             return
         
         setup_script = self.workspace_path / "install" / "setup.sh"
         if not setup_script.exists():
-            messagebox.showerror("Lỗi", f"Không tìm thấy setup.sh tại: {setup_script}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.setup_not_found", "Không tìm thấy setup.sh tại: {path}").replace("{path}", str(setup_script))
+            )
             return
         
         mode = self.initial_guess_mode.get()
@@ -962,7 +1157,10 @@ class CalibrationStandaloneGUI(ttk.Frame):
             cmd = f"source {ros2_setup} && source {setup_script} && ros2 run direct_visual_lidar_calibration initial_guess_manual {preprocessed_dir}"
         else:  # auto
             # Cần chạy find_matches_superglue trước
-            messagebox.showinfo("Thông tin", "Automatic mode cần SuperGlue. Vui lòng chạy find_matches_superglue trước.")
+            messagebox.showinfo(
+                self.translator.get("dialog.info", "Information"),
+                self.translator.get("calibration.message.automatic_mode_needs_superglue", "Automatic mode cần SuperGlue. Vui lòng chạy find_matches_superglue trước.")
+            )
             return
         
         self.log_initial_guess(f"Bắt đầu initial guess ({mode})...")
@@ -986,13 +1184,16 @@ class CalibrationStandaloneGUI(ttk.Frame):
             )
             
             self.initial_guess_btn.config(state=tk.DISABLED)
-            self.status_label.config(text="Trạng thái: Đang chạy initial guess...", foreground="orange")
+            self.status_label.config(text=self.translator.get("calibration.status.running_initial_guess", "Trạng thái: Đang chạy initial guess..."), foreground="orange")
             
             # Start thread để đọc output
             threading.Thread(target=self.monitor_initial_guess_process, daemon=True).start()
             
         except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể chạy initial guess: {e}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.cannot_run_initial_guess", "Không thể chạy initial guess: {error}").replace("{error}", str(e))
+            )
             self.log_initial_guess(f"Lỗi: {e}")
     
     def monitor_initial_guess_process(self):
@@ -1018,7 +1219,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def _update_initial_guess_success(self):
         """Helper function để update UI sau khi initial guess thành công"""
         try:
-            self.status_label.config(text="Trạng thái: Initial guess hoàn thành", foreground="green")
+            self.status_label.config(text=self.translator.get("calibration.status.initial_guess_completed", "Trạng thái: Initial guess hoàn thành"), foreground="green")
             self.initial_guess_btn.config(state=tk.NORMAL)
         except Exception as e:
             print(f"Lỗi khi update UI: {e}")
@@ -1026,7 +1227,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def _update_initial_guess_failure(self):
         """Helper function để update UI sau khi initial guess thất bại"""
         try:
-            self.status_label.config(text="Trạng thái: Initial guess thất bại", foreground="red")
+            self.status_label.config(text=self.translator.get("calibration.status.initial_guess_failed", "Trạng thái: Initial guess thất bại"), foreground="red")
             self.initial_guess_btn.config(state=tk.NORMAL)
         except Exception as e:
             print(f"Lỗi khi update UI: {e}")
@@ -1051,7 +1252,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def browse_calibrate_dir(self):
         """Browse cho calibrate directory"""
         directory = filedialog.askdirectory(
-            title="Chọn thư mục preprocessed",
+            title=self.translator.get("calibration.dialog.choose_preprocessed_directory", "Chọn thư mục preprocessed"),
             initialdir=self.calibrate_dir_var.get() or str(self.workspace_path)
         )
         if directory:
@@ -1062,12 +1263,18 @@ class CalibrationStandaloneGUI(ttk.Frame):
         preprocessed_dir = self.calibrate_dir_var.get()
         
         if not preprocessed_dir or not Path(preprocessed_dir).exists():
-            messagebox.showerror("Lỗi", "Vui lòng chọn thư mục preprocessed hợp lệ")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.please_select_valid_preprocessed", "Vui lòng chọn thư mục preprocessed hợp lệ")
+            )
             return
         
         setup_script = self.workspace_path / "install" / "setup.sh"
         if not setup_script.exists():
-            messagebox.showerror("Lỗi", f"Không tìm thấy setup.sh tại: {setup_script}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.setup_not_found", "Không tìm thấy setup.sh tại: {path}").replace("{path}", str(setup_script))
+            )
             return
         
         cmd_parts = ["ros2", "run", "direct_visual_lidar_calibration", "calibrate", preprocessed_dir]
@@ -1108,13 +1315,16 @@ class CalibrationStandaloneGUI(ttk.Frame):
             
             self.calibrate_btn.config(state=tk.DISABLED)
             self.stop_calibrate_btn.config(state=tk.NORMAL)
-            self.status_label.config(text="Trạng thái: Đang calibration...", foreground="orange")
+            self.status_label.config(text=self.translator.get("calibration.status.calibrating", "Trạng thái: Đang calibration..."), foreground="orange")
             
             # Start thread để đọc output
             threading.Thread(target=self.monitor_calibrate_process, daemon=True).start()
             
         except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể chạy calibration: {e}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.cannot_run_calibration", "Không thể chạy calibration: {error}").replace("{error}", str(e))
+            )
             self.log_calibrate(f"Lỗi: {e}")
     
     def monitor_calibrate_process(self):
@@ -1155,13 +1365,13 @@ class CalibrationStandaloneGUI(ttk.Frame):
                 self.calibrate_process = None
                 self.calibrate_btn.config(state=tk.NORMAL)
                 self.stop_calibrate_btn.config(state=tk.DISABLED)
-                self.status_label.config(text="Trạng thái: Calibration đã dừng", foreground="orange")
+                self.status_label.config(text=self.translator.get("calibration.status.calibration_stopped", "Trạng thái: Calibration đã dừng"), foreground="orange")
                 self.log_calibrate("Calibration đã dừng")
     
     def _update_calibrate_success(self):
         """Helper function để update UI sau khi calibration thành công"""
         try:
-            self.status_label.config(text="Trạng thái: Calibration hoàn thành", foreground="green")
+            self.status_label.config(text=self.translator.get("calibration.status.calibration_completed", "Trạng thái: Calibration hoàn thành"), foreground="green")
             self.calibrate_btn.config(state=tk.NORMAL)
             self.stop_calibrate_btn.config(state=tk.DISABLED)
             # Auto-fill calib.json path
@@ -1174,7 +1384,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def _update_calibrate_failure(self):
         """Helper function để update UI sau khi calibration thất bại"""
         try:
-            self.status_label.config(text="Trạng thái: Calibration thất bại", foreground="red")
+            self.status_label.config(text=self.translator.get("calibration.status.calibration_failed", "Trạng thái: Calibration thất bại"), foreground="red")
             self.calibrate_btn.config(state=tk.NORMAL)
             self.stop_calibrate_btn.config(state=tk.DISABLED)
         except Exception as e:
@@ -1200,7 +1410,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
     def browse_calib_json(self):
         """Browse cho calib.json file"""
         file_path = filedialog.askopenfilename(
-            title="Chọn file calib.json",
+            title=self.translator.get("calibration.dialog.choose_calib_json", "Chọn file calib.json"),
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
             initialdir=self.calib_json_var.get() or str(self.workspace_path)
         )
@@ -1212,7 +1422,10 @@ class CalibrationStandaloneGUI(ttk.Frame):
         calib_json_path = self.calib_json_var.get()
         
         if not calib_json_path or not Path(calib_json_path).exists():
-            messagebox.showerror("Lỗi", "Vui lòng chọn file calib.json hợp lệ")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.please_select_valid_calib_json", "Vui lòng chọn file calib.json hợp lệ")
+            )
             return
         
         try:
@@ -1225,13 +1438,16 @@ class CalibrationStandaloneGUI(ttk.Frame):
             self.results_text.config(state=tk.DISABLED)
             
         except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể đọc file: {e}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.message.cannot_read_file", "Không thể đọc file: {error}").replace("{error}", str(e))
+            )
     
     def convert_to_fast_livo2(self):
         """Load calib từ fast_livo2_calib.yaml, ghi đè Rcl/Pcl và build"""
         self.convert_btn.config(state=tk.DISABLED)
         self._append_results_text("=== Bắt đầu convert và build ===", clear=True)
-        self.after(0, lambda: self.status_label.config(text="Trạng thái: Đang convert & build...", foreground="orange"))
+        self.after(0, lambda: self.status_label.config(text=self.translator.get("calibration.status.converting_building", "Trạng thái: Đang convert & build..."), foreground="orange"))
         threading.Thread(target=self._convert_and_build, daemon=True).start()
 
     def _convert_and_build(self):
@@ -1283,13 +1499,16 @@ class CalibrationStandaloneGUI(ttk.Frame):
             build_output = self._run_build_script()
             self._append_results_text(build_output)
 
-            self.after(0, lambda: messagebox.showinfo("Thành công", "Hoàn tất convert và build"))
-            self.after(0, lambda: self.status_label.config(text="Trạng thái: Hoàn tất", foreground="green"))
+            self.after(0, lambda: messagebox.showinfo(
+                self.translator.get("dialog.success", "Success"),
+                self.translator.get("calibration.message.convert_build_completed", "Hoàn tất convert và build")
+            ))
+            self.after(0, lambda: self.status_label.config(text=self.translator.get("calibration.status.completed", "Trạng thái: Hoàn tất"), foreground="green"))
         except Exception as e:
             error_msg = f"Lỗi: {e}"
             self._append_results_text(error_msg)
-            self.after(0, lambda: messagebox.showerror("Lỗi", error_msg))
-            self.after(0, lambda: self.status_label.config(text="Trạng thái: Lỗi", foreground="red"))
+            self.after(0, lambda: messagebox.showerror(self.translator.get("dialog.error", "Error"), error_msg))
+            self.after(0, lambda: self.status_label.config(text=self.translator.get("calibration.status.error", "Trạng thái: Lỗi"), foreground="red"))
         finally:
             self.after(0, lambda: self.convert_btn.config(state=tk.NORMAL))
 

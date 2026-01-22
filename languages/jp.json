@@ -3,7 +3,8 @@
         "livox_panel": "Livox コントロールパネル",
         "bag_mapping_system": "Bag Mapping システム",
         "worker_interface": "ワーカーインターフェース | システム監視",
-        "livox_ip_discovery": "Livox MID360 IP 検出ツール"
+        "livox_ip_discovery": "Livox MID360 IP 検出ツール",
+        "calibration_standalone_gui": "キャリブレーション スタンドアロン GUI"
     },
     "label": {
         "livox_driver_2": "LIVOX DRIVER 2",
@@ -543,6 +544,7 @@
         "warning": "警告",
         "error": "エラー",
         "success": "成功",
+        "info": "情報",
         "library_missing": "ライブラリが見つかりません",
         "pcd_dir_not_exists": "PCD ディレクトリが存在しません: {path}",
         "no_pcd_files_warning": "ディレクトリに PCD ファイルが見つかりません: {path}",
@@ -566,6 +568,165 @@
         "choose_design_obj_file": "設計 OBJ ファイルを選択",
         "choose_design_pcd_file": "設計 PCD ファイルを選択",
         "low_similarity_warning_title": "類似度が低い警告"
+    },
+    "tab": {
+        "replay_calibration": "リプレイ キャリブレーション",
+        "preprocessing": "前処理",
+        "initial_guess": "初期推定",
+        "calibration": "キャリブレーション",
+        "export_results": "結果のエクスポート"
+    },
+    "status": {
+        "ready": "ステータス: 準備完了"
+    },
+    "calibration": {
+        "preprocess_instructions": "rosbagからデータを前処理してキャリブレーションの準備を行う（等距離射影カメラ）",
+        "initial_guess_instructions": "キャリブレーションの初期推定を作成（手動または自動）",
+        "calibrate_instructions": "ファイン登録を実行してキャリブレーションを調整",
+        "export_instructions": "キャリブレーション結果をエクスポートしてFAST-LIVO2形式に変換",
+        "label": {
+            "bags_directory": "バッグディレクトリ:",
+            "output_directory": "出力ディレクトリ:",
+            "preprocessed_directory": "前処理済みディレクトリ:",
+            "camera_model": "カメラモデル",
+            "select_camera_model": "カメラ投影モデルを選択:",
+            "options": "オプション",
+            "mode": "モード",
+            "registration_type": "登録タイプ:",
+            "calib_json_file": "calib.jsonファイル:",
+            "output_yaml": "出力YAML:",
+            "results": "結果"
+        },
+        "camera_model": {
+            "equirectangular": "等距離射影（360°カメラのデフォルト）",
+            "auto": "camera_infoトピックから自動検出",
+            "plumb_bob": "Plumb Bob（放射/接線歪みのあるピンホール）",
+            "fisheye": "Fisheye（等距離）",
+            "omnidir": "全方向"
+        },
+        "option": {
+            "auto_detect_topics": "トピックを自動検出 (-a)",
+            "dynamic_lidar": "動的LiDAR統合 (-d) - スピニングLiDAR用",
+            "visualize": "可視化 (-v)",
+            "auto_quit": "キャリブレーション完了後に自動終了（推奨）",
+            "background": "バックグラウンドで実行（ビューアー表示なし）- 推奨"
+        },
+        "mode": {
+            "manual": "手動 - 対応を手動で選択",
+            "automatic": "自動 - SuperGlueを使用（ライセンス必要）"
+        },
+        "registration_type": {
+            "nid_bfgs": "NID-BFGS（高速、推奨）",
+            "nid_nelder_mead": "NID-Nelder-Mead（低速だがより安定）"
+        },
+        "button": {
+            "run_preprocessing": "前処理を実行",
+            "run_initial_guess": "初期推定を実行",
+            "run_calibration": "キャリブレーションを実行",
+            "stop_calibration": "キャリブレーションを停止",
+            "convert_to_fast_livo2": "FAST-LIVO2に変換"
+        },
+        "status": {
+            "recording_bag": "ステータス: バッグを録画中...",
+            "record_stopped": "ステータス: 録画停止",
+            "record_completed": "ステータス: 録画完了",
+            "preprocessing": "ステータス: 前処理中...",
+            "preprocessing_completed": "ステータス: 前処理完了",
+            "preprocessing_failed": "ステータス: 前処理失敗",
+            "running_initial_guess": "ステータス: 初期推定実行中...",
+            "initial_guess_completed": "ステータス: 初期推定完了",
+            "initial_guess_failed": "ステータス: 初期推定失敗",
+            "calibrating": "ステータス: キャリブレーション中...",
+            "calibration_stopped": "ステータス: キャリブレーション停止",
+            "calibration_completed": "ステータス: キャリブレーション完了",
+            "calibration_failed": "ステータス: キャリブレーション失敗",
+            "converting_building": "ステータス: 変換・ビルド中...",
+            "completed": "ステータス: 完了",
+            "error": "ステータス: エラー"
+        },
+        "message": {
+            "recording_in_progress": "録画中です。先に停止してください",
+            "cannot_create_directory": "ディレクトリを作成できません: {error}",
+            "please_enter_topic": "少なくとも1つのトピックを入力してください",
+            "cannot_start_record": "録画を開始できません: {error}",
+            "please_select_valid_input": "有効な入力ディレクトリを選択してください",
+            "please_select_output": "出力ディレクトリを選択してください",
+            "setup_not_found": "setup.shが見つかりません: {path}",
+            "cannot_run_preprocessing": "前処理を実行できません: {error}",
+            "please_select_valid_preprocessed": "有効な前処理済みディレクトリを選択してください",
+            "automatic_mode_needs_superglue": "自動モードにはSuperGlueが必要です。先にfind_matches_superglueを実行してください。",
+            "cannot_run_initial_guess": "初期推定を実行できません: {error}",
+            "cannot_run_calibration": "キャリブレーションを実行できません: {error}",
+            "please_select_valid_calib_json": "有効なcalib.jsonファイルを選択してください",
+            "cannot_read_file": "ファイルを読み取れません: {error}",
+            "camera_info_publisher_running": "カメラ情報パブリッシャーが実行中です",
+            "cannot_launch_camera_info_publisher": "camera_info_publisherを起動できません: {error}",
+            "convert_build_completed": "変換とビルドが完了しました"
+        },
+        "replay": {
+            "title": "リプレイ キャリブレーション",
+            "choose_bag_folder": "Bag フォルダを選択",
+            "bag_info": "Bag 情報",
+            "no_bag_selected": "Bag フォルダが選択されていません",
+            "not_cut_5s": "5秒をカットしていません",
+            "bag_not_exists": "Bag フォルダが存在しません",
+            "bag_folder": "Bag フォルダ: {name}",
+            "directory_not_confirmed": "ディレクトリ: {name} (Bag フォルダとして未確認)",
+            "error": "エラー: {error}",
+            "getting_bag_info": "Bag 情報を取得中...",
+            "bag_info_label": "Bag 情報:",
+            "bag_info_success": "✓ Bag 情報の取得に成功しました",
+            "cannot_get_bag_info": "⚠️  Bag 情報を取得できません: {error}",
+            "error_getting_bag_info": "⚠️  Bag 情報の取得中にエラー: {error}",
+            "cutting_5s": "5秒データをカット中...",
+            "cutting_before_replay": "リプレイ前に5秒データをカット中...",
+            "cut_success": "カット済み: {path}",
+            "cut_failed": "カット失敗: {message}",
+            "cut_success_log": "✅ カット成功 -> {path}",
+            "cut_failed_log": "❌ カット失敗: {message}",
+            "button": {
+                "start": "リプレイ開始",
+                "stop": "リプレイ停止"
+            },
+            "status": {
+                "ready": "ステータス: 準備完了",
+                "cutting_5s": "ステータス: 5秒カット中...",
+                "replaying": "ステータス: リプレイ中...",
+                "stopped": "ステータス: 停止",
+                "completed": "ステータス: 完了"
+            },
+            "message": {
+                "cutting": "Bag をカット中です。お待ちください...",
+                "please_select_bag": "Bag フォルダを選択してください",
+                "bag_not_exists": "Bag フォルダが存在しません: {path}",
+                "setup_not_found": "setup.sh が見つかりません: {path}",
+                "cut_failed": "Bag のカットに失敗しました: {message}",
+                "task_running": "他のタスクが実行中です。先に停止してください",
+                "setup_not_found_build": "setup.sh が見つかりません: {path}\n先にワークスペースをビルドしてください。",
+                "cannot_start_replay": "リプレイを開始できません: {error}"
+            },
+            "dialog": {
+                "choose_bag_directory": "Bag ファイルを含むディレクトリを選択"
+            },
+            "replaying_info": "リプレイ中: {name}\nレート: {rate}x | ループ: {loop} | クロック: {clock}",
+            "stopped_info": "リプレイ停止\nBag: {name}",
+            "stopped": "リプレイ停止",
+            "stopped_log": "✅ リプレイ停止。Bag: {name}",
+            "stopped_log_simple": "✅ リプレイ停止",
+            "completed_title": "リプレイ完了",
+            "completed_message": "再生完了: {name}\n録画は自動的に停止されました",
+            "completed_info": "リプレイ完了\nBag: {name}\n録画は自動的に停止されました",
+            "completed_simple": "リプレイ完了\n録画は停止されました",
+            "yes": "はい",
+            "no": "いいえ"
+        },
+        "dialog": {
+            "choose_bag_directory": "バッグを保存するディレクトリを選択",
+            "choose_bags_directory": "バッグを含むディレクトリを選択",
+            "choose_output_directory": "出力ディレクトリを選択",
+            "choose_preprocessed_directory": "前処理済みディレクトリを選択",
+            "choose_calib_json": "calib.jsonファイルを選択"
+        }
     },
     "category": {
         "roadheader": "自由断面掘削機",

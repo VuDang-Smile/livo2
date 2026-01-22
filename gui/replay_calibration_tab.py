@@ -9,24 +9,35 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 import os
+import sys
 import time
 from functools import partial
 from bag_cut_tab import cut_bag_5s_data
+
+# Thêm project root vào sys.path để có thể import các module
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 try:
     import tkinter as tk
     from tkinter import ttk, messagebox, scrolledtext, filedialog
 except ImportError as e:
     print(f"Lỗi import: {e}")
-    import sys
     sys.exit(1)
+
+from languages.translate_engine import Translator
 
 
 class ReplayCalibrationTab(ttk.Frame):
     """Tab Replay dành cho Calibration"""
 
-    def __init__(self, parent):
+    def __init__(self, parent, translator=None):
         super().__init__(parent)
+        
+        # Translator for multi-language support
+        self.translator = translator if translator else Translator('en')
+        self.current_lang = self.translator.lang_code
 
         # Paths
         self.workspace_path = Path(__file__).parent.parent / "ws"
@@ -56,31 +67,31 @@ class ReplayCalibrationTab(ttk.Frame):
         """Tạo các widget cho tab Replay Calibration"""
 
         # Title
-        title_label = ttk.Label(
+        self.title_label = ttk.Label(
             self,
-            text="Replay Calibration",
+            text=self.translator.get("calibration.replay.title", "Replay Calibration"),
             font=("Arial", 16, "bold")
         )
-        title_label.pack(pady=10)
+        self.title_label.pack(pady=10)
 
         # Frame điều khiển
         control_frame = ttk.Frame(self, padding="10")
         control_frame.pack(fill=tk.X)
 
         # Frame chọn bag folder
-        bag_frame = ttk.LabelFrame(control_frame, text="Chọn Bag Folder", padding="10")
-        bag_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.bag_frame = ttk.LabelFrame(control_frame, text=self.translator.get("calibration.replay.choose_bag_folder", "Chọn Bag Folder"), padding="10")
+        self.bag_frame.pack(fill=tk.X, padx=10, pady=5)
 
         self.bag_path_var = tk.StringVar()
-        bag_entry = ttk.Entry(bag_frame, textvariable=self.bag_path_var, width=60)
+        bag_entry = ttk.Entry(self.bag_frame, textvariable=self.bag_path_var, width=60)
         bag_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
 
-        browse_btn = ttk.Button(
-            bag_frame,
-            text="Browse",
+        self.browse_btn = ttk.Button(
+            self.bag_frame,
+            text=self.translator.get("button.browse", "Browse"),
             command=self.browse_bag_folder
         )
-        browse_btn.pack(side=tk.LEFT, padx=5)
+        self.browse_btn.pack(side=tk.LEFT, padx=5)
 
         # Frame nút điều khiển
         button_frame = ttk.Frame(control_frame)
@@ -88,7 +99,7 @@ class ReplayCalibrationTab(ttk.Frame):
 
         self.start_btn = ttk.Button(
             button_frame,
-            text="Start Replay",
+            text=self.translator.get("calibration.replay.button.start", "Start Replay"),
             command=self.start_replay,
             style="Accent.TButton"
         )
@@ -96,7 +107,7 @@ class ReplayCalibrationTab(ttk.Frame):
 
         self.stop_btn = ttk.Button(
             button_frame,
-            text="Stop Replay",
+            text=self.translator.get("calibration.replay.button.stop", "Stop Replay"),
             command=self.stop_replay,
             state=tk.DISABLED
         )
@@ -105,41 +116,70 @@ class ReplayCalibrationTab(ttk.Frame):
         # Label trạng thái
         self.status_label = ttk.Label(
             button_frame,
-            text="Trạng thái: Sẵn sàng",
+            text=self.translator.get("calibration.replay.status.ready", "Trạng thái: Sẵn sàng"),
             foreground="gray"
         )
         self.status_label.pack(side=tk.LEFT, padx=20)
 
         # Frame thông tin bag
-        info_frame = ttk.LabelFrame(self, text="Thông tin Bag", padding="10")
-        info_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.info_frame = ttk.LabelFrame(self, text=self.translator.get("calibration.replay.bag_info", "Thông tin Bag"), padding="10")
+        self.info_frame.pack(fill=tk.X, padx=10, pady=5)
 
         self.info_label = ttk.Label(
-            info_frame,
-            text="Chưa chọn bag folder",
+            self.info_frame,
+            text=self.translator.get("calibration.replay.no_bag_selected", "Chưa chọn bag folder"),
             font=("Arial", 10)
         )
         self.info_label.pack(anchor=tk.W, padx=5)
 
         self.cut_status_label = ttk.Label(
-            info_frame,
-            text="Chưa cắt 5s",
+            self.info_frame,
+            text=self.translator.get("calibration.replay.not_cut_5s", "Chưa cắt 5s"),
             font=("Arial", 9),
             foreground="gray"
         )
         self.cut_status_label.pack(anchor=tk.W, padx=5, pady=(2, 0))
 
         # Text area để hiển thị log riêng cho tab Replay
-        log_frame = ttk.LabelFrame(self, text="Log", padding="5")
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.log_frame = ttk.LabelFrame(self, text=self.translator.get("label.log", "Log"), padding="5")
+        self.log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         self.log_text = scrolledtext.ScrolledText(
-            log_frame,
+            self.log_frame,
             height=15,
             wrap=tk.WORD,
             state=tk.DISABLED
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
+    
+    def update_ui_texts(self):
+        """Update all UI texts based on current language"""
+        if hasattr(self, 'title_label'):
+            self.title_label.config(text=self.translator.get("calibration.replay.title", "Replay Calibration"))
+        if hasattr(self, 'bag_frame'):
+            self.bag_frame.config(text=self.translator.get("calibration.replay.choose_bag_folder", "Chọn Bag Folder"))
+        if hasattr(self, 'browse_btn'):
+            self.browse_btn.config(text=self.translator.get("button.browse", "Browse"))
+        if hasattr(self, 'start_btn'):
+            self.start_btn.config(text=self.translator.get("calibration.replay.button.start", "Start Replay"))
+        if hasattr(self, 'stop_btn'):
+            self.stop_btn.config(text=self.translator.get("calibration.replay.button.stop", "Stop Replay"))
+        if hasattr(self, 'status_label'):
+            current_text = self.status_label.cget("text")
+            if "Sẵn sàng" in current_text or "Ready" in current_text:
+                self.status_label.config(text=self.translator.get("calibration.replay.status.ready", "Trạng thái: Sẵn sàng"))
+        if hasattr(self, 'info_frame'):
+            self.info_frame.config(text=self.translator.get("calibration.replay.bag_info", "Thông tin Bag"))
+        if hasattr(self, 'info_label'):
+            current_text = self.info_label.cget("text")
+            if "Chưa chọn" in current_text or "not selected" in current_text.lower():
+                self.info_label.config(text=self.translator.get("calibration.replay.no_bag_selected", "Chưa chọn bag folder"))
+        if hasattr(self, 'cut_status_label'):
+            current_text = self.cut_status_label.cget("text")
+            if "Chưa cắt" in current_text or "not cut" in current_text.lower():
+                self.cut_status_label.config(text=self.translator.get("calibration.replay.not_cut_5s", "Chưa cắt 5s"))
+        if hasattr(self, 'log_frame'):
+            self.log_frame.config(text=self.translator.get("label.log", "Log"))
 
     def log(self, message):
         """Thêm message vào log của tab Replay"""
@@ -160,7 +200,7 @@ class ReplayCalibrationTab(ttk.Frame):
             initial_dir = str(self.workspace_path)
 
         folder = filedialog.askdirectory(
-            title="Chọn thư mục chứa bag files",
+            title=self.translator.get("calibration.replay.dialog.choose_bag_directory", "Chọn thư mục chứa bag files"),
             initialdir=self.bag_path_var.get() or initial_dir
         )
         if folder:
@@ -173,20 +213,20 @@ class ReplayCalibrationTab(ttk.Frame):
         try:
             bag_path_obj = Path(bag_path)
             if not bag_path_obj.exists():
-                self.info_label.config(text="Bag folder không tồn tại")
+                self.info_label.config(text=self.translator.get("calibration.replay.bag_not_exists", "Bag folder không tồn tại"))
                 return
 
             has_metadata = (bag_path_obj / "metadata.yaml").exists()
             has_db3 = any(bag_path_obj.glob("*.db3"))
 
             if has_metadata or has_db3:
-                self.info_label.config(text=f"Bag folder: {bag_path_obj.name}")
-                self.log("Đang lấy thông tin bag...")
+                self.info_label.config(text=self.translator.get("calibration.replay.bag_folder", "Bag folder: {name}").replace("{name}", bag_path_obj.name))
+                self.log(self.translator.get("calibration.replay.getting_bag_info", "Đang lấy thông tin bag..."))
                 self._get_bag_info(bag_path)
             else:
-                self.info_label.config(text=f"Thư mục: {bag_path_obj.name} (chưa xác nhận là bag folder)")
+                self.info_label.config(text=self.translator.get("calibration.replay.directory_not_confirmed", "Thư mục: {name} (chưa xác nhận là bag folder)").replace("{name}", bag_path_obj.name))
         except Exception as e:
-            self.info_label.config(text=f"Lỗi: {e}")
+            self.info_label.config(text=self.translator.get("calibration.replay.error", "Lỗi: {error}").replace("{error}", str(e)))
 
     def _get_bag_info(self, bag_path):
         """Lấy thông tin về bag file"""
@@ -209,41 +249,53 @@ class ReplayCalibrationTab(ttk.Frame):
 
             if result.returncode == 0:
                 output_lines = result.stdout.split('\n')
-                info_text = "Bag info:\n"
+                info_text = self.translator.get("calibration.replay.bag_info_label", "Bag info:") + "\n"
                 for line in output_lines[:10]:
                     if line.strip():
                         info_text += f"  {line}\n"
                 self.info_label.config(text=info_text)
-                self.log("✓ Đã lấy thông tin bag thành công")
+                self.log(self.translator.get("calibration.replay.bag_info_success", "✓ Đã lấy thông tin bag thành công"))
             else:
-                self.log(f"⚠️  Không thể lấy thông tin bag: {result.stderr}")
+                self.log(self.translator.get("calibration.replay.cannot_get_bag_info", "⚠️  Không thể lấy thông tin bag: {error}").replace("{error}", result.stderr))
         except Exception as e:
-            self.log(f"⚠️  Lỗi khi lấy thông tin bag: {e}")
+            self.log(self.translator.get("calibration.replay.error_getting_bag_info", "⚠️  Lỗi khi lấy thông tin bag: {error}").replace("{error}", str(e)))
 
     def cut_5s_data(self):
         """Cắt đúng 5s dữ liệu (timestamp) và tự động load vào Replay"""
         if self.is_cutting:
-            messagebox.showinfo("Đang cắt", "Đang cắt bag, vui lòng chờ...")
+            messagebox.showinfo(
+                self.translator.get("dialog.info", "Information"),
+                self.translator.get("calibration.replay.message.cutting", "Đang cắt bag, vui lòng chờ...")
+            )
             return
 
         bag_path = self.bag_path_var.get()
         if not bag_path:
-            messagebox.showerror("Lỗi", "Vui lòng chọn bag folder")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.replay.message.please_select_bag", "Vui lòng chọn bag folder")
+            )
             return
 
         bag_path_obj = Path(bag_path)
         if not bag_path_obj.exists():
-            messagebox.showerror("Lỗi", f"Bag folder không tồn tại: {bag_path}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.replay.message.bag_not_exists", "Bag folder không tồn tại: {path}").replace("{path}", bag_path)
+            )
             return
 
         ws_setup = self.workspace_path / "install" / "setup.sh"
         if not ws_setup.exists():
-            messagebox.showerror("Lỗi", f"Không tìm thấy ws/install/setup.sh tại: {ws_setup}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.replay.message.setup_not_found", "Không tìm thấy ws/install/setup.sh tại: {path}").replace("{path}", str(ws_setup))
+            )
             return
 
         self.is_cutting = True
         self.cut_output_path = None
-        self.cut_status_label.config(text="Đang cắt 5s dữ liệu...", foreground="orange")
+        self.cut_status_label.config(text=self.translator.get("calibration.replay.cutting_5s", "Đang cắt 5s dữ liệu..."), foreground="orange")
         self.log("🔧 Đang cắt 5s dữ liệu dựa trên timestamp...")
 
         def worker():
@@ -267,47 +319,58 @@ class ReplayCalibrationTab(ttk.Frame):
 
         if success and out_path:
             self.cut_output_path = out_path
-            self.cut_status_label.config(text=f"Đã cắt: {out_path}", foreground="green")
+            self.cut_status_label.config(text=self.translator.get("calibration.replay.cut_success", "Đã cắt: {path}").replace("{path}", str(out_path)), foreground="green")
             self.bag_path_var.set(out_path)
             self._update_bag_info(out_path)
-            self.log(f"✅ Cắt thành công -> {out_path}")
+            self.log(self.translator.get("calibration.replay.cut_success_log", "✅ Cắt thành công -> {path}").replace("{path}", str(out_path)))
         else:
-            self.cut_status_label.config(text=f"Cắt thất bại: {message}", foreground="red")
-            self.log(f"❌ Cắt thất bại: {message}")
-            messagebox.showerror("Lỗi", f"Cắt bag thất bại: {message}")
+            self.cut_status_label.config(text=self.translator.get("calibration.replay.cut_failed", "Cắt thất bại: {message}").replace("{message}", str(message)), foreground="red")
+            self.log(self.translator.get("calibration.replay.cut_failed_log", "❌ Cắt thất bại: {message}").replace("{message}", str(message)))
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.replay.message.cut_failed", "Cắt bag thất bại: {message}").replace("{message}", str(message))
+            )
 
     def start_replay(self):
         """Cắt 5s -> Record -> Replay -> Khi replay kết thúc thì dừng record"""
         if self.is_replaying or self.is_cutting or self.is_recording:
-            messagebox.showwarning("Cảnh báo", "Đang chạy tác vụ khác, vui lòng dừng trước")
+            messagebox.showwarning(
+                self.translator.get("dialog.warning", "Warning"),
+                self.translator.get("calibration.replay.message.task_running", "Đang chạy tác vụ khác, vui lòng dừng trước")
+            )
             return
 
         bag_path = self.bag_path_var.get()
         if not bag_path:
-            messagebox.showerror("Lỗi", "Vui lòng chọn bag folder")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.replay.message.please_select_bag", "Vui lòng chọn bag folder")
+            )
             return
 
         bag_path_obj = Path(bag_path)
         if not bag_path_obj.exists():
-            messagebox.showerror("Lỗi", f"Bag folder không tồn tại: {bag_path}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.replay.message.bag_not_exists", "Bag folder không tồn tại: {path}").replace("{path}", bag_path)
+            )
             return
 
         ws_setup = self.workspace_path / "install" / "setup.sh"
         if not ws_setup.exists():
             messagebox.showerror(
-                "Lỗi",
-                f"Không tìm thấy ws/install/setup.sh tại: {ws_setup}\n"
-                "Vui lòng build workspace trước."
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.replay.message.setup_not_found_build", "Không tìm thấy ws/install/setup.sh tại: {path}\nVui lòng build workspace trước.").replace("{path}", str(ws_setup))
             )
             return
 
         # UI trạng thái cắt trước khi replay
         self.is_cutting = True
         self.cut_output_path = None
-        self.cut_status_label.config(text="Đang cắt 5s dữ liệu trước khi replay...", foreground="orange")
+        self.cut_status_label.config(text=self.translator.get("calibration.replay.cutting_before_replay", "Đang cắt 5s dữ liệu trước khi replay..."), foreground="orange")
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.DISABLED)
-        self.status_label.config(text="Trạng thái: Đang cắt 5s...", foreground="orange")
+        self.status_label.config(text=self.translator.get("calibration.replay.status.cutting_5s", "Trạng thái: Đang cắt 5s..."), foreground="orange")
         self.log("🔧 Đang cắt 5s dữ liệu (timestamp) trước khi replay...")
 
         def worker():
@@ -329,16 +392,19 @@ class ReplayCalibrationTab(ttk.Frame):
         """Sau khi cắt xong, tự động replay file đã cắt"""
         self.is_cutting = False
         if not success or not out_path:
-            self.cut_status_label.config(text=f"Cắt thất bại: {message}", foreground="red")
-            self.status_label.config(text="Trạng thái: Sẵn sàng", foreground="gray")
+            self.cut_status_label.config(text=self.translator.get("calibration.replay.cut_failed", "Cắt thất bại: {message}").replace("{message}", str(message)), foreground="red")
+            self.status_label.config(text=self.translator.get("calibration.replay.status.ready", "Trạng thái: Sẵn sàng"), foreground="gray")
             self.start_btn.config(state=tk.NORMAL)
             self.stop_btn.config(state=tk.DISABLED)
-            messagebox.showerror("Lỗi", f"Cắt bag thất bại: {message}")
+            messagebox.showerror(
+                self.translator.get("dialog.error", "Error"),
+                self.translator.get("calibration.replay.message.cut_failed", "Cắt bag thất bại: {message}").replace("{message}", str(message))
+            )
             return
 
         # Cập nhật info và dùng file đã cắt để replay
         self.cut_output_path = out_path
-        self.cut_status_label.config(text=f"Đã cắt: {out_path}", foreground="green")
+        self.cut_status_label.config(text=self.translator.get("calibration.replay.cut_success", "Đã cắt: {path}").replace("{path}", str(out_path)), foreground="green")
         self.bag_path_var.set(out_path)
         self._update_bag_info(out_path)
         self.log(f"✅ Cắt thành công -> {out_path}")
@@ -461,11 +527,13 @@ class ReplayCalibrationTab(ttk.Frame):
             self.start_btn.config(state=tk.DISABLED)
             self.stop_btn.config(state=tk.NORMAL)
             self.status_label.config(
-                text="Trạng thái: Đang replay...",
+                text=self.translator.get("calibration.replay.status.replaying", "Trạng thái: Đang replay..."),
                 foreground="orange"
             )
+            loop_text = self.translator.get("calibration.replay.yes", "Có") if loop else self.translator.get("calibration.replay.no", "Không")
+            clock_text = self.translator.get("calibration.replay.yes", "Có") if clock else self.translator.get("calibration.replay.no", "Không")
             self.info_label.config(
-                text=f"Đang replay: {bag_path_obj.name}\nRate: {rate}x | Loop: {'Có' if loop else 'Không'} | Clock: {'Có' if clock else 'Không'}"
+                text=self.translator.get("calibration.replay.replaying_info", "Đang replay: {name}\nRate: {rate}x | Loop: {loop} | Clock: {clock}").replace("{name}", bag_path_obj.name).replace("{rate}", str(rate)).replace("{loop}", loop_text).replace("{clock}", clock_text)
             )
 
             # Khởi chạy monitor replay process
@@ -482,9 +550,9 @@ class ReplayCalibrationTab(ttk.Frame):
             self.log("✅ Replay đã được khởi động")
 
         except Exception as e:
-            error_msg = f"Không thể bắt đầu replay: {e}"
+            error_msg = self.translator.get("calibration.replay.message.cannot_start_replay", "Không thể bắt đầu replay: {error}").replace("{error}", str(e))
             self.log(f"❌ Lỗi: {error_msg}")
-            messagebox.showerror("Lỗi", error_msg)
+            messagebox.showerror(self.translator.get("dialog.error", "Error"), error_msg)
             # Nếu record đã khởi chạy thì dừng
             self._stop_record_process()
             self.is_replaying = False
@@ -533,19 +601,19 @@ class ReplayCalibrationTab(ttk.Frame):
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
         self.status_label.config(
-            text="Trạng thái: Đã dừng",
+            text=self.translator.get("calibration.replay.status.stopped", "Trạng thái: Đã dừng"),
             foreground="green"
         )
 
         if self.bag_path:
             bag_name = Path(self.bag_path).name
             self.info_label.config(
-                text=f"Đã dừng replay\nBag: {bag_name}"
+                text=self.translator.get("calibration.replay.stopped_info", "Đã dừng replay\nBag: {name}").replace("{name}", bag_name)
             )
-            self.log(f"✅ Replay đã dừng. Bag: {bag_name}")
+            self.log(self.translator.get("calibration.replay.stopped_log", "✅ Replay đã dừng. Bag: {name}").replace("{name}", bag_name))
         else:
-            self.info_label.config(text="Đã dừng replay")
-            self.log("✅ Replay đã dừng")
+            self.info_label.config(text=self.translator.get("calibration.replay.stopped", "Đã dừng replay"))
+            self.log(self.translator.get("calibration.replay.stopped_log_simple", "✅ Replay đã dừng"))
 
     def _get_bag_duration(self, bag_path_obj: Path) -> float:
         """Lấy duration của bag file (seconds)"""
@@ -735,20 +803,23 @@ class ReplayCalibrationTab(ttk.Frame):
             self.start_btn.config(state=tk.NORMAL)
             self.stop_btn.config(state=tk.DISABLED)
             self.status_label.config(
-                text="Trạng thái: Đã hoàn thành",
+                text=self.translator.get("calibration.replay.status.completed", "Trạng thái: Đã hoàn thành"),
                 foreground="green"
             )
             if self.bag_path:
                 bag_name = Path(self.bag_path).name
                 self.info_label.config(
-                    text=f"Replay đã hoàn thành\nBag: {bag_name}\nRecord đã được dừng tự động"
+                    text=self.translator.get("calibration.replay.completed_info", "Replay đã hoàn thành\nBag: {name}\nRecord đã được dừng tự động").replace("{name}", bag_name)
                 )
                 try:
-                    messagebox.showinfo("Replay hoàn thành", f"Đã phát xong: {bag_name}\nRecord đã được dừng tự động")
+                    messagebox.showinfo(
+                        self.translator.get("calibration.replay.completed_title", "Replay hoàn thành"),
+                        self.translator.get("calibration.replay.completed_message", "Đã phát xong: {name}\nRecord đã được dừng tự động").replace("{name}", bag_name)
+                    )
                 except Exception:
                     pass
             else:
-                self.info_label.config(text="Replay đã hoàn thành\nRecord đã được dừng")
+                self.info_label.config(text=self.translator.get("calibration.replay.completed_simple", "Replay đã hoàn thành\nRecord đã được dừng"))
         except Exception as e:
             self.log(f"❌ Lỗi khi update UI: {e}")
             # Đảm bảo state được reset ngay cả khi có lỗi

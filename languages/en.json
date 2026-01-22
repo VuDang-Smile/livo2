@@ -3,7 +3,8 @@
         "livox_panel": "Livox control panel",
         "bag_mapping_system": "Bag Mapping System",
         "worker_interface": "Worker Interface | System Monitoring",
-        "livox_ip_discovery": "Livox MID360 IP Discovery Tool"
+        "livox_ip_discovery": "Livox MID360 IP Discovery Tool",
+        "calibration_standalone_gui": "Calibration Standalone GUI"
     },
     "label": {
         "livox_driver_2": "LIVOX DRIVER 2",
@@ -567,6 +568,7 @@
         "error": "Error",
         "warning": "Warning",
         "success": "Success",
+        "info": "Information",
         "library_missing": "Missing Library",
         "pcd_dir_not_exists": "PCD directory does not exist: {path}",
         "no_pcd_files_warning": "No PCD files found in directory: {path}",
@@ -590,6 +592,165 @@
         "choose_design_obj_file": "Choose Design OBJ File",
         "choose_design_pcd_file": "Choose Design PCD File",
         "low_similarity_warning_title": "Low similarity warning"
+    },
+    "tab": {
+        "replay_calibration": "Replay Calibration",
+        "preprocessing": "Preprocessing",
+        "initial_guess": "Initial Guess",
+        "calibration": "Calibration",
+        "export_results": "Export Results"
+    },
+    "status": {
+        "ready": "Status: Ready"
+    },
+    "calibration": {
+        "preprocess_instructions": "Preprocessing data from rosbag to prepare for calibration (equirectangular camera)",
+        "initial_guess_instructions": "Create initial guess for calibration (manual or automatic)",
+        "calibrate_instructions": "Run fine registration to refine calibration",
+        "export_instructions": "Export and convert calibration results to FAST-LIVO2 format",
+        "label": {
+            "bags_directory": "Bags directory:",
+            "output_directory": "Output directory:",
+            "preprocessed_directory": "Preprocessed directory:",
+            "camera_model": "Camera Model",
+            "select_camera_model": "Select camera projection model:",
+            "options": "Options",
+            "mode": "Mode",
+            "registration_type": "Registration type:",
+            "calib_json_file": "File calib.json:",
+            "output_yaml": "Output YAML:",
+            "results": "Results"
+        },
+        "camera_model": {
+            "equirectangular": "Equirectangular (default for 360° cameras)",
+            "auto": "Auto-detect from camera_info topic",
+            "plumb_bob": "Plumb Bob (pinhole with radial/tangential distortion)",
+            "fisheye": "Fisheye (equidistant)",
+            "omnidir": "Omnidirectional"
+        },
+        "option": {
+            "auto_detect_topics": "Auto-detect topics (-a)",
+            "dynamic_lidar": "Dynamic LiDAR integration (-d) - for spinning LiDAR",
+            "visualize": "Visualize (-v)",
+            "auto_quit": "Auto quit after calibration completes (recommended)",
+            "background": "Run in background (no viewer display) - recommended"
+        },
+        "mode": {
+            "manual": "Manual - Select correspondences manually",
+            "automatic": "Automatic - Use SuperGlue (requires license)"
+        },
+        "registration_type": {
+            "nid_bfgs": "NID-BFGS (faster, recommended)",
+            "nid_nelder_mead": "NID-Nelder-Mead (slower but more stable)"
+        },
+        "button": {
+            "run_preprocessing": "Run Preprocessing",
+            "run_initial_guess": "Run Initial Guess",
+            "run_calibration": "Run Calibration",
+            "stop_calibration": "Stop Calibration",
+            "convert_to_fast_livo2": "Convert to FAST-LIVO2"
+        },
+        "status": {
+            "recording_bag": "Status: Recording bag...",
+            "record_stopped": "Status: Record stopped",
+            "record_completed": "Status: Record completed",
+            "preprocessing": "Status: Preprocessing...",
+            "preprocessing_completed": "Status: Preprocessing completed",
+            "preprocessing_failed": "Status: Preprocessing failed",
+            "running_initial_guess": "Status: Running initial guess...",
+            "initial_guess_completed": "Status: Initial guess completed",
+            "initial_guess_failed": "Status: Initial guess failed",
+            "calibrating": "Status: Calibrating...",
+            "calibration_stopped": "Status: Calibration stopped",
+            "calibration_completed": "Status: Calibration completed",
+            "calibration_failed": "Status: Calibration failed",
+            "converting_building": "Status: Converting & building...",
+            "completed": "Status: Completed",
+            "error": "Status: Error"
+        },
+        "message": {
+            "recording_in_progress": "Recording in progress, please stop first",
+            "cannot_create_directory": "Cannot create directory: {error}",
+            "please_enter_topic": "Please enter at least one topic",
+            "cannot_start_record": "Cannot start recording: {error}",
+            "please_select_valid_input": "Please select a valid input directory",
+            "please_select_output": "Please select output directory",
+            "setup_not_found": "Setup.sh not found at: {path}",
+            "cannot_run_preprocessing": "Cannot run preprocessing: {error}",
+            "please_select_valid_preprocessed": "Please select a valid preprocessed directory",
+            "automatic_mode_needs_superglue": "Automatic mode requires SuperGlue. Please run find_matches_superglue first.",
+            "cannot_run_initial_guess": "Cannot run initial guess: {error}",
+            "cannot_run_calibration": "Cannot run calibration: {error}",
+            "please_select_valid_calib_json": "Please select a valid calib.json file",
+            "cannot_read_file": "Cannot read file: {error}",
+            "camera_info_publisher_running": "Camera info publisher is running",
+            "cannot_launch_camera_info_publisher": "Cannot launch camera_info_publisher: {error}",
+            "convert_build_completed": "Convert and build completed"
+        },
+        "replay": {
+            "title": "Replay Calibration",
+            "choose_bag_folder": "Choose Bag Folder",
+            "bag_info": "Bag Information",
+            "no_bag_selected": "No bag folder selected",
+            "not_cut_5s": "Not cut 5s",
+            "bag_not_exists": "Bag folder does not exist",
+            "bag_folder": "Bag folder: {name}",
+            "directory_not_confirmed": "Directory: {name} (not confirmed as bag folder)",
+            "error": "Error: {error}",
+            "getting_bag_info": "Getting bag information...",
+            "bag_info_label": "Bag info:",
+            "bag_info_success": "✓ Successfully retrieved bag information",
+            "cannot_get_bag_info": "⚠️  Cannot get bag information: {error}",
+            "error_getting_bag_info": "⚠️  Error getting bag information: {error}",
+            "cutting_5s": "Cutting 5s data...",
+            "cutting_before_replay": "Cutting 5s data before replay...",
+            "cut_success": "Cut: {path}",
+            "cut_failed": "Cut failed: {message}",
+            "cut_success_log": "✅ Cut successful -> {path}",
+            "cut_failed_log": "❌ Cut failed: {message}",
+            "button": {
+                "start": "Start Replay",
+                "stop": "Stop Replay"
+            },
+            "status": {
+                "ready": "Status: Ready",
+                "cutting_5s": "Status: Cutting 5s...",
+                "replaying": "Status: Replaying...",
+                "stopped": "Status: Stopped",
+                "completed": "Status: Completed"
+            },
+            "message": {
+                "cutting": "Cutting bag, please wait...",
+                "please_select_bag": "Please select bag folder",
+                "bag_not_exists": "Bag folder does not exist: {path}",
+                "setup_not_found": "Setup.sh not found at: {path}",
+                "cut_failed": "Cut bag failed: {message}",
+                "task_running": "Another task is running, please stop first",
+                "setup_not_found_build": "Setup.sh not found at: {path}\nPlease build workspace first.",
+                "cannot_start_replay": "Cannot start replay: {error}"
+            },
+            "dialog": {
+                "choose_bag_directory": "Choose directory containing bag files"
+            },
+            "replaying_info": "Replaying: {name}\nRate: {rate}x | Loop: {loop} | Clock: {clock}",
+            "stopped_info": "Replay stopped\nBag: {name}",
+            "stopped": "Replay stopped",
+            "stopped_log": "✅ Replay stopped. Bag: {name}",
+            "stopped_log_simple": "✅ Replay stopped",
+            "completed_title": "Replay Completed",
+            "completed_message": "Finished playing: {name}\nRecord has been stopped automatically",
+            "completed_info": "Replay completed\nBag: {name}\nRecord has been stopped automatically",
+            "completed_simple": "Replay completed\nRecord has been stopped",
+            "yes": "Yes",
+            "no": "No"
+        },
+        "dialog": {
+            "choose_bag_directory": "Choose directory to save bag",
+            "choose_bags_directory": "Choose directory containing bags",
+            "choose_output_directory": "Choose output directory",
+            "choose_preprocessed_directory": "Choose preprocessed directory",
+            "choose_calib_json": "Choose calib.json file"
+        }
     },
     "category": {
         "roadheader": "Roadheader",
