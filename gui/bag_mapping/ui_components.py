@@ -161,7 +161,7 @@ class UIComponentsBuilder:
         """Setup preview/RViz section với progress, design comparison, QR codes, và log"""
         self.preview_card = tk.LabelFrame(
             self.workspace,
-            text=self.translator.get('label.visualization_preview', 'Visualization Preview'),
+            text="",
             padx=15,
             pady=10,
         )
@@ -421,7 +421,7 @@ class UIComponentsBuilder:
         
         # Preview card
         if self.preview_card:
-            self.preview_card.config(text=self.translator.get('label.visualization_preview', 'Visualization Preview'))
+            self.preview_card.config(text="")
         
         if self.rviz_check:
             self.rviz_check.config(text=self.translator.get('label.use_rviz2_external_view', 'Use RViz2 External View'))
