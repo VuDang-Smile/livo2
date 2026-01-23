@@ -189,6 +189,7 @@ class WorkerInterface:
         self.root.geometry("1100x700")
         
         self.is_running = False
+        self.auto_start_triggered = False  # Flag để tránh double-start
         
         # Paths
         self.workspace_path = Path(project_root) / "ws"
@@ -292,6 +293,10 @@ class WorkerInterface:
         # Update UI texts after all components are set up
         self.update_ui_texts()
         
+        # Kiểm tra và tự động đăng ký thiết bị nếu chưa có trên backend
+        # Gọi trong thread để không block UI
+        threading.Thread(target=self.check_and_auto_register, daemon=True).start()
+        
         # Cập nhật trạng thái vehicle thành online khi khởi động
         # Gọi sau khi setup_vehicle_info để có vehicle_id
         if self.vehicle_id:
@@ -301,6 +306,11 @@ class WorkerInterface:
         
         # Tự động tải map và QR khi khởi động
         self.download_map_and_qr()
+        
+        # Kiểm tra nếu map đã tồn tại sẵn (không cần download)
+        if self.default_map_root.exists() and (self.default_map_root / "pose.json").exists():
+            # Map đã có sẵn, enable nút và tự động start
+            self.root.after(500, self._on_map_downloaded)  # Delay 0.5 giây để đảm bảo UI đã render xong
         
         # Bắt đầu monitoring kết nối thiết bị định kỳ
         self.start_device_connection_monitoring()
@@ -528,6 +538,7 @@ class WorkerInterface:
         """Xử lý UI khi localization dừng"""
         self.is_localization_running = False
         self.is_running = False
+        self.auto_start_triggered = False  # Reset flag khi stop
         self.btn_start.config(text=self.translator.get('button.start_moving', '▶ START MOVING'), state=tk.NORMAL)
         self.btn_stop.config(state=tk.DISABLED)
         self.status_text.config(text=self.translator.get('label.stopped', 'System: Stopped'))
@@ -1564,7 +1575,126 @@ class WorkerInterface:
             mac = uuid.getnode()
             return ':'.join(['{:02x}'.format((mac >> elements) & 0xff) for elements in range(40, -1, -8)])
         except: return "unknown"
-
+    
+    def is_device_registered(self, vehicle_id):
+        """Kiểm tra thiết bị đã đăng ký trên backend chưa"""
+        try:
+            url = f'{VEHICLE_ENDPOINT}{vehicle_id}'
+            headers = {
+                'accept': 'application/json'
+            }
+            response = requests.get(url, headers=headers, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("vehicle_id"):
+                    return True
+            return False
+        except requests.exceptions.RequestException:
+            return False
+    
+    def check_and_auto_register(self):
+        """Kiểm tra và tự động đăng ký thiết bị nếu chưa có trên backend với vai trò worker"""
+        try:
+            # Lấy MAC address
+            mac = self.get_mac_address()
+            if mac == "unknown":
+                self.log(self.translator.get('log.cannot_get_mac', '⚠️ Cannot get MAC address'))
+                return
+            
+            # Tạo vehicle_id từ MAC (12 ký tự đầu, không có dấu :)
+            vehicle_id = mac.lower().replace(':', '')[:12]
+            
+            # Kiểm tra đã đăng ký chưa
+            if self.is_device_registered(vehicle_id):
+                self.log(self.translator.get('log.device_already_registered', '✅ Device already registered on backend'))
+                return
+            
+            # Thiết bị chưa đăng ký, tự động đăng ký
+            self.log(self.translator.get('log.device_not_registered', '⚠️ Device not registered. Auto-registering as worker...'))
+            
+            # Fetch available categories và types từ backend
+            available_categories = []
+            available_types = []
+            worker_category = None
+            worker_type = None
+            
+            try:
+                # Fetch Categories
+                categories_url = f"{self.backend_base_url}/api/v1/vehicles/categories"
+                response = requests.get(categories_url, headers=HEADERS, timeout=API_TIMEOUT)
+                if response.status_code == 200:
+                    data = response.json()
+                    available_categories = data.get("categories", [])
+                    # Tìm "worker" trong categories (case-insensitive)
+                    for cat in available_categories:
+                        if cat.lower() == "worker":
+                            worker_category = cat
+                            break
+                
+                # Fetch Types
+                types_url = f"{self.backend_base_url}/api/v1/vehicles/types"
+                response = requests.get(types_url, headers=HEADERS, timeout=API_TIMEOUT)
+                if response.status_code == 200:
+                    data = response.json()
+                    available_types = data.get("types", [])
+                    # Tìm "worker" trong types (case-insensitive)
+                    for t_val in available_types:
+                        if t_val.lower() == "worker":
+                            worker_type = t_val
+                            break
+            except Exception as e:
+                self.log(self.translator.get('log.error_fetching_enums', '⚠️ Error fetching categories/types: {error}').replace('{error}', str(e)))
+            
+            # Tạo payload đăng ký
+            payload = {
+                "vehicle_id": vehicle_id,
+                "name": f"Worker-{vehicle_id}",
+                "description": f"Auto-registered worker device (MAC: {mac})",
+                "metadata": {}
+            }
+            
+            # Thêm vehicle_category nếu tìm thấy worker
+            if worker_category:
+                payload["vehicle_category"] = worker_category
+            elif available_categories:
+                # Nếu không tìm thấy "worker", thử dùng category đầu tiên
+                payload["vehicle_category"] = available_categories[0]
+            
+            # Thêm vehicle_type nếu tìm thấy worker
+            if worker_type:
+                payload["vehicle_type"] = worker_type
+            elif available_types:
+                # Nếu không tìm thấy "worker", thử dùng type đầu tiên
+                payload["vehicle_type"] = available_types[0]
+            
+            # Gửi request đăng ký
+            response = requests.post(VEHICLE_ENDPOINT, json=payload, headers=HEADERS, timeout=API_TIMEOUT)
+            
+            if response.status_code in [200, 201]:
+                self.log(self.translator.get('log.auto_registration_success', '✅ Auto-registration successful! Device registered as worker'))
+                # Cập nhật vehicle_id và refresh info
+                self.vehicle_id = vehicle_id
+                # Cập nhật UI trong main thread
+                self.root.after(0, self._on_auto_registration_success)
+            else:
+                error_msg = response.text[:200] if response.text else "Unknown error"
+                self.log(self.translator.get('log.auto_registration_failed', '❌ Auto-registration failed: {status} - {error}').replace('{status}', str(response.status_code)).replace('{error}', error_msg))
+        
+        except Exception as e:
+            self.log(self.translator.get('log.auto_registration_error', '❌ Error during auto-registration: {error}').replace('{error}', str(e)))
+    
+    def _on_auto_registration_success(self):
+        """Xử lý sau khi auto-registration thành công"""
+        # Refresh vehicle info
+        if hasattr(self, 'refresh_vehicle_info'):
+            self.refresh_vehicle_info()
+        # Cập nhật trạng thái vehicle thành online
+        if self.vehicle_id:
+            self.update_vehicle_status("online", refresh_info=True)
+            # Bắt đầu heartbeat nếu chưa bắt đầu
+            if not self.heartbeat_timer_id:
+                self.start_heartbeat()
+    
     def log(self, message):
         self.log_panel.config(state='normal')
         time_str = datetime.now().strftime("%H:%M:%S")
@@ -1768,6 +1898,7 @@ class WorkerInterface:
         if self.is_livox_driver_running:
             self.stop_livox_driver()
         self.is_running = False
+        self.auto_start_triggered = False  # Reset flag khi stop
         self.btn_start.config(text=self.translator.get('button.start_moving', '▶ START MOVING'), state=tk.NORMAL)
         self.btn_stop.config(state=tk.DISABLED)
         self.status_text.config(text=self.translator.get('label.stopped', 'System: Stopped'))
@@ -1895,6 +2026,21 @@ class WorkerInterface:
         # Enable nút START MOVING
         self.btn_start.config(state=tk.NORMAL)
         self.status_text.config(text=self.translator.get('label.system_ready', 'System: Ready to start'))
+        
+        # Tự động bấm nút START MOVING sau delay ngắn
+        if not self.auto_start_triggered:
+            self.auto_start_triggered = True
+            self.log(self.translator.get('log.auto_starting', '⏱️ Auto-starting in 1 second...'))
+            # Delay 1 giây (1000ms) trước khi tự động start
+            self.root.after(1000, self._auto_start_movement)
+    
+    def _auto_start_movement(self):
+        """Tự động bấm nút START MOVING"""
+        if not self.is_running and self.btn_start['state'] == tk.NORMAL:
+            self.log(self.translator.get('log.auto_start_triggered', '🚀 Auto-starting movement...'))
+            self.toggle_movement()
+        else:
+            self.log(self.translator.get('log.auto_start_skipped', '⏭️ Auto-start skipped (system already running or button disabled)'))
     
     def update_vehicle_status(self, status, refresh_info=False):
         """Cập nhật trạng thái vehicle lên backend"""
