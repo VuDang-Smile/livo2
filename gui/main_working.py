@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import scrolledtext
+from tkinter import scrolledtext, messagebox
 from datetime import datetime
 import uuid
 import subprocess
@@ -197,6 +197,8 @@ class WorkerInterface:
         self.default_map_root = self.log_path / "fastloc_map"
         self.qr_detect_path = self.log_path / "QR_detect.json"
         self.backend_base_url = BACKEND_HOST.rstrip("/")
+        self.autostart_config_path = Path(project_root) / "autostart_config.json"
+        self.install_autostart_script = Path(project_root) / "install_autostart.sh"
         
         # Localization process
         self.loc_process = None
@@ -321,6 +323,9 @@ class WorkerInterface:
         
         # Thêm handler khi đóng cửa sổ
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Kiểm tra và hiển thị thông báo autostart nếu cần (sau khi UI đã load, delay 5 giây để không gây khó chịu)
+        self.root.after(5000, self.check_and_prompt_autostart)
     
     def setup_language_button(self):
         """Setup language toggle button"""
@@ -369,8 +374,6 @@ class WorkerInterface:
         # Update movement control frame
         if hasattr(self, 'btn_start'):
             self.btn_start.config(text=self.translator.get('button.start_moving', '▶ START MOVING'))
-        if hasattr(self, 'btn_stop'):
-            self.btn_stop.config(text=self.translator.get('button.stop', 'STOP'))
         if hasattr(self, 'status_text'):
             current_text = self.status_text.cget('text')
             if 'Đang tải map' in current_text or 'Loading map' in current_text:
@@ -383,8 +386,16 @@ class WorkerInterface:
                 self.status_text.config(text=self.translator.get('label.system_ready', 'System: Ready to start'))
         
         # Update preview frame
+        if hasattr(self, 'preview_frame'):
+            self.preview_frame.config(text=self.translator.get('label.preview', 'Preview'))
         if hasattr(self, 'btn_rviz'):
             self.btn_rviz.config(text="📊 " + self.translator.get("button.launch_rviz2", "Launch RViz2"))
+        
+        # Update settings frame
+        if hasattr(self, 'settings_frame'):
+            self.settings_frame.config(text=self.translator.get('label.settings', 'Settings'))
+        if hasattr(self, 'chk_autostart'):
+            self.chk_autostart.config(text=self.translator.get('label.autostart', 'Auto-start on boot'))
         
         # Update log area
         if hasattr(self, 'log_title_label'):
@@ -429,6 +440,10 @@ class WorkerInterface:
             self.movement_control_frame.config(text=self.translator.get('label.movement_control', 'Movement Control'))
         if hasattr(self, 'preview_frame'):
             self.preview_frame.config(text=self.translator.get('label.preview', 'Preview'))
+        if hasattr(self, 'settings_frame'):
+            self.settings_frame.config(text=self.translator.get('label.settings', 'Settings'))
+        if hasattr(self, 'chk_autostart'):
+            self.chk_autostart.config(text=self.translator.get('label.autostart', 'Auto-start on boot'))
         if hasattr(self, 'vehicle_info_frame'):
             self.vehicle_info_frame.config(text=self.translator.get('label.vehicle_information', 'Vehicle Information'))
         if hasattr(self, 'map_info_frame'):
@@ -454,30 +469,65 @@ class WorkerInterface:
         self.btn_start = tk.Button(frame, text=self.translator.get('button.start_moving', '▶ START MOVING'), command=self.toggle_movement, state=tk.DISABLED)
         self.btn_start.pack(fill=tk.X, pady=2)
 
-        self.btn_stop = tk.Button(frame, text=self.translator.get('button.stop', 'STOP'), command=self.stop_system, state=tk.DISABLED)
-        self.btn_stop.pack(fill=tk.X, pady=2)
-
         self.status_text = tk.Label(frame, text=self.translator.get('label.loading_map', 'System: Loading map...'), font=("Arial", 9, "italic"))
         self.status_text.pack(pady=5)
 
     def setup_options(self):
-        frame = tk.LabelFrame(self.sidebar, text=self.translator.get('label.preview', 'Preview'), padx=5, pady=5)
-        frame.pack(fill=tk.X, pady=5, padx=5)
-        self.preview_frame = frame  # Store reference for update_ui_texts
-
-        # self.rviz_var = tk.BooleanVar(value=False)
-        # self.chk_rviz = tk.Checkbutton(frame, text="Show RViz2 Interface", 
-        #                                variable=self.rviz_var, 
-        #                                command=self.on_rviz_toggle)
-        # self.chk_rviz.pack(anchor="w")
+        # Frame Preview
+        preview_frame = tk.LabelFrame(self.sidebar, text=self.translator.get('label.preview', 'Preview'), padx=5, pady=5)
+        preview_frame.pack(fill=tk.X, pady=5, padx=5)
+        self.preview_frame = preview_frame  # Store reference for update_ui_texts
 
         self.btn_rviz = tk.Button(
-            frame, 
+            preview_frame, 
             text="📊 " + self.translator.get("button.launch_rviz2", "Launch RViz2"), 
             command=self.open_rviz,
             width=10
         )
-        self.btn_rviz.pack(side="right", pady=10)  
+        self.btn_rviz.pack(side="right", pady=10)
+        
+        # Frame Settings
+        settings_frame = tk.LabelFrame(self.sidebar, text=self.translator.get('label.settings', 'Settings'), padx=5, pady=5)
+        settings_frame.pack(fill=tk.X, pady=5, padx=5)
+        self.settings_frame = settings_frame  # Store reference for update_ui_texts
+        
+        # Tạo checkbox cho autostart với giá trị mặc định False, sẽ update sau khi check xong
+        self.autostart_var = tk.BooleanVar(value=False)
+        self.chk_autostart = tk.Checkbutton(
+            settings_frame,
+            text=self.translator.get('label.autostart', 'Auto-start on boot'),
+            variable=self.autostart_var,
+            command=self.toggle_autostart
+        )
+        self.chk_autostart.pack(anchor="w", pady=5)
+        
+        # Check autostart status trong background thread để không block UI
+        def check_status():
+            try:
+                enabled = self.check_autostart_enabled()
+                # Update UI trong main thread
+                self.root.after(0, lambda: self.autostart_var.set(enabled))
+            except Exception as e:
+                self.root.after(0, lambda: self.log(f"⚠️ Error checking autostart status: {e}"))
+        
+        threading.Thread(target=check_status, daemon=True).start()  
+    
+    def toggle_autostart(self):
+        """Xử lý khi user bật/tắt autostart từ checkbox"""
+        # Disable checkbox khi đang xử lý để tránh double-click
+        self.chk_autostart.config(state=tk.DISABLED)
+        current_state = self.autostart_var.get()
+        
+        if current_state:
+            # User muốn bật autostart
+            self.chk_autostart.config(text=self.translator.get('log.autostart_enabling', 'Enabling autostart...'))
+            self.log(self.translator.get('log.autostart_enabling', '📋 Enabling autostart...'))
+            self.install_autostart()
+        else:
+            # User muốn tắt autostart
+            self.chk_autostart.config(text=self.translator.get('log.autostart_disabling', 'Disabling autostart...'))
+            self.log(self.translator.get('log.autostart_disabling', '📋 Disabling autostart...'))
+            self.disable_autostart()
     
     def open_rviz(self):
         """Mở RViz2 để xem bản đồ (không khởi động node)"""
@@ -540,7 +590,6 @@ class WorkerInterface:
         self.is_running = False
         self.auto_start_triggered = False  # Reset flag khi stop
         self.btn_start.config(text=self.translator.get('button.start_moving', '▶ START MOVING'), state=tk.NORMAL)
-        self.btn_stop.config(state=tk.DISABLED)
         self.status_text.config(text=self.translator.get('label.stopped', 'System: Stopped'))
     
     def stop_localization(self):
@@ -1713,32 +1762,32 @@ class WorkerInterface:
 
     def toggle_movement(self):
         if not self.is_running:
-            # Khởi động localization node
-            self.start_localization()
+            # Khởi động localization node trong thread để không block UI
+            threading.Thread(target=self.start_localization, daemon=True).start()
         else:
             self.stop_system()
     
     def start_localization(self):
-        """Khởi động localization node"""
+        """Khởi động localization node (chạy trong thread để không block UI)"""
         if self.is_localization_running:
             return
         
         # Kiểm tra map có tồn tại không
         if not self.default_map_root.exists() or not (self.default_map_root / "pose.json").exists():
-            self.log(self.translator.get('log.map_not_ready_wait', '⚠️ Map not ready. Please wait for map download to complete.'))
+            self.root.after(0, lambda: self.log(self.translator.get('log.map_not_ready_wait', '⚠️ Map not ready. Please wait for map download to complete.')))
             return
         
         # Luôn luôn thử start driver khi người dùng bấm START MOVING (giống như recorder)
         # Không check topics trước vì khi thiết bị chưa start thì không có topics
-        self.log("=" * 60)
+        self.root.after(0, lambda: self.log("=" * 60))
         
         # Kiểm tra và launch Theta driver trước (cần cho QR scanning)
-        self.log(self.translator.get('log.checking_theta_driver', '🔍 Checking Theta driver...'))
+        self.root.after(0, lambda: self.log(self.translator.get('log.checking_theta_driver', '🔍 Checking Theta driver...')))
         if self.theta_driver:
             try:
                 # Check USB connection nếu chưa check
                 if not hasattr(self, 'is_theta_connected') or self.is_theta_connected is None:
-                    # Check USB trong main thread với timeout ngắn
+                    # Check USB trong thread với callback
                     self.theta_driver.check_theta_usb_connection(self.check_theta_usb_callback)
                     time.sleep(0.5)  # Đợi một chút để check hoàn thành
                 
@@ -1746,36 +1795,36 @@ class WorkerInterface:
                 if self.is_theta_connected:
                     self._launch_theta_driver_if_needed()
                 else:
-                    self.log(self.translator.get('log.theta_camera_not_connected', '⚠️ Theta camera not connected. QR scanning may not work.'))
+                    self.root.after(0, lambda: self.log(self.translator.get('log.theta_camera_not_connected', '⚠️ Theta camera not connected. QR scanning may not work.')))
             except Exception as e:
-                self.log(f"⚠️ Error checking/launching Theta driver: {e}")
+                self.root.after(0, lambda: self.log(f"⚠️ Error checking/launching Theta driver: {e}"))
         else:
-            self.log(self.translator.get('log.theta_driver_not_available', '⚠️ Theta driver not available. QR scanning will be disabled.'))
+            self.root.after(0, lambda: self.log(self.translator.get('log.theta_driver_not_available', '⚠️ Theta driver not available. QR scanning will be disabled.')))
         
-        self.log(self.translator.get('log.checking_livox_driver', '🔍 Checking Livox driver...'))
+        self.root.after(0, lambda: self.log(self.translator.get('log.checking_livox_driver', '🔍 Checking Livox driver...')))
         
         if not self.is_livox_driver_running:
-            self.log(self.translator.get('log.livox_driver_not_running', '⚠️ Livox driver not running, starting...'))
+            self.root.after(0, lambda: self.log(self.translator.get('log.livox_driver_not_running', '⚠️ Livox driver not running, starting...')))
             # Thử start driver (sẽ tự động detect nếu có thiết bị)
             driver_started = self.start_livox_driver()
             if driver_started:
-                self.log(self.translator.get('log.livox_driver_started', '✅ Livox driver đã khởi động thành công'))
+                self.root.after(0, lambda: self.log(self.translator.get('log.livox_driver_started', '✅ Livox driver đã khởi động thành công')))
             else:
                 # Driver không start được, có thể không có thiết bị hoặc đang replay bag
                 # Vẫn tiếp tục với localization (có thể đang replay bag)
-                self.log(self.translator.get('log.livox_driver_start_failed_continue', '⚠️ Cannot start Livox driver. Continuing with localization (may be bag replay)...'))
+                self.root.after(0, lambda: self.log(self.translator.get('log.livox_driver_start_failed_continue', '⚠️ Cannot start Livox driver. Continuing with localization (may be bag replay)...')))
         else:
-            self.log(self.translator.get('log.livox_driver_already_running', '✅ Livox driver is already running'))
+            self.root.after(0, lambda: self.log(self.translator.get('log.livox_driver_already_running', '✅ Livox driver is already running')))
         
         # Script helper
         run_script = Path(project_root) / "scripts" / "run_localization.sh"
         if not run_script.exists():
-            self.log(self.translator.get('log.localization_script_not_found', '❌ Localization script not found at: {path}').replace('{path}', str(run_script)))
+            self.root.after(0, lambda: self.log(self.translator.get('log.localization_script_not_found', '❌ Localization script not found at: {path}').replace('{path}', str(run_script))))
             return
         
-        self.log("=" * 60)
-        self.log(self.translator.get('log.starting_localization_node', '🚀 Starting Localization node...'))
-        self.log(self.translator.get('log.map_path', '📁 Map: {path}').replace('{path}', str(self.default_map_root)))
+        self.root.after(0, lambda: self.log("=" * 60))
+        self.root.after(0, lambda: self.log(self.translator.get('log.starting_localization_node', '🚀 Starting Localization node...')))
+        self.root.after(0, lambda: self.log(self.translator.get('log.map_path', '📁 Map: {path}').replace('{path}', str(self.default_map_root))))
         
         try:
             # Chạy localization script với RViz disabled (chỉ chạy node)
@@ -1805,14 +1854,13 @@ class WorkerInterface:
             time.sleep(1.0)
             self.start_qr_scanning()
             
-            # Cập nhật UI
-            self.btn_start.config(text=self.translator.get('button.stop_movement', '■ STOP MOVEMENT'), state=tk.NORMAL)
-            self.btn_stop.config(state=tk.NORMAL)
-            self.status_text.config(text=self.translator.get('label.localization_running', 'System: Localization running...'))
-            self.log(self.translator.get('log.localization_node_started', '✅ Localization node started.'))
+            # Cập nhật UI trong main thread
+            self.root.after(0, lambda: self.btn_start.config(text=self.translator.get('button.stop_movement', '■ STOP MOVEMENT'), state=tk.NORMAL))
+            self.root.after(0, lambda: self.status_text.config(text=self.translator.get('label.localization_running', 'System: Localization running...')))
+            self.root.after(0, lambda: self.log(self.translator.get('log.localization_node_started', '✅ Localization node started.')))
             
         except Exception as e:
-            self.log(self.translator.get('log.error_starting_localization', '❌ Error starting localization: {error}').replace('{error}', str(e)))
+            self.root.after(0, lambda: self.log(self.translator.get('log.error_starting_localization', '❌ Error starting localization: {error}').replace('{error}', str(e))))
             self.is_localization_running = False
             self.is_running = False
 
@@ -1900,7 +1948,6 @@ class WorkerInterface:
         self.is_running = False
         self.auto_start_triggered = False  # Reset flag khi stop
         self.btn_start.config(text=self.translator.get('button.start_moving', '▶ START MOVING'), state=tk.NORMAL)
-        self.btn_stop.config(state=tk.DISABLED)
         self.status_text.config(text=self.translator.get('label.stopped', 'System: Stopped'))
         # Reset pose display
         self.reset_pose_display()
@@ -2423,6 +2470,243 @@ class WorkerInterface:
             
         except Exception as e:
             self.log(self.translator.get('log.error_processing_qr', '❌ Error processing QR code: {error}').replace('{error}', str(e)))
+    
+    def load_autostart_config(self):
+        """Load cấu hình autostart từ file JSON"""
+        default_config = {
+            "autostart_enabled": False,
+            "autostart_first_run": True  # True = lần đầu, False = từ lần sau
+        }
+        
+        if self.autostart_config_path.exists():
+            try:
+                with open(self.autostart_config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    # Đảm bảo có tất cả các key cần thiết
+                    for key in default_config:
+                        if key not in config:
+                            config[key] = default_config[key]
+                    # Migration: nếu có autostart_prompt_shown cũ, chuyển sang autostart_first_run
+                    if "autostart_prompt_shown" in config and "autostart_first_run" not in config:
+                        # Nếu đã hỏi rồi (prompt_shown = True), thì không phải lần đầu nữa
+                        config["autostart_first_run"] = not config.get("autostart_prompt_shown", False)
+                    return config
+            except Exception as e:
+                self.log(f"⚠️ Error loading autostart config: {e}")
+                return default_config
+        return default_config
+    
+    def save_autostart_config(self, config):
+        """Lưu cấu hình autostart vào file JSON"""
+        try:
+            with open(self.autostart_config_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            self.log(f"⚠️ Error saving autostart config: {e}")
+    
+    def check_autostart_enabled(self):
+        """Kiểm tra xem autostart đã được bật trong systemd chưa"""
+        try:
+            result = subprocess.run(
+                ['systemctl', '--user', 'is-enabled', 'livo2-working.service'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            return result.returncode == 0 and 'enabled' in result.stdout
+        except Exception as e:
+            self.log(f"⚠️ Error checking autostart status: {e}")
+            return False
+    
+    def install_autostart(self):
+        """Cài đặt autostart bằng cách chạy install_autostart.sh (chạy trong background thread)"""
+        if not self.install_autostart_script.exists():
+            self.log(f"❌ {self.translator.get('error.autostart_script_not_found', 'Autostart script not found')}: {self.install_autostart_script}")
+            self._on_autostart_failed(True, self.translator.get('error.autostart_script_not_found', 'Autostart script not found'))
+            return
+        
+        try:
+            # Chạy script với echo "y" để tự động chấp nhận
+            # Tuy nhiên script hiện tại yêu cầu input, nên ta sẽ chạy non-interactive
+            # Hoặc có thể sửa script để nhận argument --yes
+            # Tạm thời chạy với expect hoặc sửa script
+            # Vì script yêu cầu input, ta sẽ chạy trong thread và hiển thị thông báo
+            def run_install():
+                try:
+                    # Tạo một script wrapper để tự động trả lời yes cho cả 2 prompt
+                    import tempfile
+                    wrapper_script = tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False)
+                    wrapper_script.write(f'''#!/bin/bash
+cd "{Path(project_root)}"
+# Trả lời yes cho cả 2 prompt (overwrite nếu có, và confirm)
+printf "y\\ny\\n" | bash "{self.install_autostart_script}"
+''')
+                    wrapper_script.close()
+                    os.chmod(wrapper_script.name, 0o755)
+                    
+                    result = subprocess.run(
+                        ['bash', wrapper_script.name],
+                        capture_output=True,
+                        text=True,
+                        timeout=60
+                    )
+                    
+                    os.unlink(wrapper_script.name)
+                    
+                    # Kiểm tra xem service có được enable thành công không
+                    # "Created symlink" là thông báo thành công từ systemctl, không phải lỗi
+                    # Hoặc có thể script exit với code khác 0 nhưng service vẫn được enable
+                    time.sleep(0.5)  # Đợi một chút để systemd cập nhật
+                    
+                    # Kiểm tra trực tiếp xem service có được enable không (source of truth)
+                    if self.check_autostart_enabled():
+                        # Cập nhật config
+                        config = self.load_autostart_config()
+                        config["autostart_enabled"] = True
+                        self.save_autostart_config(config)
+                        # Gọi callback trong main thread
+                        self.root.after(0, lambda: self._on_autostart_enabled())
+                    else:
+                        # Service chưa được enable, kiểm tra output để xem có thông báo thành công không
+                        output = (result.stdout or "") + (result.stderr or "")
+                        if "Created symlink" in output or "Service enabled" in output or result.returncode == 0:
+                            # Có thể service đang được enable nhưng chưa kịp cập nhật, thử lại
+                            time.sleep(1)
+                            if self.check_autostart_enabled():
+                                config = self.load_autostart_config()
+                                config["autostart_enabled"] = True
+                                self.save_autostart_config(config)
+                                self.root.after(0, lambda: self._on_autostart_enabled())
+                            else:
+                                error_msg = output[:300] if output else "Unknown error"
+                                self.root.after(0, lambda: self._on_autostart_failed(True, error_msg))
+                        else:
+                            error_msg = output[:300] if output else f"Exit code: {result.returncode}"
+                            self.root.after(0, lambda: self._on_autostart_failed(True, error_msg))
+                except Exception as e:
+                    self.root.after(0, lambda: self._on_autostart_failed(True, str(e)))
+            
+            threading.Thread(target=run_install, daemon=True).start()
+        except Exception as e:
+            self._on_autostart_failed(True, str(e))
+    
+    def disable_autostart(self):
+        """Tắt autostart bằng cách disable systemd service (chạy trong background thread)"""
+        def run_disable():
+            try:
+                result = subprocess.run(
+                    ['systemctl', '--user', 'disable', 'livo2-working.service'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                if result.returncode == 0:
+                    # Cập nhật config
+                    config = self.load_autostart_config()
+                    config["autostart_enabled"] = False
+                    self.save_autostart_config(config)
+                    # Gọi callback trong main thread
+                    self.root.after(0, lambda: self._on_autostart_disabled())
+                else:
+                    error_msg = result.stderr or result.stdout
+                    self.root.after(0, lambda: self._on_autostart_failed(False, error_msg))
+            except Exception as e:
+                self.root.after(0, lambda: self._on_autostart_failed(False, str(e)))
+        
+        threading.Thread(target=run_disable, daemon=True).start()
+    
+    def _on_autostart_enabled(self):
+        """Callback khi autostart được enable thành công"""
+        self.chk_autostart.config(
+            state=tk.NORMAL, 
+            text=self.translator.get('label.autostart', 'Auto-start on boot')
+        )
+        self.autostart_var.set(True)
+        self.log(self.translator.get('log.autostart_enabled', '✅ Autostart enabled successfully. Application will start automatically on boot.'))
+    
+    def _on_autostart_disabled(self):
+        """Callback khi autostart được disable thành công"""
+        self.chk_autostart.config(
+            state=tk.NORMAL, 
+            text=self.translator.get('label.autostart', 'Auto-start on boot')
+        )
+        self.autostart_var.set(False)
+        self.log(self.translator.get('log.autostart_disabled', '✅ Autostart disabled successfully. Application will not start automatically on boot.'))
+    
+    def _on_autostart_failed(self, desired_state, error_msg=None):
+        """Callback khi autostart operation fail"""
+        # Revert checkbox state về trạng thái ban đầu
+        self.autostart_var.set(not desired_state)
+        self.chk_autostart.config(
+            state=tk.NORMAL, 
+            text=self.translator.get('label.autostart', 'Auto-start on boot')
+        )
+        
+        # Hiển thị error message
+        if error_msg:
+            error_text = error_msg[:300] if len(error_msg) > 300 else error_msg
+            self.log(f"❌ {self.translator.get('error.autostart_install_failed' if desired_state else 'error.autostart_disable_failed', 'Failed to change autostart status')}: {error_text}")
+            messagebox.showerror(
+                self.translator.get('title.error', 'Error'),
+                self.translator.get(
+                    'error.autostart_install_failed' if desired_state else 'error.autostart_disable_failed',
+                    'Failed to change autostart status'
+                ) + (f": {error_text}" if error_text else "")
+            )
+        else:
+            self.log(f"❌ {self.translator.get('error.autostart_install_failed' if desired_state else 'error.autostart_disable_failed', 'Failed to change autostart status')}")
+            messagebox.showerror(
+                self.translator.get('title.error', 'Error'),
+                self.translator.get(
+                    'error.autostart_install_failed' if desired_state else 'error.autostart_disable_failed',
+                    'Failed to change autostart status'
+                )
+            )
+    
+    def check_and_prompt_autostart(self):
+        """Kiểm tra và hiển thị thông báo hỏi có muốn tự động khởi động khi mới lên"""
+        config = self.load_autostart_config()
+        
+        # Lần đầu tiên: đánh dấu đã chạy lần đầu và không hiển thị thông báo
+        if config.get("autostart_first_run", True):
+            config["autostart_first_run"] = False
+            self.save_autostart_config(config)
+            return
+        
+        # Từ lần thứ 2 trở đi: kiểm tra và hiển thị thông báo nếu chưa bật autostart
+        # Chạy check trong background thread để không block UI
+        def check_and_show_prompt():
+            try:
+                if self.check_autostart_enabled():
+                    # Đã bật rồi, không cần hỏi nữa
+                    return
+                
+                # Hiển thị thông báo hỏi trong main thread
+                self.root.after(0, lambda: self._show_autostart_prompt())
+            except Exception as e:
+                self.root.after(0, lambda: self.log(f"⚠️ Error checking autostart status: {e}"))
+        
+        threading.Thread(target=check_and_show_prompt, daemon=True).start()
+    
+    def _show_autostart_prompt(self):
+        """Hiển thị dialog hỏi user có muốn enable autostart"""
+        response = messagebox.askyesno(
+            self.translator.get('title.autostart', 'Autostart'),
+            self.translator.get('prompt.autostart_question', 
+                              'Do you want to automatically start this application when the computer boots?')
+        )
+        
+        if response:
+            # User chọn Yes, cài đặt autostart
+            self.log(self.translator.get('log.autostart_user_enable', '📋 User chose to enable autostart. Installing...'))
+            self.install_autostart()
+        else:
+            # User chọn No
+            config = self.load_autostart_config()
+            config["autostart_enabled"] = False
+            self.save_autostart_config(config)
+            self.log(self.translator.get('log.autostart_user_disable', '📋 User chose not to enable autostart.'))
     
     def on_closing(self):
         """Xử lý khi đóng cửa sổ"""

@@ -4,7 +4,9 @@
         "bag_mapping_system": "Bag Mapping System",
         "worker_interface": "Worker Interface | System Monitoring",
         "livox_ip_discovery": "Livox MID360 IP Discovery Tool",
-        "calibration_standalone_gui": "Calibration Standalone GUI"
+        "calibration_standalone_gui": "Calibration Standalone GUI",
+        "autostart": "Autostart",
+        "error": "Error"
     },
     "label": {
         "livox_driver_2": "LIVOX DRIVER 2",
@@ -65,6 +67,8 @@
         "system_ready": "System: Ready to start",
         "movement_control": "Movement Control",
         "preview": "Preview",
+        "settings": "Settings",
+        "autostart": "Auto-start on boot",
         "vehicle_information": "Vehicle Information",
         "map_information": "Map Information",
         "pose_orientation": "Pose & Orientation",
@@ -186,6 +190,14 @@
         "registered_successfully": "Registered '{name}' successfully!",
         "registration_error": "Status: {status_code}\n{response_text}",
         "connection_error": "Connection error to {endpoint}:\n{error}"
+    },
+    "prompt": {
+        "autostart_question": "Do you want to automatically start this application when the computer boots?"
+    },
+    "error": {
+        "autostart_script_not_found": "Autostart script not found",
+        "autostart_install_failed": "Failed to install autostart",
+        "autostart_disable_failed": "Failed to disable autostart"
     },
     "button": {
         "cancel": "Cancel",
@@ -561,7 +573,16 @@
         "livox_driver_stopped": "⏹ Livox driver stopped",
         "livox_driver_started": "✅ Livox driver started successfully",
         "livox_driver_already_running": "✅ Livox driver is already running",
-        "theta_driver_already_running": "✅ Theta driver is already running"
+        "theta_driver_already_running": "✅ Theta driver is already running",
+        "autostart_enabling": "📋 Enabling autostart...",
+        "autostart_disabling": "📋 Disabling autostart...",
+        "autostart_enabled": "✅ Autostart enabled successfully. Application will start automatically on boot.",
+        "autostart_disabled": "✅ Autostart disabled successfully. Application will not start automatically on boot.",
+        "autostart_checking": "Checking autostart status...",
+        "autostart_already_enabled": "Autostart is already enabled",
+        "autostart_already_disabled": "Autostart is already disabled",
+        "autostart_user_enable": "📋 User chose to enable autostart. Installing...",
+        "autostart_user_disable": "📋 User chose not to enable autostart."
     },
     "dialog": {
         "choose_bag_folder": "Choose Bag Folder",

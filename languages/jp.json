@@ -4,7 +4,9 @@
         "bag_mapping_system": "Bag Mapping システム",
         "worker_interface": "ワーカーインターフェース | システム監視",
         "livox_ip_discovery": "Livox MID360 IP 検出ツール",
-        "calibration_standalone_gui": "キャリブレーション スタンドアロン GUI"
+        "calibration_standalone_gui": "キャリブレーション スタンドアロン GUI",
+        "autostart": "自動起動",
+        "error": "エラー"
     },
     "label": {
         "livox_driver_2": "LIVOX DRIVER 2",
@@ -65,6 +67,8 @@
         "system_ready": "システム: 起動準備完了",
         "movement_control": "移動制御",
         "preview": "プレビュー",
+        "settings": "設定",
+        "autostart": "起動時に自動起動",
         "vehicle_information": "車両情報",
         "map_information": "マップ情報",
         "pose_orientation": "姿勢と方向",
@@ -186,6 +190,14 @@
         "registered_successfully": "'{name}' の登録が成功しました！",
         "registration_error": "ステータス: {status_code}\n{response_text}",
         "connection_error": "{endpoint} への接続エラー:\n{error}"
+    },
+    "prompt": {
+        "autostart_question": "コンピューター起動時にこのアプリケーションを自動的に起動しますか？"
+    },
+    "error": {
+        "autostart_script_not_found": "自動起動スクリプトが見つかりません",
+        "autostart_install_failed": "自動起動のインストールに失敗しました",
+        "autostart_disable_failed": "自動起動の無効化に失敗しました"
     },
     "button": {
         "cancel": "キャンセル",
@@ -537,7 +549,16 @@
         "latency_high": "❌ 高いレイテンシ ({latency:.2f}ms) - スイッチ/ルーター経由の可能性",
         "build_detected_completed": "✅ ビルド完了を検出しました！",
         "build_completing": "✅ ビルド完了、終了中...",
-        "build_driver_success": "✅ Livoxドライバーのビルドに成功しました！"
+        "build_driver_success": "✅ Livoxドライバーのビルドに成功しました！",
+        "autostart_enabling": "📋 自動起動を有効にしています...",
+        "autostart_disabling": "📋 自動起動を無効にしています...",
+        "autostart_enabled": "✅ 自動起動が正常に有効になりました。アプリケーションは起動時に自動的に開始されます。",
+        "autostart_disabled": "✅ 自動起動が正常に無効になりました。アプリケーションは起動時に自動的に開始されません。",
+        "autostart_checking": "自動起動ステータスを確認中...",
+        "autostart_already_enabled": "自動起動は既に有効です",
+        "autostart_already_disabled": "自動起動は既に無効です",
+        "autostart_user_enable": "📋 ユーザーが自動起動を有効にすることを選択しました。インストール中...",
+        "autostart_user_disable": "📋 ユーザーは自動起動を有効にしないことを選択しました。"
     },
     "dialog": {
         "choose_bag_folder": "Bag フォルダを選択",

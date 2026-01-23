@@ -39,3 +39,6 @@ dependencies/HBA/build_standalone/**
 # ImGui config files
 imgui.ini
 **/imgui.ini
+
+#config
+autostart_config.json
