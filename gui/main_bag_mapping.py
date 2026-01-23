@@ -229,7 +229,6 @@ class BagMappingInterface:
         self.select_bag_label = self.ui_builder.select_bag_label
         self.bag_path_var = self.ui_builder.bag_path_var
         self.browse_btn = self.ui_builder.browse_btn
-        self.map_name_var = self.ui_builder.map_name_var
         self.vehicle_info_var = self.ui_builder.vehicle_info_var
         self.btn_start = self.ui_builder.btn_start
         self.btn_stop = self.ui_builder.btn_stop
@@ -251,6 +250,9 @@ class BagMappingInterface:
         self.design_path_var = self.ui_builder.design_path_var
         self.design_browse_btn = self.ui_builder.design_browse_btn
         self.comparison_status_label = self.ui_builder.comparison_status_label
+        self.tunnel_entrance_x_var = self.ui_builder.tunnel_entrance_x_var
+        self.tunnel_entrance_y_var = self.ui_builder.tunnel_entrance_y_var
+        self.tunnel_entrance_z_var = self.ui_builder.tunnel_entrance_z_var
         self.qr_listbox = self.ui_builder.qr_listbox
         self.system_log_label = self.ui_builder.system_log_label
         self.clear_log_btn = self.ui_builder.clear_log_btn
@@ -375,16 +377,15 @@ class BagMappingInterface:
         self.update_ui_texts()
     
     def update_ui_texts(self):
-        """Update UI texts - delegate to UI builder và language manager"""
+        """Update UI texts - delegate to UI builder"""
         self.root.title(self.translator.get('title.bag_mapping_system', 'Bag Mapping System'))
         
         # Update UI builder
         if hasattr(self, 'ui_builder'):
             self.ui_builder.update_ui_texts()
         
-        # Update language manager
-        if hasattr(self, 'language_manager'):
-            self.language_manager.change_language(self.current_lang)
+        # Note: Không gọi language_manager.change_language() ở đây vì nó sẽ gọi lại ui_updater()
+        # và tạo vòng lặp đệ quy. language_manager.change_language() sẽ tự gọi ui_updater() khi cần.
 
     def setup_control_card(self):
         """Setup control card - delegate to UI builder"""
@@ -415,8 +416,8 @@ class BagMappingInterface:
         if hasattr(self, 'mapping_core'):
             ui_callbacks = {
                 'update_status_label': lambda text, color: self.status_label.config(text=text, foreground=color),
-                'disable_start_button': lambda: self.btn_start.config(state=tk.DISABLED),
-                'enable_start_button': lambda: self.btn_start.config(state=tk.NORMAL),
+                'disable_start_button': lambda: [self.btn_start.config(state=tk.DISABLED), self.btn_stop.config(state=tk.NORMAL)],
+                'enable_start_button': lambda: [self.btn_start.config(state=tk.NORMAL), self.btn_stop.config(state=tk.DISABLED)],
                 'start_bag_playback': self.start_bag_playback,
                 'start_qr_scanning': self.start_qr_scanning_subscriber,
             }
@@ -435,6 +436,9 @@ class BagMappingInterface:
                 # Sync process references
                 self.mapping_process = self.mapping_core.mapping_process
                 self.is_mapping_running = self.mapping_core.is_mapping_running
+                # Disable START button, enable STOP button
+                self.btn_start.config(state=tk.DISABLED)
+                self.btn_stop.config(state=tk.NORMAL)
                 # Auto-start bag playback
                 self.start_bag_playback()
             else:
@@ -476,7 +480,6 @@ class BagMappingInterface:
                 self.btn_upload.config(state=state)
             
             self.upload_manager.start_upload(
-                self.map_name_var,
                 self.vehicle_info_var,
                 self.design_file_path,
                 self.comparison_threshold,
@@ -819,7 +822,7 @@ class BagMappingInterface:
         if hasattr(self, 'mapping_core'):
             ui_callbacks = {
                 'update_status_label': lambda text, color: self.status_label.config(text=text, foreground=color),
-                'enable_start_button': lambda: self.btn_start.config(state=tk.NORMAL),
+                'enable_start_button': lambda: [self.btn_start.config(state=tk.NORMAL), self.btn_stop.config(state=tk.DISABLED)],
             }
             self.mapping_core.monitor_mapping_process(self.root, ui_callbacks)
             # Sync state
@@ -940,7 +943,7 @@ class BagMappingInterface:
         if hasattr(self, 'mapping_core'):
             ui_callbacks = {
                 'update_status_label': lambda text, color: self.status_label.config(text=text, foreground=color),
-                'enable_start_button': lambda: self.btn_start.config(state=tk.NORMAL),
+                'enable_start_button': lambda: [self.btn_start.config(state=tk.NORMAL), self.btn_stop.config(state=tk.DISABLED)],
             }
             self.mapping_core.cleanup_processes(self.root, ui_callbacks)
             # Sync state
@@ -949,6 +952,10 @@ class BagMappingInterface:
             self.is_mapping_running = self.mapping_core.is_mapping_running
             self.is_bag_playing = self.mapping_core.is_bag_playing
             self.is_stopping = self.mapping_core.is_stopping
+        
+        # Enable START button, disable STOP button khi cleanup
+        self.btn_start.config(state=tk.NORMAL)
+        self.btn_stop.config(state=tk.DISABLED)
         
         # Kiểm tra PCD files và cập nhật status
         if self.check_pcd_files():
@@ -1061,7 +1068,9 @@ class BagMappingInterface:
         if hasattr(self, 'mapping_core'):
             self.mapping_core.is_stopping = True
         self.cleanup_processes()
+        # Enable START button, disable STOP button
         self.btn_start.config(state=tk.NORMAL)
+        self.btn_stop.config(state=tk.DISABLED)
         self.set_progress(0)
         self.add_log(self.translator.get('log.process_terminated', 'PROCESS: Mapping and Upload terminated.'))
 

@@ -39,7 +39,6 @@ class UIComponentsBuilder:
         self.select_bag_label = None
         self.bag_path_var = None
         self.browse_btn = None
-        self.map_name_var = None
         self.vehicle_info_var = None
         self.btn_start = None
         self.btn_stop = None
@@ -49,6 +48,9 @@ class UIComponentsBuilder:
         self.btn_upload = None
         self.progress = None
         self.upload_stat = None
+        self.progress_label = None
+        self.qr_label = None
+        self.btn_clear_qr = None
         self.comparison_frame = None
         self.design_file_type_label = None
         self.design_type_var = None
@@ -56,6 +58,13 @@ class UIComponentsBuilder:
         self.design_path_var = None
         self.design_browse_btn = None
         self.comparison_status_label = None
+        self.tunnel_entrance_x_var = None
+        self.tunnel_entrance_y_var = None
+        self.tunnel_entrance_z_var = None
+        self.tunnel_entrance_coords_label = None
+        self.tunnel_entrance_x_label = None
+        self.tunnel_entrance_y_label = None
+        self.tunnel_entrance_z_label = None
         self.qr_listbox = None
         self.system_log_label = None
         self.clear_log_btn = None
@@ -88,23 +97,16 @@ class UIComponentsBuilder:
         )
         self.browse_btn.pack(side=tk.LEFT, padx=5)
 
-        # Map metadata inputs (Map Name & Vehicle Info)
+        # Vehicle Info input
         meta_frame = tk.Frame(self.control_card)
         meta_frame.pack(fill=tk.X, pady=(5, 5))
 
-        # Map Name
-        map_name_label = tk.Label(meta_frame, text=self.translator.get('label.map_name', 'Map Name:'))
-        map_name_label.grid(row=0, column=0, sticky="w", padx=(0, 5), pady=2)
-        self.map_name_var = tk.StringVar()
-        map_name_entry = tk.Entry(meta_frame, textvariable=self.map_name_var)
-        map_name_entry.grid(row=0, column=1, sticky="we", padx=(0, 5), pady=2)
-
         # Vehicle info (Name - ID)
         vehicle_label = tk.Label(meta_frame, text=self.translator.get('label.vehicle_info', 'Vehicle (Name - ID):'))
-        vehicle_label.grid(row=1, column=0, sticky="w", padx=(0, 5), pady=2)
+        vehicle_label.grid(row=0, column=0, sticky="w", padx=(0, 5), pady=2)
         self.vehicle_info_var = tk.StringVar()
         vehicle_entry = tk.Entry(meta_frame, textvariable=self.vehicle_info_var)
-        vehicle_entry.grid(row=1, column=1, sticky="we", padx=(0, 5), pady=2)
+        vehicle_entry.grid(row=0, column=1, sticky="we", padx=(0, 5), pady=2)
 
         # Auto-fill vehicle_id từ MAC local và đặt read-only nếu có
         local_vehicle_id = get_mac_callback()
@@ -115,6 +117,19 @@ class UIComponentsBuilder:
             self.vehicle_info_var.set(self.translator.get('label.vehicle_mac_not_found', 'MAC not found'))
 
         meta_frame.columnconfigure(1, weight=1)
+
+        # RViz checkbox section - đặt sau Vehicle Info
+        rviz_frame = tk.Frame(self.control_card)
+        rviz_frame.pack(fill=tk.X, pady=(5, 5))
+        
+        self.rviz_var = tk.BooleanVar(value=False)
+        self.rviz_check = tk.Checkbutton(
+            rviz_frame,
+            text=self.translator.get('label.use_rviz2_external_view', 'Use RViz2 External View'),
+            variable=self.rviz_var,
+            command=self.callbacks['update_preview_mode'],
+        )
+        self.rviz_check.pack(side=tk.LEFT)
 
         # Control Buttons
         btn_row = tk.Frame(self.control_card)
@@ -130,7 +145,8 @@ class UIComponentsBuilder:
             btn_row, 
             text=self.translator.get('button.stop_process', '■ STOP'), 
             width=self.config.button_stop_width, 
-            command=self.callbacks['stop_process']
+            command=self.callbacks['stop_process'],
+            state=tk.DISABLED  # Disable khi khởi tạo
         )
         self.btn_stop.pack(side=tk.LEFT, padx=5)
         
@@ -151,56 +167,7 @@ class UIComponentsBuilder:
         )
         self.preview_card.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        # 1. RViz checkbox section
-        rviz_frame = tk.Frame(self.preview_card)
-        rviz_frame.pack(fill=tk.X, pady=(0, 15))
-
-        self.rviz_var = tk.BooleanVar(value=False)
-        self.rviz_check = tk.Checkbutton(
-            rviz_frame,
-            text=self.translator.get('label.use_rviz2_external_view', 'Use RViz2 External View'),
-            variable=self.rviz_var,
-            command=self.callbacks['update_preview_mode'],
-        )
-        self.rviz_check.pack(side=tk.LEFT)
-        
-        # Separator
-        separator1 = ttk.Separator(self.preview_card, orient=tk.HORIZONTAL)
-        separator1.pack(fill=tk.X, pady=(0, 10))
-        
-        # 2. Progress section (Server Upload)
-        progress_frame = tk.Frame(self.preview_card)
-        progress_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        progress_label = tk.Label(
-            progress_frame, 
-            text=self.translator.get('label.server_synchronization', 'Server Synchronization'), 
-            font=self.config.font_primary
-        )
-        progress_label.pack(anchor=tk.W, pady=(0, 5))
-        
-        progress_controls = tk.Frame(progress_frame)
-        progress_controls.pack(fill=tk.X)
-        
-        self.btn_upload = tk.Button(
-            progress_controls, 
-            text=self.translator.get('button.upload_to_server', '☁ UPLOAD TO SERVER'), 
-            state=tk.NORMAL, 
-            command=self.callbacks['start_upload']
-        )
-        self.btn_upload.pack(side=tk.LEFT, padx=5)
-        
-        self.progress = ttk.Progressbar(progress_controls, orient=tk.HORIZONTAL, mode='determinate')
-        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
-        
-        self.upload_stat = tk.Label(
-            progress_controls, 
-            text=self.translator.get('label.waiting', 'Waiting...'), 
-            font=self.config.font_small
-        )
-        self.upload_stat.pack(side=tk.RIGHT)
-
-        # 2.2. Design map comparison section
+        # Design map comparison section
         self.comparison_frame = tk.LabelFrame(
             self.preview_card,
             text=self.translator.get('label.design_map_comparison', 'Design Map Comparison'),
@@ -261,6 +228,39 @@ class UIComponentsBuilder:
         )
         self.design_browse_btn.pack(side=tk.LEFT, padx=5)
 
+        # Tunnel Entrance Coordinates - đặt trong Design Map Comparison, sau phần chọn path
+        coords_frame = tk.Frame(self.comparison_frame)
+        coords_frame.pack(fill=tk.X, pady=(0, 5))
+
+        # Label cho tunnel entrance coordinates
+        self.tunnel_entrance_coords_label = tk.Label(
+            coords_frame,
+            text=self.translator.get('label.tunnel_entrance_coordinates', 'Tunnel Entrance Coordinates:'),
+            font=self.config.font_secondary,
+        )
+        self.tunnel_entrance_coords_label.pack(side=tk.LEFT, padx=(0, 5))
+
+        # X coordinate
+        self.tunnel_entrance_x_label = tk.Label(coords_frame, text=self.translator.get('label.coordinate_x', 'X:'), font=self.config.font_secondary)
+        self.tunnel_entrance_x_label.pack(side=tk.LEFT, padx=(5, 2))
+        self.tunnel_entrance_x_var = tk.StringVar()
+        x_entry = tk.Entry(coords_frame, textvariable=self.tunnel_entrance_x_var, width=12)
+        x_entry.pack(side=tk.LEFT, padx=(0, 5))
+
+        # Y coordinate
+        self.tunnel_entrance_y_label = tk.Label(coords_frame, text=self.translator.get('label.coordinate_y', 'Y:'), font=self.config.font_secondary)
+        self.tunnel_entrance_y_label.pack(side=tk.LEFT, padx=(5, 2))
+        self.tunnel_entrance_y_var = tk.StringVar()
+        y_entry = tk.Entry(coords_frame, textvariable=self.tunnel_entrance_y_var, width=12)
+        y_entry.pack(side=tk.LEFT, padx=(0, 5))
+
+        # Z coordinate
+        self.tunnel_entrance_z_label = tk.Label(coords_frame, text=self.translator.get('label.coordinate_z', 'Z:'), font=self.config.font_secondary)
+        self.tunnel_entrance_z_label.pack(side=tk.LEFT, padx=(5, 2))
+        self.tunnel_entrance_z_var = tk.StringVar()
+        z_entry = tk.Entry(coords_frame, textvariable=self.tunnel_entrance_z_var, width=12)
+        z_entry.pack(side=tk.LEFT, padx=(0, 5))
+
         # Nhãn hiển thị kết quả so sánh
         self.comparison_status_label = tk.Label(
             self.comparison_frame,
@@ -270,6 +270,38 @@ class UIComponentsBuilder:
         )
         self.comparison_status_label.pack(fill=tk.X, pady=(2, 0))
 
+        # Progress section (Server Upload) - đặt sau Design Map Comparison
+        progress_frame = tk.Frame(self.preview_card)
+        progress_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.progress_label = tk.Label(
+            progress_frame, 
+            text=self.translator.get('label.server_synchronization', 'Server Synchronization'), 
+            font=self.config.font_primary
+        )
+        self.progress_label.pack(anchor=tk.W, pady=(0, 5))
+        
+        progress_controls = tk.Frame(progress_frame)
+        progress_controls.pack(fill=tk.X)
+        
+        self.btn_upload = tk.Button(
+            progress_controls, 
+            text=self.translator.get('button.upload_to_server', '☁ UPLOAD TO SERVER'), 
+            state=tk.NORMAL, 
+            command=self.callbacks['start_upload']
+        )
+        self.btn_upload.pack(side=tk.LEFT, padx=5)
+        
+        self.progress = ttk.Progressbar(progress_controls, orient=tk.HORIZONTAL, mode='determinate')
+        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
+        
+        self.upload_stat = tk.Label(
+            progress_controls, 
+            text=self.translator.get('label.waiting', 'Waiting...'), 
+            font=self.config.font_small
+        )
+        self.upload_stat.pack(side=tk.RIGHT)
+
         # Separator
         separator2 = ttk.Separator(self.preview_card, orient=tk.HORIZONTAL)
         separator2.pack(fill=tk.X, pady=(0, 10))
@@ -278,12 +310,12 @@ class UIComponentsBuilder:
         qr_frame = tk.Frame(self.preview_card)
         qr_frame.pack(fill=tk.X, pady=(0, 10))
         
-        qr_label = tk.Label(
+        self.qr_label = tk.Label(
             qr_frame, 
             text=self.translator.get('label.qr_codes_detected', 'QR Codes Detected'), 
             font=self.config.font_primary
         )
-        qr_label.pack(anchor=tk.W, pady=(0, 5))
+        self.qr_label.pack(anchor=tk.W, pady=(0, 5))
         
         qr_controls = tk.Frame(qr_frame)
         qr_controls.pack(fill=tk.X)
@@ -305,13 +337,13 @@ class UIComponentsBuilder:
         scrollbar_qr.config(command=self.qr_listbox.yview)
         
         # Button to clear QR codes
-        btn_clear_qr = tk.Button(
+        self.btn_clear_qr = tk.Button(
             qr_controls, 
             text=self.translator.get('button.clear_qr_codes', 'Clear QR Codes'), 
             font=self.config.font_small, 
             command=self.callbacks['clear_qr_codes']
         )
-        btn_clear_qr.pack(side=tk.RIGHT, padx=5)
+        self.btn_clear_qr.pack(side=tk.RIGHT, padx=5)
         
         # Separator
         separator3 = ttk.Separator(self.preview_card, orient=tk.HORIZONTAL)
@@ -394,6 +426,9 @@ class UIComponentsBuilder:
         if self.rviz_check:
             self.rviz_check.config(text=self.translator.get('label.use_rviz2_external_view', 'Use RViz2 External View'))
         
+        if self.progress_label:
+            self.progress_label.config(text=self.translator.get('label.server_synchronization', 'Server Synchronization'))
+        
         if self.btn_upload:
             self.btn_upload.config(text=self.translator.get('button.upload_to_server', '☁ UPLOAD TO SERVER'))
         
@@ -406,11 +441,32 @@ class UIComponentsBuilder:
             else:
                 self.upload_stat.config(text=self.translator.get('label.waiting', 'Waiting...'))
         
+        if self.qr_label:
+            self.qr_label.config(text=self.translator.get('label.qr_codes_detected', 'QR Codes Detected'))
+        
+        if self.btn_clear_qr:
+            self.btn_clear_qr.config(text=self.translator.get('button.clear_qr_codes', 'Clear QR Codes'))
+        
         if self.system_log_label:
             self.system_log_label.config(text=self.translator.get('label.system_log', 'SYSTEM LOG'))
         
         if self.clear_log_btn:
             self.clear_log_btn.config(text=self.translator.get('button.clear_log', 'Clear Log'))
+        
+        # Tunnel entrance coordinates section
+        if self.tunnel_entrance_coords_label:
+            self.tunnel_entrance_coords_label.config(
+                text=self.translator.get('label.tunnel_entrance_coordinates', 'Tunnel Entrance Coordinates:')
+            )
+        
+        if self.tunnel_entrance_x_label:
+            self.tunnel_entrance_x_label.config(text=self.translator.get('label.coordinate_x', 'X:'))
+        
+        if self.tunnel_entrance_y_label:
+            self.tunnel_entrance_y_label.config(text=self.translator.get('label.coordinate_y', 'Y:'))
+        
+        if self.tunnel_entrance_z_label:
+            self.tunnel_entrance_z_label.config(text=self.translator.get('label.coordinate_z', 'Z:'))
         
         # Design comparison section
         if self.comparison_frame:

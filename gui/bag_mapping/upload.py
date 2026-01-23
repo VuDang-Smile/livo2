@@ -46,13 +46,12 @@ class UploadManager:
         self.design_comparison = design_comparison
         self.save_qr_codes = qr_save_callback
     
-    def start_upload(self, map_name_var, vehicle_info_var, design_file_path, 
+    def start_upload(self, vehicle_info_var, design_file_path, 
                      comparison_threshold, root, btn_upload_callback):
         """
         Bắt đầu upload pipeline
         
         Args:
-            map_name_var: Tkinter StringVar chứa map name
             vehicle_info_var: Tkinter StringVar chứa vehicle info
             design_file_path: Path đến design file (string hoặc None)
             comparison_threshold: Threshold cho design comparison
@@ -73,17 +72,13 @@ class UploadManager:
             )
             return
 
-        map_name = (map_name_var.get() or "").strip()
+        # Tự động tạo map_name với timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        map_name = f"Auto_Map_{timestamp}"
+        
         vehicle_id = get_local_mac_no_colon()
         if vehicle_id:
             vehicle_info_var.set(vehicle_id)
-
-        if not map_name:
-            messagebox.showerror(
-                self.translator.get('dialog.error', 'Error'),
-                self.translator.get('dialog.map_name_required', 'Please enter Map Name before uploading.')
-            )
-            return
 
         if not vehicle_id:
             messagebox.showerror(
@@ -387,8 +382,13 @@ class UploadManager:
                     self.log(self.translator.get('log.zip_file_added', '   ✓ Added: {path}').replace('{path}', 'QR_detect.json'))
                 
                 # Tạo và thêm map_metadata.json
+                # Tự động tạo map_name nếu không có
+                if not map_name:
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    map_name = f"Auto_Map_{timestamp}"
+                
                 map_metadata = {
-                    "map_name": map_name or "Unknown",
+                    "map_name": map_name,
                     "vehicle_id": vehicle_id or "Unknown",
                     "created_at": datetime.now().isoformat(),
                 }
@@ -458,6 +458,11 @@ class UploadManager:
     
     def upload_map_to_backend(self, zip_path: Path, map_name: str, vehicle_id: str):
         """Upload file zip map lên backend với retry mechanism"""
+        # Tự động tạo map_name nếu không có
+        if not map_name:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            map_name = f"Auto_Map_{timestamp}"
+        
         if not REQUESTS_AVAILABLE:
             msg = self.translator.get('log.upload_backend_requests_missing', 'Missing requests library. Install with: pip install requests')
             self.log(f"❌ {msg}")
