@@ -206,7 +206,7 @@ class ReplayCalibrationTab(ttk.Frame):
         if folder:
             self.bag_path_var.set(folder)
             self._update_bag_info(folder)
-            self.log(f"Đã chọn bag folder: {folder}")
+            self.log(self.translator.get("calibration.replay.bag_folder_selected", "Đã chọn bag folder: {folder}").replace("{folder}", folder))
 
     def _update_bag_info(self, bag_path):
         """Cập nhật thông tin về bag"""
@@ -296,7 +296,7 @@ class ReplayCalibrationTab(ttk.Frame):
         self.is_cutting = True
         self.cut_output_path = None
         self.cut_status_label.config(text=self.translator.get("calibration.replay.cutting_5s", "Đang cắt 5s dữ liệu..."), foreground="orange")
-        self.log("🔧 Đang cắt 5s dữ liệu dựa trên timestamp...")
+        self.log(self.translator.get("calibration.replay.cutting_5s_timestamp", "🔧 Đang cắt 5s dữ liệu dựa trên timestamp..."))
 
         def worker():
             try:
@@ -371,7 +371,7 @@ class ReplayCalibrationTab(ttk.Frame):
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.DISABLED)
         self.status_label.config(text=self.translator.get("calibration.replay.status.cutting_5s", "Trạng thái: Đang cắt 5s..."), foreground="orange")
-        self.log("🔧 Đang cắt 5s dữ liệu (timestamp) trước khi replay...")
+        self.log(self.translator.get("calibration.replay.cutting_5s_before_replay", "🔧 Đang cắt 5s dữ liệu (timestamp) trước khi replay..."))
 
         def worker():
             try:
@@ -407,7 +407,7 @@ class ReplayCalibrationTab(ttk.Frame):
         self.cut_status_label.config(text=self.translator.get("calibration.replay.cut_success", "Đã cắt: {path}").replace("{path}", str(out_path)), foreground="green")
         self.bag_path_var.set(out_path)
         self._update_bag_info(out_path)
-        self.log(f"✅ Cắt thành công -> {out_path}")
+        self.log(self.translator.get("calibration.replay.cut_success_log", "✅ Cắt thành công -> {path}").replace("{path}", str(out_path)))
 
         # Thực hiện record rồi replay với file đã cắt
         self._start_record_and_replay(Path(out_path))
@@ -442,7 +442,7 @@ class ReplayCalibrationTab(ttk.Frame):
         if clock:
             bag_play_cmd += " --clock"
 
-        self.log("🔧 Đang chuẩn bị source environment...")
+        self.log(self.translator.get("calibration.replay.preparing_source_environment", "🔧 Đang chuẩn bị source environment..."))
         if use_drive_ws:
             cmd = (
                 f"source {ros2_setup} && "
@@ -450,16 +450,16 @@ class ReplayCalibrationTab(ttk.Frame):
                 f"source {ws_setup} && "
                 f"{bag_play_cmd}"
             )
-            self.log("✅ Sẽ source: ROS2 base -> drive_ws -> ws")
-            self.log("✅ CustomMsg support đã được kích hoạt")
+            self.log(self.translator.get("calibration.replay.will_source_full", "✅ Sẽ source: ROS2 base -> drive_ws -> ws"))
+            self.log(self.translator.get("calibration.replay.custommsg_enabled", "✅ CustomMsg support đã được kích hoạt"))
         else:
             cmd = (
                 f"source {ros2_setup} && "
                 f"source {ws_setup} && "
                 f"{bag_play_cmd}"
             )
-            self.log("⚠️  Sẽ source: ROS2 base -> ws (không có drive_ws)")
-            self.log("⚠️  CustomMsg có thể không hoạt động")
+            self.log(self.translator.get("calibration.replay.will_source_minimal", "⚠️  Sẽ source: ROS2 base -> ws (không có drive_ws)"))
+            self.log(self.translator.get("calibration.replay.custommsg_may_not_work", "⚠️  CustomMsg có thể không hoạt động"))
 
         # Chuẩn bị record (song song khi replay)
         record_dir = self.workspace_path / "calibration_data" / "bags"
@@ -469,12 +469,14 @@ class ReplayCalibrationTab(ttk.Frame):
         topics = ["/image_raw", "/camera_info", "/livox/points2"]
         record_cmd = f"ros2 bag record -o {record_bag_path} {' '.join(topics)}"
 
-        self.log(f"📝 Bắt đầu record song song khi replay: {record_bag_path}")
-        self.log(f"📝 Bắt đầu replay bag: {bag_path_obj.name}")
-        self.log(f"📁 Bag path: {bag_path}")
-        self.log(f"⚙️  Rate: {rate}x")
-        self.log(f"⚙️  Loop: {'Có' if loop else 'Không'}")
-        self.log(f"⚙️  Clock: {'Có' if clock else 'Không'}")
+        self.log(self.translator.get("calibration.replay.starting_parallel_record", "📝 Bắt đầu record song song khi replay: {path}").replace("{path}", str(record_bag_path)))
+        self.log(self.translator.get("calibration.replay.starting_replay_bag", "📝 Bắt đầu replay bag: {name}").replace("{name}", bag_path_obj.name))
+        self.log(self.translator.get("bag_path", "📁 Bag path: {path}").replace("{path}", bag_path))
+        self.log(self.translator.get("bag_rate", "⚙️  Rate: {rate}x").replace("{rate}", str(rate)))
+        loop_text = self.translator.get("calibration.replay.yes", "Có") if loop else self.translator.get("calibration.replay.no", "Không")
+        clock_text = self.translator.get("calibration.replay.yes", "Có") if clock else self.translator.get("calibration.replay.no", "Không")
+        self.log(self.translator.get("calibration.replay.loop_label", "⚙️  Loop: {value}").replace("{value}", loop_text))
+        self.log(self.translator.get("calibration.replay.clock_label", "⚙️  Clock: {value}").replace("{value}", clock_text))
 
         try:
             env = os.environ.copy()
@@ -497,7 +499,7 @@ class ReplayCalibrationTab(ttk.Frame):
                 env=env,
             )
             self.is_recording = True
-            self.log(f"✅ Record bắt đầu: {record_bag_path}")
+            self.log(self.translator.get("calibration.replay.record_started", "✅ Record bắt đầu: {path}").replace("{path}", str(record_bag_path)))
 
             # Khởi chạy replay
             self.replay_process = subprocess.Popen(
@@ -520,9 +522,11 @@ class ReplayCalibrationTab(ttk.Frame):
             
             if self.bag_duration_seconds:
                 expected_duration = self.bag_duration_seconds / rate + 2.0  # +2s buffer
-                self.log(f"⏱️  Bag duration: {self.bag_duration_seconds:.2f}s, sẽ tự động dừng sau ~{expected_duration:.1f}s")
+                self.log(self.translator.get("calibration.replay.bag_duration_auto_stop", "⏱️  Bag duration: {duration}s, sẽ tự động dừng sau ~{expected}s")
+                        .replace("{duration}", f"{self.bag_duration_seconds:.2f}")
+                        .replace("{expected}", f"{expected_duration:.1f}"))
             else:
-                self.log("⚠️  Không thể lấy duration của bag, sẽ monitor process exit")
+                self.log(self.translator.get("calibration.replay.cannot_get_bag_duration", "⚠️  Không thể lấy duration của bag, sẽ monitor process exit"))
             
             self.start_btn.config(state=tk.DISABLED)
             self.stop_btn.config(state=tk.NORMAL)
@@ -547,7 +551,7 @@ class ReplayCalibrationTab(ttk.Frame):
                     daemon=True
                 ).start()
 
-            self.log("✅ Replay đã được khởi động")
+            self.log(self.translator.get("calibration.replay.replay_started", "✅ Replay đã được khởi động"))
 
         except Exception as e:
             error_msg = self.translator.get("calibration.replay.message.cannot_start_replay", "Không thể bắt đầu replay: {error}").replace("{error}", str(e))
@@ -563,7 +567,7 @@ class ReplayCalibrationTab(ttk.Frame):
         """Dừng record nếu đang chạy"""
         if self.record_process:
             try:
-                self.log("Đang dừng record song song...")
+                self.log(self.translator.get("calibration.replay.stopping_parallel_record", "Đang dừng record song song..."))
                 self.record_process.terminate()
                 try:
                     self.record_process.wait(timeout=5)
@@ -719,9 +723,9 @@ class ReplayCalibrationTab(ttk.Frame):
             if self.replay_process.poll() is not None:
                 exit_code = self.replay_process.poll()
                 if exit_code != 0:
-                    self.log(f"✗ Replay đã dừng với exit code: {exit_code}")
+                    self.log(self.translator.get("calibration.replay.replay_stopped_exit_code", "✗ Replay đã dừng với exit code: {code}").replace("{code}", str(exit_code)))
                 else:
-                    self.log(f"✓ Replay đã hoàn thành (process đã exit)")
+                    self.log(self.translator.get("calibration.replay.replay_completed_exit", "✓ Replay đã hoàn thành (process đã exit)"))
                 break
             time.sleep(0.2)
         
@@ -755,11 +759,11 @@ class ReplayCalibrationTab(ttk.Frame):
         """Xử lý khi replay kết thúc"""
         try:
             # Đợi một chút để đảm bảo messages cuối cùng được record
-            self.log("⏳ Đợi để đảm bảo tất cả messages đã được record...")
+            self.log(self.translator.get("calibration.replay.waiting_for_messages", "⏳ Đợi để đảm bảo tất cả messages đã được record..."))
             time.sleep(2)  # Đợi 2 giây để messages cuối cùng được record
 
             # Dừng record khi replay kết thúc
-            self.log("🛑 Đang dừng record vì replay đã kết thúc...")
+            self.log(self.translator.get("calibration.replay.stopping_record_after_replay", "🛑 Đang dừng record vì replay đã kết thúc..."))
             self._stop_record_process()
 
             self.is_replaying = False

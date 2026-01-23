@@ -601,9 +601,6 @@
         "calibration": "キャリブレーション",
         "export_results": "結果のエクスポート"
     },
-    "status": {
-        "ready": "ステータス: 準備完了"
-    },
     "calibration": {
         "preprocess_instructions": "rosbagからデータを前処理してキャリブレーションの準備を行う（等距離射影カメラ）",
         "initial_guess_instructions": "キャリブレーションの初期推定を作成（手動または自動）",
@@ -686,7 +683,26 @@
             "cannot_read_file": "ファイルを読み取れません: {error}",
             "camera_info_publisher_running": "カメラ情報パブリッシャーが実行中です",
             "cannot_launch_camera_info_publisher": "camera_info_publisherを起動できません: {error}",
-            "convert_build_completed": "変換とビルドが完了しました"
+            "convert_build_completed": "変換とビルドが完了しました",
+            "auto_convert_to_fast_livo2": "=== FAST-LIVO2への自動変換に切り替え ===",
+            "starting_convert_and_build": "=== 変換とビルドを開始 ===",
+            "overwritten_rcl_pcl": "✅ Rcl/Pclをmid360_equirectangular_stable.yamlに上書きしました",
+            "running_command": "▶️ 実行中: {cmd}",
+            "build_success": "✅ ビルド成功",
+            "build_failed": "❌ ビルド失敗 (終了コード {code})",
+            "fast_livo2_calib_not_found": "⚠️  fast_livo2_calib.yamlファイルが見つかりません、calib.jsonを探して変換中...",
+            "converting_calib_json": "🔄 calib.jsonからfast_livo2_calib.yamlに変換中...",
+            "convert_failed": "変換失敗",
+            "convert_success": "✅ 変換成功: {path}",
+            "calib_json_not_found": "⚠️  calib.jsonファイルが見つかりません: {path}",
+            "error_convert": "変換エラー: {error}",
+            "starting_calibration": "キャリブレーションを開始...",
+            "directory_label": "ディレクトリ: {path}",
+            "error_reading_output": "出力読み取りエラー: {error}",
+            "stopping_calibration": "キャリブレーションを停止中...",
+            "error_stopping_calibration": "キャリブレーション停止エラー: {error}",
+            "calibration_stopped_log": "キャリブレーションが停止されました",
+            "error_label": "エラー: {error}"
         },
         "replay": {
             "title": "リプレイ キャリブレーション",
@@ -743,7 +759,28 @@
             "completed_info": "リプレイ完了\nBag: {name}\n録画は自動的に停止されました",
             "completed_simple": "リプレイ完了\n録画は停止されました",
             "yes": "はい",
-            "no": "いいえ"
+            "no": "いいえ",
+            "bag_folder_selected": "Bag フォルダを選択しました: {folder}",
+            "starting_parallel_record": "📝 リプレイと同時に録画を開始: {path}",
+            "starting_replay_bag": "📝 リプレイ開始: {name}",
+            "loop_label": "ループ: {value}",
+            "clock_label": "クロック: {value}",
+            "record_started": "✅ 録画開始: {path}",
+            "bag_duration_auto_stop": "⏱️  Bag 継続時間: {duration}s、約{expected}s後に自動停止します",
+            "replay_started": "✅ リプレイが開始されました",
+            "stopping_parallel_record": "並列録画を停止中...",
+            "replay_completed_exit": "✓ リプレイ完了 (プロセス終了)",
+            "waiting_for_messages": "⏳ すべてのメッセージが録画されるまで待機中...",
+            "stopping_record_after_replay": "🛑 リプレイ終了により録画を停止中...",
+            "preparing_source_environment": "🔧 ソース環境を準備中...",
+            "will_source_full": "✅ ソース: ROS2 base -> drive_ws -> ws",
+            "will_source_minimal": "⚠️  ソース: ROS2 base -> ws (drive_wsなし)",
+            "custommsg_enabled": "✅ CustomMsg サポートが有効になりました",
+            "custommsg_may_not_work": "⚠️  CustomMsg が動作しない可能性があります",
+            "cannot_get_bag_duration": "⚠️  Bag の継続時間を取得できません、プロセスの終了を監視します",
+            "replay_stopped_exit_code": "✗ リプレイが終了コード {code} で停止しました",
+            "cutting_5s_timestamp": "🔧 タイムスタンプに基づいて5秒データをカット中...",
+            "cutting_5s_before_replay": "🔧 リプレイ前に5秒データ（タイムスタンプ）をカット中..."
         },
         "dialog": {
             "choose_bag_directory": "バッグを保存するディレクトリを選択",

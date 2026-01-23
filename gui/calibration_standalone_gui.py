@@ -13,6 +13,7 @@ from pathlib import Path
 from datetime import datetime
 import os
 import sys
+import signal
 from functools import partial
 
 # Thêm project root vào sys.path để có thể import các module
@@ -108,11 +109,6 @@ class CalibrationStandaloneGUI(ttk.Frame):
         self.notebook.add(calibrate_frame, text=self.translator.get("tab.calibration", "Calibration"))
         self.create_calibrate_tab(calibrate_frame)
         
-        # Tab 4: Export Results
-        export_frame = ttk.Frame(self.notebook)
-        self.notebook.add(export_frame, text=self.translator.get("tab.export_results", "Export Results"))
-        self.create_export_tab(export_frame)
-        
         # Status bar
         self.status_label = ttk.Label(
             self,
@@ -144,7 +140,6 @@ class CalibrationStandaloneGUI(ttk.Frame):
                 self.notebook.tab(1, text=self.translator.get("tab.preprocessing", "Preprocessing"))
                 self.notebook.tab(2, text=self.translator.get("tab.initial_guess", "Initial Guess"))
                 self.notebook.tab(3, text=self.translator.get("tab.calibration", "Calibration"))
-                self.notebook.tab(4, text=self.translator.get("tab.export_results", "Export Results"))
             except:
                 pass
         
@@ -230,20 +225,6 @@ class CalibrationStandaloneGUI(ttk.Frame):
         if hasattr(self, 'calibrate_log_frame'):
             self.calibrate_log_frame.config(text=self.translator.get("label.log", "Log"))
         
-        # Update export tab
-        if hasattr(self, 'export_instructions'):
-            self.export_instructions.config(text=self.translator.get("calibration.export_instructions", "Export và convert kết quả calibration sang format FAST-LIVO2"))
-        if hasattr(self, 'calib_json_label'):
-            self.calib_json_label.config(text=self.translator.get("calibration.label.calib_json_file", "File calib.json:"))
-        if hasattr(self, 'browse_calib_btn'):
-            self.browse_calib_btn.config(text=self.translator.get("button.browse", "Browse"))
-        if hasattr(self, 'output_yaml_label'):
-            self.output_yaml_label.config(text=self.translator.get("calibration.label.output_yaml", "Output YAML:"))
-        if hasattr(self, 'convert_btn'):
-            self.convert_btn.config(text=self.translator.get("calibration.button.convert_to_fast_livo2", "Convert sang FAST-LIVO2"))
-        if hasattr(self, 'results_frame'):
-            self.results_frame.config(text=self.translator.get("calibration.label.results", "Kết quả"))
-        
         # Update ReplayCalibrationTab texts if it exists
         if hasattr(self, 'replay_calibration_tab') and hasattr(self.replay_calibration_tab, 'update_ui_texts'):
             self.replay_calibration_tab.update_ui_texts()
@@ -255,9 +236,13 @@ class CalibrationStandaloneGUI(ttk.Frame):
         self.after(0, partial(self._log_global_impl, full_message))
 
     def _append_results_text(self, content, clear=False):
-        """Cập nhật ô kết quả theo cách thread-safe"""
+        """Cập nhật ô kết quả theo cách thread-safe (chỉ dùng khi results_text tồn tại)"""
         def _update():
             try:
+                if not hasattr(self, 'results_text'):
+                    # Tab Export đã bị xóa, không có results_text nữa - in ra console
+                    print(f"[Log] {content}")
+                    return
                 self.results_text.config(state=tk.NORMAL)
                 if clear:
                     self.results_text.delete(1.0, tk.END)
@@ -659,67 +644,6 @@ class CalibrationStandaloneGUI(ttk.Frame):
             state=tk.DISABLED
         )
         self.calibrate_log.pack(fill=tk.BOTH, expand=True)
-    
-    def create_export_tab(self, parent):
-        """Tạo tab export results"""
-        # Instructions
-        self.export_instructions = ttk.Label(
-            parent,
-            text=self.translator.get("calibration.export_instructions", "Export và convert kết quả calibration sang format FAST-LIVO2"),
-            font=("Arial", 10)
-        )
-        self.export_instructions.pack(pady=10)
-        
-        # Calib.json path
-        calib_frame = ttk.Frame(parent)
-        calib_frame.pack(fill=tk.X, padx=20, pady=10)
-        
-        self.calib_json_label = ttk.Label(calib_frame, text=self.translator.get("calibration.label.calib_json_file", "File calib.json:"))
-        self.calib_json_label.pack(side=tk.LEFT, padx=5)
-        self.calib_json_var = tk.StringVar()
-        calib_entry = ttk.Entry(calib_frame, textvariable=self.calib_json_var, width=50)
-        calib_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        
-        self.browse_calib_btn = ttk.Button(
-            calib_frame,
-            text=self.translator.get("button.browse", "Browse"),
-            command=self.browse_calib_json
-        )
-        self.browse_calib_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Output YAML path
-        yaml_frame = ttk.Frame(parent)
-        yaml_frame.pack(fill=tk.X, padx=20, pady=10)
-        
-        self.output_yaml_label = ttk.Label(yaml_frame, text=self.translator.get("calibration.label.output_yaml", "Output YAML:"))
-        self.output_yaml_label.pack(side=tk.LEFT, padx=5)
-        self.output_yaml_var = tk.StringVar()
-        yaml_entry = ttk.Entry(yaml_frame, textvariable=self.output_yaml_var, width=50)
-        yaml_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        
-        # Buttons
-        button_frame = ttk.Frame(parent)
-        button_frame.pack(pady=20)
-        
-        self.convert_btn = ttk.Button(
-            button_frame,
-            text=self.translator.get("calibration.button.convert_to_fast_livo2", "Convert sang FAST-LIVO2"),
-            command=self.convert_to_fast_livo2,
-            style="Accent.TButton"
-        )
-        self.convert_btn.pack(side=tk.LEFT, padx=10)
-        
-        # Results display
-        self.results_frame = ttk.LabelFrame(parent, text=self.translator.get("calibration.label.results", "Kết quả"), padding=10)
-        self.results_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-        
-        self.results_text = scrolledtext.ScrolledText(
-            self.results_frame,
-            height=10,
-            wrap=tk.WORD,
-            state=tk.DISABLED
-        )
-        self.results_text.pack(fill=tk.BOTH, expand=True)
     
     # ========== Record Bag Methods ==========
     
@@ -1292,8 +1216,8 @@ class CalibrationStandaloneGUI(ttk.Frame):
         ros2_setup = "/opt/ros/jazzy/setup.bash"
         cmd = f"source {ros2_setup} && source {setup_script} && {' '.join(cmd_parts)}"
         
-        self.log_calibrate(f"Bắt đầu calibration...")
-        self.log_calibrate(f"Directory: {preprocessed_dir}")
+        self.log_calibrate(self.translator.get("calibration.message.starting_calibration", "Bắt đầu calibration..."))
+        self.log_calibrate(self.translator.get("calibration.message.directory_label", "Directory: {path}").replace("{path}", preprocessed_dir))
         
         try:
             # Sử dụng env để đảm bảo clean environment
@@ -1302,6 +1226,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
             if 'ROS_DOMAIN_ID' not in env:
                 env['ROS_DOMAIN_ID'] = '0'
             
+            # Tạo process với process group để có thể kill tất cả child processes
             self.calibrate_process = subprocess.Popen(
                 cmd,
                 shell=True,
@@ -1310,7 +1235,8 @@ class CalibrationStandaloneGUI(ttk.Frame):
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 bufsize=1,
-                env=env
+                env=env,
+                preexec_fn=os.setsid if hasattr(os, 'setsid') else None
             )
             
             self.calibrate_btn.config(state=tk.DISABLED)
@@ -1325,7 +1251,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
                 self.translator.get("dialog.error", "Error"),
                 self.translator.get("calibration.message.cannot_run_calibration", "Không thể chạy calibration: {error}").replace("{error}", str(e))
             )
-            self.log_calibrate(f"Lỗi: {e}")
+            self.log_calibrate(self.translator.get("calibration.message.error_label", "Lỗi: {error}").replace("{error}", str(e)))
     
     def monitor_calibrate_process(self):
         """Monitor calibrate process output"""
@@ -1336,37 +1262,77 @@ class CalibrationStandaloneGUI(ttk.Frame):
             for line in iter(self.calibrate_process.stdout.readline, ''):
                 if not line:
                     break
+                # Kiểm tra xem process có còn tồn tại không
+                if not self.calibrate_process:
+                    break
                 self.log_calibrate(line.strip())
         except Exception as e:
-            self.log_calibrate(f"Lỗi khi đọc output: {e}")
+            self.log_calibrate(self.translator.get("calibration.message.error_reading_output", "Lỗi khi đọc output: {error}").replace("{error}", str(e)))
         
-        if self.calibrate_process.poll() is not None:
-            exit_code = self.calibrate_process.poll()
-            if exit_code == 0:
-                self.after(0, partial(self._update_calibrate_success))
-            else:
-                self.after(0, partial(self._update_calibrate_failure))
+        # Kiểm tra lại xem process có còn tồn tại không trước khi poll
+        if self.calibrate_process:
+            try:
+                exit_code = self.calibrate_process.poll()
+                if exit_code is not None:
+                    if exit_code == 0:
+                        self.after(0, partial(self._update_calibrate_success))
+                    else:
+                        self.after(0, partial(self._update_calibrate_failure))
+            except Exception as e:
+                # Process có thể đã bị xóa trong lúc poll
+                pass
     
     def stop_calibrate(self):
         """Dừng calibration process"""
         if self.calibrate_process:
+            process_to_kill = self.calibrate_process
             try:
-                self.log_calibrate("Đang dừng calibration...")
-                self.calibrate_process.terminate()
-                self.calibrate_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
+                self.log_calibrate(self.translator.get("calibration.message.stopping_calibration", "Đang dừng calibration..."))
+                
+                # Đặt process thành None trước để monitor thread biết dừng
+                self.calibrate_process = None
+                
+                # Terminate process group nếu có thể (để kill tất cả child processes)
                 try:
-                    self.calibrate_process.kill()
-                except:
+                    if hasattr(os, 'setsid') and hasattr(process_to_kill, 'pid'):
+                        try:
+                            # Kill process group
+                            os.killpg(os.getpgid(process_to_kill.pid), signal.SIGTERM)
+                        except (ProcessLookupError, OSError):
+                            # Nếu không có process group, chỉ terminate process chính
+                            process_to_kill.terminate()
+                    else:
+                        process_to_kill.terminate()
+                except (ProcessLookupError, OSError):
+                    # Process đã không tồn tại
                     pass
+                
+                # Đợi process dừng với timeout
+                try:
+                    process_to_kill.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Nếu timeout, kill mạnh
+                    try:
+                        if hasattr(os, 'setsid') and hasattr(process_to_kill, 'pid'):
+                            try:
+                                os.killpg(os.getpgid(process_to_kill.pid), signal.SIGKILL)
+                            except (ProcessLookupError, OSError):
+                                process_to_kill.kill()
+                        else:
+                            process_to_kill.kill()
+                        process_to_kill.wait()
+                    except (ProcessLookupError, OSError):
+                        # Process đã không tồn tại
+                        pass
             except Exception as e:
-                self.log_calibrate(f"Lỗi khi dừng calibration: {e}")
+                self.log_calibrate(self.translator.get("calibration.message.error_stopping_calibration", "Lỗi khi dừng calibration: {error}").replace("{error}", str(e)))
             finally:
+                # Đảm bảo process được set thành None
                 self.calibrate_process = None
                 self.calibrate_btn.config(state=tk.NORMAL)
                 self.stop_calibrate_btn.config(state=tk.DISABLED)
                 self.status_label.config(text=self.translator.get("calibration.status.calibration_stopped", "Trạng thái: Calibration đã dừng"), foreground="orange")
-                self.log_calibrate("Calibration đã dừng")
+                self.log_calibrate(self.translator.get("calibration.message.calibration_stopped_log", "Calibration đã dừng"))
     
     def _update_calibrate_success(self):
         """Helper function để update UI sau khi calibration thành công"""
@@ -1374,10 +1340,25 @@ class CalibrationStandaloneGUI(ttk.Frame):
             self.status_label.config(text=self.translator.get("calibration.status.calibration_completed", "Trạng thái: Calibration hoàn thành"), foreground="green")
             self.calibrate_btn.config(state=tk.NORMAL)
             self.stop_calibrate_btn.config(state=tk.DISABLED)
+            
             # Auto-fill calib.json path
-            calib_json_path = Path(self.calibrate_dir_var.get()) / "calib.json"
+            preprocessed_dir = self.calibrate_dir_var.get()
+            if preprocessed_dir:
+                calib_json_path = Path(preprocessed_dir) / "calib.json"
+            else:
+                # Fallback về path mặc định
+                calib_json_path = self.workspace_path / "calibration_data" / "preprocessed" / "calib.json"
+            
             if calib_json_path.exists():
-                self.calib_json_var.set(str(calib_json_path))
+                # Tự động chạy convert sau khi calibration thành công
+                self.log_calibrate(self.translator.get("calibration.message.auto_convert_to_fast_livo2", "=== Tự động chuyển sang convert to FAST-LIVO2 ==="))
+                threading.Thread(
+                    target=self._auto_convert_after_calibration, 
+                    args=(str(calib_json_path), preprocessed_dir if preprocessed_dir else None), 
+                    daemon=True
+                ).start()
+            else:
+                self.log_calibrate(self.translator.get("calibration.message.calib_json_not_found", "⚠️  Không tìm thấy file calib.json tại: {path}").replace("{path}", str(calib_json_path)))
         except Exception as e:
             print(f"Lỗi khi update UI: {e}")
     
@@ -1405,61 +1386,63 @@ class CalibrationStandaloneGUI(ttk.Frame):
         except Exception as e:
             print(f"Lỗi khi log: {e}")
     
-    # ========== Export Methods ==========
-    
-    def browse_calib_json(self):
-        """Browse cho calib.json file"""
-        file_path = filedialog.askopenfilename(
-            title=self.translator.get("calibration.dialog.choose_calib_json", "Chọn file calib.json"),
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            initialdir=self.calib_json_var.get() or str(self.workspace_path)
-        )
-        if file_path:
-            self.calib_json_var.set(file_path)
-    
-    def view_calib_json(self):
-        """Xem nội dung calib.json"""
-        calib_json_path = self.calib_json_var.get()
-        
-        if not calib_json_path or not Path(calib_json_path).exists():
-            messagebox.showerror(
-                self.translator.get("dialog.error", "Error"),
-                self.translator.get("calibration.message.please_select_valid_calib_json", "Vui lòng chọn file calib.json hợp lệ")
-            )
-            return
-        
+    def _auto_convert_after_calibration(self, calib_json_path, preprocessed_dir=None):
+        """Tự động convert sau khi calibration thành công"""
         try:
-            with open(calib_json_path, 'r') as f:
-                calib_data = json.load(f)
+            self.after(0, lambda: self.status_label.config(
+                text=self.translator.get("calibration.status.converting_building", "Trạng thái: Đang convert & build..."), 
+                foreground="orange"
+            ))
+            self.log_calibrate(self.translator.get("calibration.message.starting_convert_and_build", "=== Bắt đầu convert và build ==="))
             
-            self.results_text.config(state=tk.NORMAL)
-            self.results_text.delete(1.0, tk.END)
-            self.results_text.insert(tk.END, json.dumps(calib_data, indent=2))
-            self.results_text.config(state=tk.DISABLED)
+            # Gọi _convert_and_build với path đúng và use_calibrate_log=True
+            self._convert_and_build(
+                calib_json_path=calib_json_path, 
+                preprocessed_dir=preprocessed_dir,
+                use_calibrate_log=True
+            )
             
         except Exception as e:
-            messagebox.showerror(
-                self.translator.get("dialog.error", "Error"),
-                self.translator.get("calibration.message.cannot_read_file", "Không thể đọc file: {error}").replace("{error}", str(e))
-            )
-    
-    def convert_to_fast_livo2(self):
-        """Load calib từ fast_livo2_calib.yaml, ghi đè Rcl/Pcl và build"""
-        self.convert_btn.config(state=tk.DISABLED)
-        self._append_results_text("=== Bắt đầu convert và build ===", clear=True)
-        self.after(0, lambda: self.status_label.config(text=self.translator.get("calibration.status.converting_building", "Trạng thái: Đang convert & build..."), foreground="orange"))
-        threading.Thread(target=self._convert_and_build, daemon=True).start()
+            error_msg = self.translator.get("calibration.message.error_convert", "Lỗi khi convert: {error}").replace("{error}", str(e))
+            self.log_calibrate(error_msg)
+            self.after(0, lambda: self.status_label.config(
+                text=self.translator.get("calibration.status.error", "Trạng thái: Lỗi"), 
+                foreground="red"
+            ))
 
-    def _convert_and_build(self):
+    def _convert_and_build(self, calib_json_path=None, preprocessed_dir=None, use_calibrate_log=False):
+        """
+        Convert và build với path động
+        Args:
+            calib_json_path: Path đến calib.json (nếu None, sẽ dùng path mặc định)
+            preprocessed_dir: Thư mục preprocessed (nếu None, sẽ dùng path mặc định)
+            use_calibrate_log: Nếu True, log vào calibrate_log; nếu False, log vào results_text
+        """
         try:
-            preprocessed_dir = self.workspace_path / "calibration_data" / "preprocessed"
+            # Xác định path
+            if preprocessed_dir is None:
+                preprocessed_dir = self.workspace_path / "calibration_data" / "preprocessed"
+            else:
+                preprocessed_dir = Path(preprocessed_dir)
+            
+            if calib_json_path is None:
+                calib_json_path = preprocessed_dir / "calib.json"
+            else:
+                calib_json_path = Path(calib_json_path)
+            
             calib_path = preprocessed_dir / "fast_livo2_calib.yaml"
-            calib_json_path = preprocessed_dir / "calib.json"
             config_path = self.workspace_path / "src" / "FAST-LIVO2" / "config" / "mid360_equirectangular_stable.yaml"
+            
+            # Hàm helper để log
+            def log_msg(msg):
+                if use_calibrate_log:
+                    self.log_calibrate(msg)
+                else:
+                    self._append_results_text(msg)
             
             # Kiểm tra và convert từ calib.json nếu fast_livo2_calib.yaml chưa tồn tại
             if not calib_path.exists():
-                self._append_results_text(f"⚠️  Không tìm thấy file fast_livo2_calib.yaml, đang tìm calib.json để convert...")
+                log_msg(self.translator.get("calibration.message.fast_livo2_calib_not_found", "⚠️  Không tìm thấy file fast_livo2_calib.yaml, đang tìm calib.json để convert..."))
                 
                 if not calib_json_path.exists():
                     raise FileNotFoundError(
@@ -1472,7 +1455,7 @@ class CalibrationStandaloneGUI(ttk.Frame):
                 if not convert_script.exists():
                     raise FileNotFoundError(f"Không tìm thấy script conversion tại: {convert_script}")
                 
-                self._append_results_text(f"🔄 Đang convert từ calib.json sang fast_livo2_calib.yaml...")
+                log_msg(self.translator.get("calibration.message.converting_calib_json", "🔄 Đang convert từ calib.json sang fast_livo2_calib.yaml..."))
                 cmd = f"python3 {convert_script} {calib_json_path} --output {calib_path}"
                 
                 result = subprocess.run(
@@ -1484,20 +1467,21 @@ class CalibrationStandaloneGUI(ttk.Frame):
                 )
                 
                 if result.returncode != 0:
-                    raise RuntimeError(f"Convert thất bại:\n{result.stderr}")
+                    raise RuntimeError(self.translator.get("calibration.message.convert_failed", "Convert thất bại") + f":\n{result.stderr}")
                 
-                self._append_results_text(f"✅ Đã convert thành công: {calib_path}")
-                self._append_results_text(result.stdout)
+                log_msg(self.translator.get("calibration.message.convert_success", "✅ Đã convert thành công: {path}").replace("{path}", str(calib_path)))
+                if result.stdout:
+                    log_msg(result.stdout)
             
             if not config_path.exists():
                 raise FileNotFoundError(f"Không tìm thấy file config: {config_path}")
 
             rcl_values, pcl_values = self._load_calib_values(calib_path)
             self._update_mid360_config(config_path, rcl_values, pcl_values)
-            self._append_results_text("✅ Đã ghi đè Rcl/Pcl vào mid360_equirectangular_stable.yaml")
+            log_msg(self.translator.get("calibration.message.overwritten_rcl_pcl", "✅ Đã ghi đè Rcl/Pcl vào mid360_equirectangular_stable.yaml"))
 
-            build_output = self._run_build_script()
-            self._append_results_text(build_output)
+            build_output = self._run_build_script(use_calibrate_log=use_calibrate_log)
+            log_msg(build_output)
 
             self.after(0, lambda: messagebox.showinfo(
                 self.translator.get("dialog.success", "Success"),
@@ -1506,11 +1490,15 @@ class CalibrationStandaloneGUI(ttk.Frame):
             self.after(0, lambda: self.status_label.config(text=self.translator.get("calibration.status.completed", "Trạng thái: Hoàn tất"), foreground="green"))
         except Exception as e:
             error_msg = f"Lỗi: {e}"
-            self._append_results_text(error_msg)
+            if use_calibrate_log:
+                self.log_calibrate(error_msg)
+            else:
+                self._append_results_text(error_msg)
             self.after(0, lambda: messagebox.showerror(self.translator.get("dialog.error", "Error"), error_msg))
             self.after(0, lambda: self.status_label.config(text=self.translator.get("calibration.status.error", "Trạng thái: Lỗi"), foreground="red"))
         finally:
-            self.after(0, lambda: self.convert_btn.config(state=tk.NORMAL))
+            if not use_calibrate_log and hasattr(self, 'convert_btn'):
+                self.after(0, lambda: self.convert_btn.config(state=tk.NORMAL))
 
     def _format_num(self, value):
         """Định dạng số gọn gàng"""
@@ -1585,14 +1573,22 @@ class CalibrationStandaloneGUI(ttk.Frame):
         with open(config_path, "w") as f:
             f.write(content)
 
-    def _run_build_script(self):
+    def _run_build_script(self, use_calibrate_log=False):
         """Chạy build.sh và trả về log"""
         build_script = self.workspace_path.parent / "build.sh"
         if not build_script.exists():
             raise FileNotFoundError(f"Không tìm thấy build.sh tại: {build_script}")
 
         cmd = f"cd {build_script.parent} && printf '\\n' | bash {build_script.name}"
-        self._append_results_text(f"▶️ Running: {cmd}")
+        
+        # Hàm helper để log
+        def log_msg(msg):
+            if use_calibrate_log:
+                self.log_calibrate(msg)
+            else:
+                self._append_results_text(msg)
+        
+        log_msg(self.translator.get("calibration.message.running_command", "▶️ Running: {cmd}").replace("{cmd}", cmd))
 
         process = subprocess.Popen(
             cmd,
@@ -1609,10 +1605,13 @@ class CalibrationStandaloneGUI(ttk.Frame):
             for line in process.stdout:
                 line = line.rstrip("\n")
                 logs.append(line)
-                self._append_results_text(line)
+                log_msg(line)
 
         return_code = process.wait()
-        summary = f"✅ Build thành công" if return_code == 0 else f"❌ Build thất bại (exit {return_code})"
+        if return_code == 0:
+            summary = self.translator.get("calibration.message.build_success", "✅ Build thành công")
+        else:
+            summary = self.translator.get("calibration.message.build_failed", "❌ Build thất bại (exit {code})").replace("{code}", str(return_code))
         return "\n".join(logs + [summary])
     
     def start_converter(self):
