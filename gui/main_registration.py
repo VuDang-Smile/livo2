@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import messagebox
 import uuid
 import requests # Cài đặt bằng lệnh: pip install requests
-from contants.API import VEHICLE_ENDPOINT, API_TIMEOUT, HEADERS
+from contants.API import VEHICLE_ENDPOINT, API_TIMEOUT, HEADERS, BACKEND_HOST
 from languages.translate_engine import Translator
 
 
@@ -14,6 +14,11 @@ class RegistrationInterface:
         # Translator for multi-language support
         self.translator = Translator('en')
         self.current_lang = 'en'
+        
+        # Fetch available vehicle categories and types from backend
+        self.available_categories = []
+        self.available_types = []
+        self.fetch_backend_enums()
         
         # Setup language button FIRST (before main container)
         self.setup_language_button()
@@ -92,10 +97,54 @@ class RegistrationInterface:
             self.label_vehicle_id.config(text=self.translator.get("label.vehicle_id_system_id"))
         if hasattr(self, 'label_display_name'):
             self.label_display_name.config(text=self.translator.get("label.display_name"))
+        if hasattr(self, 'label_vehicle_category'):
+            self.label_vehicle_category.config(text=self.translator.get("label.vehicle_category"))
         if hasattr(self, 'label_type_category'):
             self.label_type_category.config(text=self.translator.get("label.type_category"))
         if hasattr(self, 'label_description'):
             self.label_description.config(text=self.translator.get("label.description_and_notes"))
+        
+        # Update vehicle category dropdown with new translations
+        if hasattr(self, 'opt_vehicle_category') and self.available_categories:
+            current_value = self.var_vehicle_category.get()
+            current_category_value = self.category_value_map.get(current_value) if current_value else None
+            
+            category_options = [""]
+            self.category_value_map = {}
+            for cat in self.available_categories:
+                translated_label = self.translator.get(f"category.{cat}", cat)
+                category_options.append(translated_label)
+                self.category_value_map[translated_label] = cat
+            
+            menu = self.opt_vehicle_category["menu"]
+            menu.delete(0, "end")
+            for option in category_options:
+                menu.add_command(label=option, command=lambda val=option: self.var_vehicle_category.set(val))
+            
+            if current_category_value:
+                new_label = self.translator.get(f"category.{current_category_value}", current_category_value)
+                self.var_vehicle_category.set(new_label if new_label in category_options else "")
+
+        # Update vehicle type dropdown with new translations
+        if hasattr(self, 'opt_vehicle_type') and self.available_types:
+            current_value = self.var_vehicle_type.get()
+            current_type_value = self.type_value_map.get(current_value) if current_value else None
+            
+            type_options = [""]
+            self.type_value_map = {}
+            for t_val in self.available_types:
+                translated_label = self.translator.get(f"type.{t_val}", t_val)
+                type_options.append(translated_label)
+                self.type_value_map[translated_label] = t_val
+            
+            menu = self.opt_vehicle_type["menu"]
+            menu.delete(0, "end")
+            for option in type_options:
+                menu.add_command(label=option, command=lambda val=option: self.var_vehicle_type.set(val))
+            
+            if current_type_value:
+                new_label = self.translator.get(f"type.{current_type_value}", current_type_value)
+                self.var_vehicle_type.set(new_label if new_label in type_options else "")
         
         # Update buttons
         if hasattr(self, 'btn_cancel'):
@@ -107,6 +156,28 @@ class RegistrationInterface:
         mac = ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff)
                         for ele in range(0, 8*6, 8)][::-1])
         return mac
+
+    def fetch_backend_enums(self):
+        """Fetch available vehicle categories and types from backend API."""
+        try:
+            # 1. Fetch Categories
+            categories_url = f"{BACKEND_HOST}/api/v1/vehicles/categories"
+            response = requests.get(categories_url, headers=HEADERS, timeout=API_TIMEOUT)
+            if response.status_code == 200:
+                data = response.json()
+                self.available_categories = data.get("categories", [])
+                print(f"Fetched {len(self.available_categories)} vehicle categories")
+            
+            # 2. Fetch Types
+            types_url = f"{BACKEND_HOST}/api/v1/vehicles/types"
+            response = requests.get(types_url, headers=HEADERS, timeout=API_TIMEOUT)
+            if response.status_code == 200:
+                data = response.json()
+                self.available_types = data.get("types", [])
+                print(f"Fetched {len(self.available_types)} vehicle types")
+                
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching backend enums: {e}")
 
     def setup_registration_form(self):
         # Cấu hình grid
@@ -127,22 +198,60 @@ class RegistrationInterface:
         self.ent_display_name = tk.Entry(self.form_container)
         self.ent_display_name.grid(row=3, column=0, sticky="ew", pady=(0, 10))
 
-        # 3. Type Category
+        # 3. Vehicle Category (from backend API)
+        self.label_vehicle_category = tk.Label(self.form_container, text=self.translator.get("label.vehicle_category"))
+        self.label_vehicle_category.grid(row=4, column=0, sticky="w", pady=(0, 2))
+        self.var_vehicle_category = tk.StringVar(value="")
+        # Build options for dropdown with translations
+        category_options = [""]  # Empty option first
+        if self.available_categories:
+            for cat in self.available_categories:
+                # Get translated label, fallback to category value if translation not found
+                translated_label = self.translator.get(f"category.{cat}", cat)
+                category_options.append(translated_label)
+        else:
+            # Fallback if categories not loaded
+            category_options = [""]
+        # Store mapping from translated label to category value
+        self.category_value_map = {}
+        if self.available_categories:
+            for cat in self.available_categories:
+                translated_label = self.translator.get(f"category.{cat}", cat)
+                self.category_value_map[translated_label] = cat
+        self.opt_vehicle_category = tk.OptionMenu(self.form_container, self.var_vehicle_category, *category_options)
+        self.opt_vehicle_category.grid(row=5, column=0, sticky="ew", pady=(0, 10))
+
+        # 4. Vehicle Type (from backend API)
         self.label_type_category = tk.Label(self.form_container, text=self.translator.get("label.type_category"))
-        self.label_type_category.grid(row=4, column=0, sticky="w", pady=(0, 2))
-        self.var_category = tk.StringVar(value="Scanner")
-        opt_category = tk.OptionMenu(self.form_container, self.var_category, "Scanner", "Worker")
-        opt_category.grid(row=5, column=0, sticky="ew", pady=(0, 10))
+        self.label_type_category.grid(row=6, column=0, sticky="w", pady=(0, 2))
+        self.var_vehicle_type = tk.StringVar(value="")
+        
+        # Build options for dropdown with translations
+        type_options = [""]
+        if self.available_types:
+            for t_val in self.available_types:
+                translated_label = self.translator.get(f"type.{t_val}", t_val)
+                type_options.append(translated_label)
+        
+        # Store mapping from translated label to type value
+        self.type_value_map = {}
+        if self.available_types:
+            for t_val in self.available_types:
+                translated_label = self.translator.get(f"type.{t_val}", t_val)
+                self.type_value_map[translated_label] = t_val
+                
+        self.opt_vehicle_type = tk.OptionMenu(self.form_container, self.var_vehicle_type, *type_options)
+        self.opt_vehicle_type.grid(row=7, column=0, sticky="ew", pady=(0, 10))
 
-        # 4. Description
+        # 5. Description
         self.label_description = tk.Label(self.form_container, text=self.translator.get("label.description_and_notes"))
-        self.label_description.grid(row=6, column=0, sticky="w", pady=(0, 2))
+        self.label_description.grid(row=8, column=0, sticky="w", pady=(0, 2))
         self.txt_desc = tk.Text(self.form_container, height=4, width=40, font=("Arial", 10))
-        self.txt_desc.grid(row=7, column=0, sticky="ew", pady=(0, 15))
+        self.txt_desc.grid(row=9, column=0, sticky="ew", pady=(0, 15))
 
-        # 5. Buttons
+        # 6. Buttons
         btn_frame = tk.Frame(self.form_container)
-        btn_frame.grid(row=8, column=0, sticky="e")
+        btn_frame.grid(row=10, column=0, sticky="e")
 
         self.btn_cancel = tk.Button(btn_frame, text=self.translator.get("button.cancel"), width=10, command=self.root.quit)
         self.btn_cancel.pack(side=tk.LEFT, padx=5)
@@ -156,7 +265,8 @@ class RegistrationInterface:
         # Lấy dữ liệu từ form
         v_id = self.ent_vehicle_id.get().strip()
         name = self.ent_display_name.get().strip()
-        category = self.var_category.get()
+        vehicle_type_label = self.var_vehicle_type.get()
+        vehicle_category_label = self.var_vehicle_category.get()
         desc = self.txt_desc.get("1.0", tk.END).strip()
 
         if not name:
@@ -170,11 +280,21 @@ class RegistrationInterface:
             "vehicle_id": v_id,
             "name": name,
             "description": desc,
-            "vehicle_type": category,
             "metadata": {
                 "additionalProp1": {}
             }
         }
+        
+        # Convert translated labels back to enum values
+        if vehicle_category_label and hasattr(self, 'category_value_map'):
+            vehicle_category = self.category_value_map.get(vehicle_category_label)
+            if vehicle_category:
+                payload["vehicle_category"] = vehicle_category
+
+        if vehicle_type_label and hasattr(self, 'type_value_map'):
+            vehicle_type = self.type_value_map.get(vehicle_type_label)
+            if vehicle_type:
+                payload["vehicle_type"] = vehicle_type
 
         print("Submitting registration with payload:", payload)
         print("Submitting registration with url VEHICLE_ENDPOINT:", VEHICLE_ENDPOINT)

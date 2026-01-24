@@ -11,6 +11,14 @@
 
 import { MapVehicle, VehicleMapResponse } from '../../types/vehicle';
 import { normalizeTimestamp } from '../../utils/timestampHelpers';
+import {
+  isValidArray,
+  isValidObject,
+  isValidString,
+  safeArrayAccess,
+  getSafePosition,
+  getSafeVehicleStatus,
+} from '../../utils/validationUtils';
 
 export class VehicleMapService {
   constructor(private apiBaseUrl: string) {
@@ -39,15 +47,24 @@ export class VehicleMapService {
       throw new Error(text || `Failed to get latest PCD with status ${pcdRes.status}`);
     }
 
-    const pcdList = (await pcdRes.json()) as any[];
-    if (!pcdList || pcdList.length === 0) {
+    const pcdListData = await pcdRes.json();
+    
+    // Validate pcdList is an array
+    if (!isValidArray(pcdListData) || pcdListData.length === 0) {
       throw new Error('No PCD files available to build 2D map');
     }
 
-    const latestPcd = pcdList[0];
-    const pcdFileId = latestPcd?.file_id;
+    // Safely access first element
+    const latestPcd = safeArrayAccess<Record<string, unknown>>(pcdListData, 0);
+    
+    if (!latestPcd || !isValidObject(latestPcd)) {
+      throw new Error('Invalid PCD record structure');
+    }
 
-    if (!pcdFileId) {
+    const pcdFileId = latestPcd.file_id;
+
+    // Validate file_id is a string
+    if (!isValidString(pcdFileId)) {
       throw new Error('Latest PCD record does not contain a valid file_id');
     }
 
@@ -70,22 +87,36 @@ export class VehicleMapService {
       );
     }
 
-    const floorplans = (await floorplanRes.json()) as any[];
-    if (!floorplans || floorplans.length === 0) {
+    const floorplansData = await floorplanRes.json();
+    
+    // Validate floorplans is an array
+    if (!isValidArray(floorplansData) || floorplansData.length === 0) {
       throw new Error('No floorplan available for latest PCD');
     }
 
-    const floorplan = floorplans[0];
+    // Safely access first element
+    const floorplan = safeArrayAccess<Record<string, unknown>>(floorplansData, 0);
+    
+    if (!floorplan || !isValidObject(floorplan)) {
+      throw new Error('Invalid floorplan record structure');
+    }
+
+    // Validate file_id
+    const floorplanFileId = floorplan.file_id;
+    if (!isValidString(floorplanFileId)) {
+      throw new Error('Floorplan record does not contain a valid file_id');
+    }
 
     // Bước 3: Build VehicleMapResponse cho 2D viewer
-    const modelUrl = `${this.apiBaseUrl}/api/v1/maps/${floorplan.file_id}/download`;
+    const modelUrl = `${this.apiBaseUrl}/api/v1/maps/${floorplanFileId}/download`;
 
+    const floorplanPcdFileId = floorplan.pcd_file_id;
     const response: VehicleMapResponse = {
       modelUrl,
       unit: 'meters',
       mapType: '2d',
       source: 'converted',
-      pcd_file_id: floorplan.pcd_file_id || pcdFileId,
+      pcd_file_id: isValidString(floorplanPcdFileId) ? floorplanPcdFileId : pcdFileId,
     };
 
     return response;
@@ -109,21 +140,51 @@ export class VehicleMapService {
     
     const data = await res.json();
 
+    // Validate response is not null/undefined
+    if (data === null || data === undefined) {
+      throw new Error('API returned null or undefined response');
+    }
+
     // Backend hiện trả VehiclesListResponse { vehicles, total }
-    const vehicles = Array.isArray(data.vehicles) ? data.vehicles : data;
+    let vehicles: unknown[] = [];
+    
+    if (isValidObject(data) && isValidArray(data.vehicles)) {
+      vehicles = data.vehicles;
+    } else if (isValidArray(data)) {
+      vehicles = data;
+    } else {
+      console.warn('[VehicleMapService] Invalid vehicles response structure, returning empty array');
+      return [];
+    }
 
     // Transform API response to MapVehicle format with position data (dựa trên latest_pose)
-    return vehicles.map((vehicle: any): MapVehicle => {
+    return vehicles
+      .filter((vehicle): vehicle is Record<string, unknown> => isValidObject(vehicle))
+      .map((vehicle: Record<string, unknown>): MapVehicle => {
+        const vehicleId = vehicle.vehicle_id;
+        if (!isValidString(vehicleId)) {
+          throw new Error('Vehicle missing required vehicle_id field');
+        }
+
       const latest = vehicle.latest_pose;
-      const position = latest?.position || { x: 0, y: 0, z: 0 };
-      const rawTimestamp = latest?.timestamp || vehicle.updated_at || vehicle.created_at;
+        const position = isValidObject(latest) && isValidObject(latest.position)
+          ? getSafePosition(latest.position)
+          : getSafePosition(undefined);
+
+        const rawTimestamp = 
+          (isValidObject(latest) && typeof latest.timestamp === 'string' ? latest.timestamp : null) ??
+          (typeof vehicle.updated_at === 'string' ? vehicle.updated_at : null) ??
+          (typeof vehicle.created_at === 'string' ? vehicle.created_at : null) ??
+          new Date().toISOString();
+
+        const status = getSafeVehicleStatus(vehicle.status);
 
       return {
-        id: vehicle.vehicle_id,
-        name: vehicle.name,
-        vehicleType: vehicle.vehicle_type,
-        vehicleCategory: vehicle.vehicle_category,
-        status: vehicle.status,
+          id: vehicleId,
+          name: typeof vehicle.name === 'string' ? vehicle.name : vehicleId,
+          vehicleType: typeof vehicle.vehicle_type === 'string' ? vehicle.vehicle_type : undefined,
+          vehicleCategory: vehicle.vehicle_category as MapVehicle['vehicleCategory'] | undefined,
+          status,
         position,
         timestamp: normalizeTimestamp(rawTimestamp, true) as string,
       };

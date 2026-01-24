@@ -25,13 +25,13 @@ export function getDefaultYForSurface(surface: 'floor' | 'ceiling' | 'left' | 'r
  * Converts scene coordinates -> world coordinates -> 2D position
  * @param position3DScene - 3D position in scene coordinates (Three.js) as [x, y, z]
  * @param mapMetadata - Map metadata containing projection configuration
- * @param view - View type: 'top', 'side_x', or 'side_y' (default: 'top')
+ * @param view - View type: 'top' or 'side_x' (default: 'top')
  * @returns 2D position as [u, v] tuple in world coordinates
  */
 export function extract2DFrom3DScene(
   position3DScene: [number, number, number],
   mapMetadata: MapMetadata | null | undefined,
-  view: 'top' | 'side_x' | 'side_y' = 'top'
+  view: 'top' | 'side_x' = 'top'
 ): [number, number] {
   // Transform from scene coordinates to world coordinates
   const coordinateConfig = mapMetadata?.coordinate_system;
@@ -45,13 +45,13 @@ export function extract2DFrom3DScene(
  * Extract 2D position from 3D world coordinates using map metadata projection configuration
  * @param position3D - 3D position in world coordinates as [x, y, z] or {x, y, z}
  * @param mapMetadata - Map metadata containing projection configuration
- * @param view - View type: 'top', 'side_x', or 'side_y' (default: 'top')
+ * @param view - View type: 'top' or 'side_x' (default: 'top')
  * @returns 2D position as [u, v] tuple
  */
 export function extract2DFrom3DWorld(
   position3D: [number, number, number] | { x: number; y: number; z: number },
   mapMetadata: MapMetadata | null | undefined,
-  view: 'top' | 'side_x' | 'side_y' = 'top'
+  view: 'top' | 'side_x' = 'top'
 ): [number, number] {
   // Normalize input to object format
   const pos3d = Array.isArray(position3D)
@@ -84,7 +84,7 @@ export function extract2DFrom3DWorld(
 export function extract2DFrom3D(
   position3D: [number, number, number] | { x: number; y: number; z: number },
   mapMetadata: MapMetadata | null | undefined,
-  view: 'top' | 'side_x' | 'side_y' = 'top'
+  view: 'top' | 'side_x' = 'top'
 ): [number, number] {
   // Assume it's world coordinates for backward compatibility
   return extract2DFrom3DWorld(position3D, mapMetadata, view);
@@ -96,14 +96,14 @@ export function extract2DFrom3D(
  * @param position2D - 2D position in world coordinates as [u, v] tuple
  * @param surface - Surface type: 'floor', 'ceiling', 'left', or 'right' (default: 'floor')
  * @param mapMetadata - Map metadata containing projection configuration
- * @param view - View type: 'top', 'side_x', or 'side_y' (default: 'top')
+ * @param view - View type: 'top' or 'side_x' (default: 'top')
  * @returns 3D position in scene coordinates as [x, y, z] tuple
  */
 export function convert2DTo3DScene(
   position2D: [number, number],
   surface: 'floor' | 'ceiling' | 'left' | 'right' = 'floor',
   mapMetadata: MapMetadata | null | undefined,
-  view: 'top' | 'side_x' | 'side_y' = 'top'
+  view: 'top' | 'side_x' = 'top'
 ): [number, number, number] {
   // Convert 2D to 3D world coordinates
   const worldPos3D = convert2DTo3DWorld(position2D, surface, mapMetadata, view);
@@ -118,14 +118,14 @@ export function convert2DTo3DScene(
  * @param position2D - 2D position in world coordinates as [u, v] tuple
  * @param surface - Surface type: 'floor', 'ceiling', 'left', or 'right' (default: 'floor')
  * @param mapMetadata - Map metadata containing projection configuration
- * @param view - View type: 'top', 'side_x', or 'side_y' (default: 'top')
+ * @param view - View type: 'top' or 'side_x' (default: 'top')
  * @returns 3D position in world coordinates as [x, y, z] tuple
  */
 export function convert2DTo3DWorld(
   position2D: [number, number],
   surface: 'floor' | 'ceiling' | 'left' | 'right' = 'floor',
   mapMetadata: MapMetadata | null | undefined,
-  view: 'top' | 'side_x' | 'side_y' = 'top'
+  view: 'top' | 'side_x' = 'top'
 ): [number, number, number] {
   const [u, v] = position2D;
   const base = { x: 0, y: 0, z: 0 };
@@ -171,7 +171,7 @@ export function convert2DTo3D(
   position2D: [number, number],
   surface: 'floor' | 'ceiling' | 'left' | 'right' = 'floor',
   mapMetadata: MapMetadata | null | undefined,
-  view: 'top' | 'side_x' | 'side_y' = 'top'
+  view: 'top' | 'side_x' = 'top'
 ): [number, number, number] {
   // Return world coordinates for backward compatibility
   return convert2DTo3DWorld(position2D, surface, mapMetadata, view);
@@ -182,14 +182,14 @@ export function convert2DTo3D(
  * @param position2D - 2D position in world coordinates as [u, v] tuple
  * @param surface - Surface type: 'floor', 'ceiling', 'left', or 'right' (default: 'floor')
  * @param mapMetadata - Map metadata containing projection configuration
- * @param view - View type: 'top', 'side_x', or 'side_y' (default: 'top')
+ * @param view - View type: 'top' or 'side_x' (default: 'top')
  * @returns 3D position in scene coordinates as {x, y, z} object
  */
 export function convert2DTo3DObject(
   position2D: [number, number],
   surface: 'floor' | 'ceiling' | 'left' | 'right' = 'floor',
   mapMetadata: MapMetadata | null | undefined,
-  view: 'top' | 'side_x' | 'side_y' = 'top'
+  view: 'top' | 'side_x' = 'top'
 ): { x: number; y: number; z: number } {
   const [x, y, z] = convert2DTo3DScene(position2D, surface, mapMetadata, view);
   return { x, y, z };

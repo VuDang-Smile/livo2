@@ -7,13 +7,13 @@
  * URL PCD map đã merge từ storage thực tế
  */
 export const PCD_SOURCE_URL =
-  'http://storage.lidar.tm/merged_map/merged_all.pcd';
+  'http://storage.lidar.tm/merged_map/merged_all_rotated.pcd';
 
 /**
- * URL metadata JSON cho floorplan 2D (top/side_x/side_y)
+ * URL metadata JSON cho floorplan 2D (top/side_x)
  */
 export const MAP_FLOORPLAN_METADATA_URL =
-  'http://storage.lidar.tm/floorplan_2d/merge_all_hba_metadata.json';
+  'http://storage.lidar.tm/floorplan_2d/merged_all_rotated_metadata.json';
 
 /**
  * URL metadata JSON cho thông tin bản đồ hiện tại (map info)
@@ -31,12 +31,11 @@ export const QR_DETECT_URL =
  * URL ảnh floorplan 2D cho từng view
  */
 export const MAP_FLOORPLAN_IMAGE_URLS: Record<
-  'top' | 'side_x' | 'side_y',
+  'top' | 'side_x',
   string
 > = {
-  top: 'http://storage.lidar.tm/floorplan_2d/merge_all_hba_top.png',
-  side_x: 'http://storage.lidar.tm/floorplan_2d/merge_all_hba_side_x.png',
-  side_y: 'http://storage.lidar.tm/floorplan_2d/merge_all_hba_side_y.png',
+  top: 'http://storage.lidar.tm/floorplan_2d/merged_all_rotated_top.png',
+  side_x: 'http://storage.lidar.tm/floorplan_2d/merged_all_rotated_side_x.png',
 };
 
 /**
@@ -45,9 +44,9 @@ export const MAP_FLOORPLAN_IMAGE_URLS: Record<
  */
 export function getBackendApiUrl(): string {
   const hostname = window.location.hostname;
-  // If running on frontend.lidar.tm or lidar.tm, use backend.lidar.tm
-  if (hostname === 'frontend.lidar.tm' || hostname === 'lidar.tm' || hostname.includes('lidar.tm')) {
-    return 'http://backend.lidar.tm';
+  // If running on frontend.lidar.ntm or lidar.tm, use backend.lidar.ntm
+  if (hostname === 'frontend.lidar.ntm' || hostname === 'lidar.tm' || hostname.includes('lidar.tm')) {
+    return 'http://backend.lidar.ntm';
   }
   // For localhost or IP addresses, use same hostname with port 8000
   return `http://${hostname}:8000`;

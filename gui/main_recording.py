@@ -782,9 +782,115 @@ class LivoxApp:
                 
                 if hasattr(self, 'theta_driver') and self.theta_driver:
                     try:
-                        self.theta_driver.stop_all()
+                        self.log(translator.get("log.stopping_theta_driver", "🛑 Đang dừng Theta driver..."))
+                        
+                        # Bước 1: Gọi stop_all() để dừng các process và ROS subscriber
+                        if hasattr(self.theta_driver, 'stop_all'):
+                            self.theta_driver.stop_all()
+                        else:
+                            # Fallback: kill process trực tiếp nếu không có stop_all()
+                            if hasattr(self.theta_driver, 'theta_driver_process') and \
+                               self.theta_driver.theta_driver_process:
+                                try:
+                                    self.theta_driver.theta_driver_process.terminate()
+                                    self.theta_driver.theta_driver_process.wait(timeout=3)
+                                except subprocess.TimeoutExpired:
+                                    if self.theta_driver.theta_driver_process:
+                                        self.theta_driver.theta_driver_process.kill()
+                                except Exception:
+                                    pass
+                            
+                            # Kill camera_info_publisher nếu có
+                            if hasattr(self.theta_driver, 'camera_info_publisher_process') and \
+                               self.theta_driver.camera_info_publisher_process:
+                                try:
+                                    self.theta_driver.camera_info_publisher_process.terminate()
+                                    self.theta_driver.camera_info_publisher_process.wait(timeout=3)
+                                except subprocess.TimeoutExpired:
+                                    if self.theta_driver.camera_info_publisher_process:
+                                        self.theta_driver.camera_info_publisher_process.kill()
+                                except Exception:
+                                    pass
+                        
+                        # Bước 2: Fallback - kiểm tra và kill process trực tiếp nếu còn chạy
+                        if hasattr(self.theta_driver, 'theta_driver_process') and \
+                           self.theta_driver.theta_driver_process:
+                            try:
+                                if self.theta_driver.theta_driver_process.poll() is None:
+                                    self.log("⚠️  theta_driver_process vẫn còn chạy, đang kill...")
+                                    self.theta_driver.theta_driver_process.terminate()
+                                    try:
+                                        self.theta_driver.theta_driver_process.wait(timeout=3)
+                                    except subprocess.TimeoutExpired:
+                                        self.theta_driver.theta_driver_process.kill()
+                                        self.theta_driver.theta_driver_process.wait()
+                            except Exception as e:
+                                self.log(f"⚠️  Lỗi khi kill theta_driver_process: {e}")
+                        
+                        if hasattr(self.theta_driver, 'camera_info_publisher_process') and \
+                           self.theta_driver.camera_info_publisher_process:
+                            try:
+                                if self.theta_driver.camera_info_publisher_process.poll() is None:
+                                    self.log("⚠️  camera_info_publisher_process vẫn còn chạy, đang kill...")
+                                    self.theta_driver.camera_info_publisher_process.terminate()
+                                    try:
+                                        self.theta_driver.camera_info_publisher_process.wait(timeout=3)
+                                    except subprocess.TimeoutExpired:
+                                        self.theta_driver.camera_info_publisher_process.kill()
+                                        self.theta_driver.camera_info_publisher_process.wait()
+                            except Exception as e:
+                                self.log(f"⚠️  Lỗi khi kill camera_info_publisher_process: {e}")
+                        
+                        # Bước 3: Kill các ROS nodes bằng pkill để đảm bảo kill cả process con
+                        self.log(translator.get("log.killing_theta_nodes", "🔍 Đang kill các ROS nodes của Theta driver..."))
+                        try:
+                            # Kill theta_driver_node
+                            subprocess.run(
+                                ['pkill', '-f', 'theta_driver_node'],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                timeout=3
+                            )
+                            
+                            # Kill camera_info_publisher_node
+                            subprocess.run(
+                                ['pkill', '-f', 'camera_info_publisher_node'],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                timeout=3
+                            )
+                            
+                            # Đợi một chút để processes dừng
+                            time.sleep(0.5)
+                        except Exception as e:
+                            self.log(f"⚠️  Lỗi khi kill bằng pkill: {e}")
+                        
+                        # Bước 4: Kill ROS nodes bằng ros2 node kill để cleanup ROS2 resources
+                        try:
+                            ros2_setup = "/opt/ros/jazzy/setup.bash"
+                            ws_setup = str(self.workspace_path / "install" / "setup.sh")
+                            
+                            if os.path.exists(ros2_setup) and os.path.exists(ws_setup):
+                                kill_cmd = f"source {ros2_setup} && source {ws_setup} && ros2 node list | grep -E 'theta_driver|camera_info_publisher' | xargs -r ros2 node kill"
+                                subprocess.run(
+                                    kill_cmd,
+                                    shell=True,
+                                    executable="/bin/bash",
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                    timeout=5
+                                )
+                        except Exception as e:
+                            # Ignore nếu không có ROS2 environment hoặc lỗi
+                            pass
+                        
+                        self.log(translator.get("log.theta_nodes_killed", "✅ Đã kill tất cả các ROS nodes của Theta driver"))
+                        self.log(translator.get("log.theta_driver_stopped", "✅ Theta driver đã được dừng"))
+                        
                     except Exception as e:
                         self.log(f"⚠️  Lỗi khi stop theta driver: {e}")
+                        import traceback
+                        self.log(traceback.format_exc())
                 
                 self.log("✓ Tất cả drivers đã được dừng")
             except Exception as e:

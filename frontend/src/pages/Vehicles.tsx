@@ -4,6 +4,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useVehicleService } from '../hooks/api/useVehicleService';
 import { ApiVehicle, VehicleFormData } from '../types/vehicle';
+import { getVehicleCategoryLabel } from '../utils/vehicleCategoryUtils';
 
 const Vehicles: React.FC = () => {
   const { t } = useLanguage();
@@ -34,10 +35,10 @@ const Vehicles: React.FC = () => {
           const metadata = (apiVehicle.metadata as any) || {};
           return {
             id: apiVehicle.vehicle_id,
-            licensePlate: metadata.licensePlate || apiVehicle.vehicle_id,
             driver: metadata.driver || apiVehicle.name || t('not_given') || 'N/A',
-            vehicleType: apiVehicle.vehicle_type || t('not_given') || 'N/A',
-            mission: metadata.mission || apiVehicle.description || t('not_given') || 'N/A',
+            vehicleType: (apiVehicle.vehicle_type || '') as any,
+            vehicleCategory: apiVehicle.vehicle_category,
+            mission: (apiVehicle.mission || metadata.mission || '') as any,
             status: apiVehicle.status || 'offline',
           };
         });
@@ -88,7 +89,7 @@ const Vehicles: React.FC = () => {
           <div className="flex items-center">
             <div className="p-2 bg-blue-100 rounded-lg">
               <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
               </svg>
             </div>
             <div className="ml-4">
@@ -171,7 +172,7 @@ const Vehicles: React.FC = () => {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  {t('license_plate')}
+                  {t('vehicle_id')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   {t('driver')}
@@ -180,7 +181,7 @@ const Vehicles: React.FC = () => {
                   {t('vehicle_type')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  {t('mission')}
+                  {t('vehicle_category')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   {t('status')}
@@ -193,7 +194,7 @@ const Vehicles: React.FC = () => {
             <tbody className="bg-white divide-y divide-gray-200">
               {!loading && vehicles.length === 0 && !error && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
                     <p className="text-lg font-medium">{t('no_vehicles_found') || 'No vehicles found'}</p>
                     <p className="text-sm mt-2">{t('no_vehicles_description') || 'Get started by adding your first vehicle.'}</p>
                   </td>
@@ -225,16 +226,20 @@ const Vehicles: React.FC = () => {
                 return (
                   <tr key={vehicle.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{vehicle.licensePlate}</div>
+                      <div className="text-sm font-medium text-gray-900">{vehicle.id}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{vehicle.driver}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{vehicle.vehicleType}</div>
+                      <div className="text-sm text-gray-900">
+                        {vehicle.vehicleType ? t(`type.${vehicle.vehicleType}`) : '-'}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{vehicle.mission}</div>
+                      <div className="text-sm text-gray-900">
+                        {getVehicleCategoryLabel(vehicle.vehicleCategory, t)}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadge(vehicle.status)}`}>
@@ -262,4 +267,4 @@ const Vehicles: React.FC = () => {
   );
 };
 
-export default Vehicles; 
+export default Vehicles;

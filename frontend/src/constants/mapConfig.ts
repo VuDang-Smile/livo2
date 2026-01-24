@@ -28,9 +28,9 @@ export const MAP_WORLD_BOUNDS = {
  */
 export function getBackendUrl(): string {
   const hostname = window.location.hostname;
-  // If running on frontend.lidar.tm or lidar.tm, use backend.lidar.tm
-  if (hostname === 'frontend.lidar.tm' || hostname === 'lidar.tm' || hostname.includes('lidar.tm')) {
-    return 'http://backend.lidar.tm';
+  // If running on frontend.lidar.ntm or lidar.tm, use backend.lidar.ntm
+  if (hostname === 'frontend.lidar.ntm' || hostname === 'lidar.tm' || hostname.includes('lidar.tm')) {
+    return 'http://backend.lidar.ntm';
   }
   // For localhost or IP addresses, use same hostname with port 8000
   return `http://${hostname}:8000`;
@@ -48,8 +48,8 @@ export function getMQTTWebSocketUrl(): string {
   // Always connect to the same host as the frontend (domain hoặc IP),
   // đi qua nginx reverse proxy tại đường dẫn /mqtt.
   // Ví dụ:
-  //   http://frontend.lidar.tm -> ws://frontend.lidar.tm/mqtt
-  //   https://frontend.lidar.tm -> wss://frontend.lidar.tm/mqtt
+  //   http://frontend.lidar.ntm -> ws://frontend.lidar.ntm/mqtt
+  //   https://frontend.lidar.ntm -> wss://frontend.lidar.ntm/mqtt
   //   http://192.168.x.x -> ws://192.168.x.x/mqtt
   return `${wsProtocol}://${host}/mqtt`;
 }
@@ -58,7 +58,7 @@ export function getMQTTWebSocketUrl(): string {
  * Build URL for map image based on view
  * Sử dụng URL thực tế từ storage (uploadId hiện tại không dùng)
  */
-export function getMapImageUrl(uploadId: string | undefined, view: 'top' | 'side_x' | 'side_y'): string {
+export function getMapImageUrl(uploadId: string | undefined, view: 'top' | 'side_x'): string {
   return MAP_FLOORPLAN_IMAGE_URLS[view];
 }
 

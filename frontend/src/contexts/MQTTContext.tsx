@@ -1,6 +1,12 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from 'react';
 import mqtt, { MqttClient } from 'mqtt';
 import { normalizeTimestamp } from '../utils/timestampHelpers';
+import {
+  isValidObject,
+  isValidString,
+  getSafePosition,
+  getSafeOrientation,
+} from '../utils/validationUtils';
 
 // Types
 interface PCDNotification {
@@ -183,48 +189,59 @@ export const MQTTProvider: React.FC<MQTTProviderProps> = ({
           
           // Handle vehicle pose updates from backend API (livo/vehicles/{vehicle_id}/pose)
           if (topic.startsWith('livo/vehicles/') && topic.endsWith('/pose')) {
-            const vehiclePoseMsg = JSON.parse(payload.toString());
+            let vehiclePoseMsg: unknown;
+            try {
+              vehiclePoseMsg = JSON.parse(payload.toString());
+            } catch (parseError) {
+              console.error('[MQTT] Failed to parse vehicle pose message:', parseError);
+              return;
+            }
+            
+            if (!isValidObject(vehiclePoseMsg)) {
+              console.warn('[MQTT] Invalid vehicle pose message format');
+              return;
+            }
+            
             console.log('🔍 [MQTT] Vehicle pose message from backend:', vehiclePoseMsg);
             
             // Extract vehicle_id from topic or payload
             const topicParts = topic.split('/');
-            const vehicleId = vehiclePoseMsg.vehicle_id || topicParts[topicParts.length - 2];
+            const msg = vehiclePoseMsg as Record<string, unknown>;
+            const vehicleId = (isValidString(msg.vehicle_id) ? msg.vehicle_id : null) ?? 
+                             (topicParts.length >= 3 ? topicParts[topicParts.length - 2] : null);
             
-            if (!vehicleId) {
+            if (!vehicleId || !isValidString(vehicleId)) {
               console.warn('[MQTT] Cannot extract vehicle_id from topic or payload:', topic);
               return;
             }
             
             // Normalize backend pose format to PositionUpdateNotification format
-            const poseData = vehiclePoseMsg.pose || {};
-            const position = poseData.position || {};
-            const orientation = poseData.orientation || {};
-            const timestamp = poseData.timestamp || vehiclePoseMsg.timestamp;
+            const poseData = isValidObject(msg.pose) ? msg.pose : {};
+            const position = isValidObject(poseData.position) ? poseData.position : {};
+            const orientation = isValidObject(poseData.orientation) ? poseData.orientation : {};
             
-            const normalizedTimestamp = normalizeTimestamp(timestamp, true);
+            // Extract and validate timestamp
+            const rawTimestamp = poseData.timestamp ?? msg.timestamp;
+            const timestampValue = (typeof rawTimestamp === 'string' || typeof rawTimestamp === 'number' || rawTimestamp instanceof Date)
+              ? rawTimestamp
+              : new Date().toISOString();
+            
+            const normalizedTimestamp = normalizeTimestamp(timestampValue, true);
             const timestampString = typeof normalizedTimestamp === 'string' ? normalizedTimestamp : new Date(normalizedTimestamp).toISOString();
+            
+            const safePosition = getSafePosition(position);
+            const safeOrientation = getSafeOrientation(orientation);
             
             const posUpdate: PositionUpdateNotification = {
               vehicle_id: vehicleId,
               position: {
-                x: position.x ?? 0,
-                y: position.y ?? 0,
-                z: position.z ?? 0,
+                ...safePosition,
                 timestamp: timestampString
               },
               pose: {
-                frame_id: 'map',
-                position: {
-                  x: position.x ?? 0,
-                  y: position.y ?? 0,
-                  z: position.z ?? 0
-                },
-                orientation: {
-                  w: orientation.w ?? 1,
-                  x: orientation.x ?? 0,
-                  y: orientation.y ?? 0,
-                  z: orientation.z ?? 0
-                },
+                frame_id: isValidString(poseData.frame_id) ? poseData.frame_id : 'map',
+                position: safePosition,
+                orientation: safeOrientation,
                 timestamp: timestampString
               }
             };
@@ -232,16 +249,37 @@ export const MQTTProvider: React.FC<MQTTProviderProps> = ({
             console.log('🔍 [MQTT] Processed vehicle pose update:', posUpdate);
             setLastPositionUpdate(posUpdate);
           } else if (topic === 'livo/maps/vehicle.status.updated') {
-            const statusMsg = JSON.parse(payload.toString());
+            let statusMsg: unknown;
+            try {
+              statusMsg = JSON.parse(payload.toString());
+            } catch (parseError) {
+              console.error('[MQTT] Failed to parse vehicle status message:', parseError);
+              return;
+            }
+            
+            if (!isValidObject(statusMsg)) {
+              console.warn('[MQTT] Invalid vehicle status message format');
+              return;
+            }
+            
             console.log('🔍 [MQTT] Vehicle status message received:', statusMsg);
+            
+            const msg = statusMsg as Record<string, unknown>;
+            const vehicleId = isValidString(msg.vehicle_id) ? msg.vehicle_id : null;
+            const status = isValidString(msg.status) ? msg.status : null;
+            
+            if (!vehicleId || !status) {
+              console.warn('[MQTT] Missing required fields in status message:', msg);
+              return;
+            }
             
             // Normalize status message format
             const vehicleStatus: LastVehicleStatus = {
-              vehicle_id: statusMsg.vehicle_id,
-              status: statusMsg.status,
-              action: statusMsg.action,
-              timestamp: statusMsg.timestamp,
-              data: statusMsg
+              vehicle_id: vehicleId,
+              status: status,
+              action: isValidString(msg.action) ? msg.action : undefined,
+              timestamp: isValidString(msg.timestamp) ? msg.timestamp : undefined,
+              data: msg
             };
             
             setLastVehicleStatus(vehicleStatus);

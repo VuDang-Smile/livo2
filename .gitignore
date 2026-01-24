@@ -30,4 +30,15 @@ dependencies/HBA/build_standalone/**
 **/*.exe
 
 # Python cache
-scripts/__pycache__/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python
+
+# ImGui config files
+imgui.ini
+**/imgui.ini
+
+#config
+autostart_config.json

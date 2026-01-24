@@ -93,8 +93,7 @@ class MapProcessor:
             # Tìm các file PNG và JSON metadata
             png_files = {
                 'top': None,
-                'side_x': None,
-                'side_y': None
+                'side_x': None
             }
             metadata_file = None
             
@@ -105,8 +104,6 @@ class MapProcessor:
                         png_files['top'] = file_path
                     elif file_name.endswith('_side_x.png'):
                         png_files['side_x'] = file_path
-                    elif file_name.endswith('_side_y.png'):
-                        png_files['side_y'] = file_path
                     elif file_name.endswith('_metadata.json'):
                         metadata_file = file_path
             
@@ -116,8 +113,6 @@ class MapProcessor:
                 missing_files.append('*_top.png')
             if not png_files['side_x']:
                 missing_files.append('*_side_x.png')
-            if not png_files['side_y']:
-                missing_files.append('*_side_y.png')
             if not metadata_file:
                 missing_files.append('*_metadata.json')
             
@@ -133,8 +128,7 @@ class MapProcessor:
             return {
                 'image_paths': {
                     'top': png_files['top'],
-                    'side_x': png_files['side_x'],
-                    'side_y': png_files['side_y']
+                    'side_x': png_files['side_x']
                 },
                 'metadata_path': metadata_file,
                 'base_name': base_name

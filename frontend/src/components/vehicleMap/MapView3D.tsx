@@ -1,4 +1,5 @@
-import React, { useRef, useEffect, Suspense } from 'react';
+import React, { useRef, useEffect, Suspense, useState } from 'react';
+import type { ErrorInfo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { ArrowHelper } from 'three';
@@ -7,6 +8,7 @@ import { VehicleMarker3D } from '../../types/vehicle';
 import PCDMap, { PointCloudBounds } from '../PCDMap';
 import { MapMetadata, CoordinateSystemConfig } from '../../types/mapMetadata';
 import { getPCDRotation, transformWorldToScene } from '../../utils/coordinateTransformer';
+import { useLanguage } from '../../contexts/LanguageContext';
 import {
   DEFAULT_PCD_URL,
   PCD_CAMERA_FOV,
@@ -95,6 +97,33 @@ const VehicleMarker: React.FC<{
   );
 };
 
+// Error Boundary Component cho PCD loading
+class PCDErrorBoundary extends React.Component<
+  { children: React.ReactNode; onError: (error: Error) => void },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode; onError: (error: Error) => void }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('[MapView3D] PCD loading error:', error, errorInfo);
+    this.props.onError(error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return null; // Return null để parent component hiển thị fallback UI
+    }
+    return this.props.children;
+  }
+}
+
 // Component chính cho 3D map
 const MapView3D: React.FC<MapView3DProps> = ({
   vehicleMarkers,
@@ -110,8 +139,10 @@ const MapView3D: React.FC<MapView3DProps> = ({
   onVehicleSelect,
   onBoundsCalculated,
 }) => {
+  const { t } = useLanguage();
   const controlsRef = useRef<any>(null);
   const coordinateConfig = mapMetadata?.coordinate_system;
+  const [pcdError, setPcdError] = useState<Error | null>(null);
 
   // Focus camera vào phương tiện được chọn
   useEffect(() => {
@@ -158,6 +189,31 @@ const MapView3D: React.FC<MapView3DProps> = ({
     animate();
   }, [selectedVehicleId, vehicleMarkers]);
 
+  // Hiển thị UI "chưa có" nếu PCD file không tồn tại
+  if (pcdError) {
+    const is404 = pcdError.message?.includes('404') || pcdError.message?.includes('Not Found');
+    
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-gray-900">
+        <div className="text-center p-8 max-w-md">
+          <div className="mb-4">
+            <svg className="w-16 h-16 mx-auto text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-medium text-white mb-2">{t('no_pcd_data') || 'Chưa có dữ liệu PCD'}</h3>
+          <p className="text-sm text-gray-400 mb-4">
+            {is404 
+              ? (t('pcd_file_not_found') || 'File PCD không tồn tại. Vui lòng tải lên file PCD trước.')
+              : (t('pcd_load_error') || 'Không thể tải file PCD. Vui lòng thử lại sau.')
+            }
+          </p>
+          <p className="text-xs text-gray-500">{t('pcd_upload_hint') || 'Bạn có thể tải lên file PCD từ trang Upload.'}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full h-full relative">
       <Canvas camera={{ position: PCD_CAMERA_POSITION, fov: PCD_CAMERA_FOV }}>
@@ -177,21 +233,23 @@ const MapView3D: React.FC<MapView3DProps> = ({
         <color attach="background" args={['#000000']} />
         
         {pcdUrl && (
-          <Suspense fallback={null}>
-            <PCDMap 
-              url={pcdUrl} 
-              scale={1}
-              rotation={getPCDRotation(coordinateConfig)}
-              position={[0, 0, 0]}
-              clipXMin={clipXMin}
-              clipXMax={clipXMax}
-              clipYMin={clipYMin}
-              clipYMax={clipYMax}
-              clipZMin={clipZMin}
-              clipZMax={clipZMax}
-              onBoundsCalculated={onBoundsCalculated}
-            />
-          </Suspense>
+          <PCDErrorBoundary onError={setPcdError}>
+            <Suspense fallback={null}>
+              <PCDMap 
+                url={pcdUrl} 
+                scale={1}
+                rotation={getPCDRotation(coordinateConfig)}
+                position={[0, 0, 0]}
+                clipXMin={clipXMin}
+                clipXMax={clipXMax}
+                clipYMin={clipYMin}
+                clipYMax={clipYMax}
+                clipZMin={clipZMin}
+                clipZMax={clipZMax}
+                onBoundsCalculated={onBoundsCalculated}
+              />
+            </Suspense>
+          </PCDErrorBoundary>
         )}
         
         {vehicleMarkers.map((marker) => (

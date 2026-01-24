@@ -19,3 +19,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+design_map_config.json
+
+output/

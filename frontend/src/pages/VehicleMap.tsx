@@ -11,15 +11,19 @@ import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { MapMetadata } from '../types/mapMetadata';
 import { MapVehicle } from '../types/vehicle';
 import VehicleStatusCard from '../components/vehicleMap/VehicleStatusCard';
+import { getVehicleCategoryLabel } from '../utils/vehicleCategoryUtils';
+import { getVehicleTypeLabel } from '../utils/vehicleTypeUtils';
+import { isValidArray } from '../utils/validationUtils';
 
 // Component chính cho trang
 const VehicleMap: React.FC = () => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [viewMode, setViewMode] = useState<'2D' | '3D'>('2D');
-  const [selectedView, setSelectedView] = useState<'top' | 'side_x' | 'side_y'>('top');
+  const [selectedView, setSelectedView] = useState<'top' | 'side_x'>('top');
+  const [mapRotation, setMapRotation] = useState<0 | 90>(0);
   const [mapMetadata] = useState<MapMetadata | null>(null);
   const [uploadId] = useState<string | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
@@ -40,8 +44,11 @@ const VehicleMap: React.FC = () => {
 
   // Hooks for data
   const { vehicleMarkers: markers3D } = useVehicleMarkers3D();
-  const { vehicleMarkers: markers2D, mapMetadata: poseMetadata } = useVehiclePose2D(selectedView);
+  const { vehicleMarkers: markers2D, mapMetadata: poseMetadata, error: poseError, isLoading: isLoadingPose } = useVehiclePose2D(selectedView);
   const { mapVehicles } = useVehicleMap2D();
+  
+  // Kiểm tra nếu metadata không tồn tại
+  const isMetadataNotFound = poseError === 'MAP_METADATA_NOT_FOUND';
 
   // Khoá scroll toàn bộ trang khi vào VehicleMap, trả lại trạng thái cũ khi rời trang
   useEffect(() => {
@@ -134,8 +141,16 @@ const VehicleMap: React.FC = () => {
    */
   const displayVehicles: MapVehicle[] = useMemo(() => {
     if (viewMode === '2D') {
+      // Validate markers2D is an array
+      if (!isValidArray(markers2D)) {
+        console.warn('[VehicleMap] Invalid markers2D, expected array');
+        return isValidArray(mapVehicles) ? mapVehicles : [];
+      }
+      
       // Transform markers2D (VehicleMarker2D) → MapVehicle format
-      const vehiclesFromMarkers: MapVehicle[] = markers2D.map(marker => ({
+      const vehiclesFromMarkers: MapVehicle[] = markers2D
+        .filter(marker => marker && marker.id && isValidArray(marker.position) && marker.position.length >= 2)
+        .map(marker => ({
         id: marker.id,
         name: marker.name || marker.label || marker.id,
         vehicleType: marker.vehicleType,
@@ -154,9 +169,13 @@ const VehicleMap: React.FC = () => {
       const vehiclesMap = new Map<string, MapVehicle>();
       
       // Step 1: Add all vehicles from API (base data - có thể thiếu position mới nhất)
+      if (isValidArray(mapVehicles)) {
       mapVehicles.forEach(vehicle => {
+          if (vehicle && vehicle.id) {
         vehiclesMap.set(vehicle.id, vehicle);
+          }
       });
+      }
       
       // Step 2: Overwrite với real-time data từ MQTT (nếu có)
       // Vehicles từ markers2D có position mới nhất từ MQTT, nên overwrite để ưu tiên real-time
@@ -166,8 +185,16 @@ const VehicleMap: React.FC = () => {
       
       return Array.from(vehiclesMap.values());
     } else {
+      // Validate markers3D is an array
+      if (!isValidArray(markers3D)) {
+        console.warn('[VehicleMap] Invalid markers3D, expected array');
+        return [];
+      }
+      
       // Convert 3D markers to display format
-      return markers3D.map<MapVehicle>(marker => ({
+      return markers3D
+        .filter(marker => marker && marker.id && isValidArray(marker.position) && marker.position.length >= 3)
+        .map<MapVehicle>(marker => ({
         id: marker.id,
         name: marker.name || marker.id,
         vehicleType: marker.vehicleType,
@@ -292,7 +319,7 @@ const VehicleMap: React.FC = () => {
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                Top
+                {t('view_top')}
               </button>
               <button
                 onClick={() => setSelectedView('side_x')}
@@ -302,17 +329,33 @@ const VehicleMap: React.FC = () => {
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                Side X
+                {t('view_side_x')}
               </button>
+            </div>
+          )}
+
+          {/* Map Rotation Toggle (only for 2D) */}
+          {viewMode === '2D' && (
+            <div className="flex bg-gray-100 rounded-lg p-1">
               <button
-                onClick={() => setSelectedView('side_y')}
+                onClick={() => setMapRotation(0)}
                 className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  selectedView === 'side_y'
+                  mapRotation === 0
                     ? 'bg-white text-blue-600 shadow-sm'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                Side Y
+                {t('view_horizontal')}
+              </button>
+              <button
+                onClick={() => setMapRotation(90)}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  mapRotation === 90
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                {t('view_vertical')}
               </button>
             </div>
           )}
@@ -368,16 +411,16 @@ const VehicleMap: React.FC = () => {
             {viewMode === '3D' ? (
               <div className="relative w-full h-full">
                 <MapView3D
-                  vehicleMarkers={markers3D}
+                  vehicleMarkers={isValidArray(markers3D) ? markers3D : []}
                   pcdUrl={DEFAULT_PCD_URL}
-                  mapMetadata={poseMetadata || mapMetadata}
+                  mapMetadata={poseMetadata ?? mapMetadata ?? null}
                   clipXMin={realXRange ? realXRange[0] : undefined}
                   clipXMax={realXRange ? realXRange[1] : undefined}
                   clipYMin={realYRange ? realYRange[0] : undefined}
                   clipYMax={realYRange ? realYRange[1] : undefined}
                   clipZMin={realZRange ? realZRange[0] : undefined}
                   clipZMax={realZRange ? realZRange[1] : undefined}
-                  selectedVehicleId={selectedVehicleId}
+                  selectedVehicleId={selectedVehicleId ?? null}
                   onVehicleSelect={handleVehicleSelect}
                   onBoundsCalculated={handleBoundsCalculated}
                 />
@@ -423,18 +466,43 @@ const VehicleMap: React.FC = () => {
               </div>
             ) : (
               <div style={{ height: isFullscreen ? '100vh' : '100%' }}>
-                <MapView2D
-                  vehicleMarkers={markers2D}
-                  mapMetadata={poseMetadata || mapMetadata}
-                  uploadId={uploadId}
-                  view={selectedView}
-                  selectedVehicleId={selectedVehicleId}
-                  onVehicleSelect={handleVehicleSelect}
-                />
-                {isLoadingMetadata && (
-                  <div className="absolute top-4 right-4 bg-white bg-opacity-90 p-2 rounded-lg shadow-sm">
-                    <span className="text-sm text-gray-600">Loading map metadata...</span>
+                {isLoadingPose ? (
+                  <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                      <p className="text-gray-600">{t('loading_map') || 'Đang tải bản đồ...'}</p>
+                    </div>
                   </div>
+                ) : isMetadataNotFound ? (
+                  <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                    <div className="text-center p-8 max-w-md">
+                      <div className="mb-4">
+                        <svg className="w-16 h-16 mx-auto text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m-6 3l6-3" />
+                        </svg>
+                      </div>
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">{t('no_map_data') || 'Chưa có dữ liệu bản đồ'}</h3>
+                      <p className="text-sm text-gray-600 mb-4">{t('map_metadata_not_available') || 'Metadata bản đồ chưa được tải lên. Vui lòng tải lên bản đồ trước.'}</p>
+                      <p className="text-xs text-gray-500">{t('map_upload_hint') || 'Bạn có thể tải lên bản đồ từ trang Upload.'}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <MapView2D
+                      vehicleMarkers={isValidArray(markers2D) ? markers2D : []}
+                      mapMetadata={poseMetadata ?? mapMetadata ?? null}
+                      uploadId={uploadId ?? null}
+                      view={selectedView}
+                      rotation={mapRotation}
+                      selectedVehicleId={selectedVehicleId ?? null}
+                      onVehicleSelect={handleVehicleSelect}
+                    />
+                    {isLoadingMetadata && (
+                      <div className="absolute top-4 right-4 bg-white bg-opacity-90 p-2 rounded-lg shadow-sm">
+                        <span className="text-sm text-gray-600">Loading map metadata...</span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -529,9 +597,15 @@ const VehicleMap: React.FC = () => {
                         
                         <div className="text-sm text-gray-600 space-y-1">
                           <p>
-                            <span className="font-medium">{t('type_label')}</span>{' '}
-                            {vehicle.vehicleType || t('vehicle_type_unknown')}
+                            <span className="font-medium">{t('vehicle_type_label')}</span>{' '}
+                            {getVehicleTypeLabel(vehicle.vehicleType, t) || t('vehicle_type_unknown')}
                           </p>
+                          {vehicle.vehicleCategory && (
+                            <p>
+                              <span className="font-medium">{t('equipment_category_label')}</span>{' '}
+                              {getVehicleCategoryLabel(vehicle.vehicleCategory, t)}
+                            </p>
+                          )}
                           <p><span className="font-medium">{t('status_label_short')}</span> 
                             <span className={`ml-1 ${
                               vehicle.status === 'online' ? 'text-green-600' : 'text-red-600'

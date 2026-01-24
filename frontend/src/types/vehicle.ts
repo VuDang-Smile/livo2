@@ -14,6 +14,21 @@
 
 export type VehicleStatus = 'online' | 'offline';
 
+export type VehicleType =
+  | 'scanner'
+  | 'worker';
+
+export type MissionType =
+  | 'tunnel_line_1'
+  | 'tunnel_line_2'
+  | 'material_transport'
+  | 'concrete_wall_pump'
+  | 'soil_transport'
+  | 'equipment_installation'
+  | 'tunnel_maintenance'
+  | 'geological_survey'
+  | 'other_mission';
+
 export type VehicleCategory =
   | 'roadheader'
   | 'drill_jumbo'
@@ -35,7 +50,8 @@ export interface VehicleApi {
   vehicle_id: string;
   name?: string;
   description?: string;
-  vehicle_type?: string;
+  vehicle_type?: VehicleType;
+  mission?: MissionType;
   vehicle_category?: VehicleCategory;
   status: VehicleStatus;
   metadata?: Record<string, unknown>;
@@ -60,7 +76,8 @@ export interface Vehicle {
   id: string;
   name?: string;
   description?: string;
-  vehicleType?: string;
+  vehicleType?: VehicleType;
+  mission?: MissionType;
   vehicleCategory?: VehicleCategory;
   status: VehicleStatus;
   metadata?: Record<string, unknown>;
@@ -78,11 +95,10 @@ export interface Vehicle {
  */
 export interface VehicleFormData {
   id: string;
-  licensePlate: string;
   driver: string;
-  vehicleType: string;
+  vehicleType: VehicleType | '';
   vehicleCategory?: VehicleCategory;
-  mission: string;
+  mission: MissionType | '';
   status: VehicleStatus;
 }
 

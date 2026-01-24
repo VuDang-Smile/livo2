@@ -238,7 +238,7 @@ fi
 
 # Check Frontend (via Nginx)
 sleep 2
-if curl -f http://localhost/health -H "Host: frontend.lidar.tm" &> /dev/null; then
+if curl -f http://localhost/health -H "Host: frontend.lidar.ntm" &> /dev/null; then
     print_success "Frontend is healthy (via Nginx)"
 else
     print_warning "Frontend health check via Nginx failed (may still be starting)"
@@ -253,7 +253,7 @@ fi
 
 # Check Backend (via Nginx)
 sleep 2
-if curl -f http://localhost/health -H "Host: backend.lidar.tm" &> /dev/null; then
+if curl -f http://localhost/health -H "Host: backend.lidar.ntm" &> /dev/null; then
     print_success "Backend is healthy (via Nginx)"
 else
     print_warning "Backend health check via Nginx failed (may still be starting)"
@@ -281,9 +281,9 @@ echo ""
 echo "Services:"
 echo ""
 echo "Access via Domain (through Nginx):"
-echo "  - Frontend:            http://frontend.lidar.tm"
-echo "  - Backend API:         http://backend.lidar.tm"
-echo "  - Backend Docs:        http://backend.lidar.tm/docs"
+echo "  - Frontend:            http://frontend.lidar.ntm"
+echo "  - Backend API:         http://backend.lidar.ntm"
+echo "  - Backend Docs:        http://backend.lidar.ntm/docs"
 echo ""
 echo "Access via IP and Port (direct):"
 echo "  - Frontend:            http://<server_ip>:3000"
@@ -298,8 +298,8 @@ echo "  - MongoDB:             localhost:27017"
 echo "  - MQTT Broker:         localhost:1883"
 echo ""
 echo "Note: To use domain names, add these to /etc/hosts:"
-echo "  <server_ip>    frontend.lidar.tm"
-echo "  <server_ip>    backend.lidar.tm"
+echo "  <server_ip>    frontend.lidar.ntm"
+echo "  <server_ip>    backend.lidar.ntm"
 echo ""
 echo "Or run: sudo ./dependencies/find_backend_lan.sh"
 echo ""
