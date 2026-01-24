@@ -5,6 +5,7 @@ import { MapMetadata } from '../../types/mapMetadata';
 import { getMapImageUrl } from '../../constants/mapConfig';
 import { useMapImage } from '../../hooks/useMapImage';
 import { isValidArray } from '../../utils/validationUtils';
+import VehicleStatsOverlay from './VehicleStatsOverlay';
 
 interface MapView2DProps {
   vehicleMarkers: VehicleMarker2D[];
@@ -14,6 +15,7 @@ interface MapView2DProps {
   rotation?: number; // Rotation angle in degrees (0 or 90)
   selectedVehicleId?: string | null;
   onVehicleSelect?: (id: string) => void;
+  statsData?: { total: number; online: number; offline: number };
 }
 
 const MapView2D: React.FC<MapView2DProps> = ({
@@ -24,6 +26,7 @@ const MapView2D: React.FC<MapView2DProps> = ({
   rotation = 0,
   selectedVehicleId,
   onVehicleSelect,
+  statsData,
 }) => {
   const { t } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -472,6 +475,16 @@ const MapView2D: React.FC<MapView2DProps> = ({
 
   return (
     <div className="relative w-full h-full">
+      {/* Stats Overlay */}
+      {statsData && (
+        <VehicleStatsOverlay
+          total={statsData.total}
+          online={statsData.online}
+          offline={statsData.offline}
+          isVisible={true}
+        />
+      )}
+      
       <div
         ref={containerRef}
         className={`w-full h-full ${scrollClass} flex items-center justify-center`}
@@ -494,21 +507,6 @@ const MapView2D: React.FC<MapView2DProps> = ({
           onClick={handleCanvasClick}
           onMouseMove={handleMouseMove}
         />
-      </div>
-      
-      {/* Legend for 2D map */}
-      <div className="absolute bottom-4 left-4 bg-white bg-opacity-90 p-3 rounded-lg shadow-sm border z-10">
-        <div className="text-sm font-medium text-gray-700 mb-2">{t('legend')}</div>
-        <div className="space-y-1">
-          <div className="flex items-center space-x-2">
-            <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-            <span className="text-xs text-gray-600">{t('online')}</span>
-          </div>
-          <div className="flex items-center space-x-2">
-            <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-            <span className="text-xs text-gray-600">{t('offline')}</span>
-          </div>
-        </div>
       </div>
     </div>
   );
