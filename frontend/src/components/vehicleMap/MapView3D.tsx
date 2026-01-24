@@ -16,6 +16,7 @@ import {
   PCD_ORBIT_MAX_DISTANCE,
   PCD_ORBIT_MIN_DISTANCE,
 } from '../../constants/pcdConfig';
+import VehicleStatsOverlay from './VehicleStatsOverlay';
 
 interface MapView3DProps {
   vehicleMarkers: VehicleMarker3D[];
@@ -31,6 +32,7 @@ interface MapView3DProps {
   selectedVehicleId?: string | null;
   onVehicleSelect?: (id: string) => void;
   onBoundsCalculated?: (bounds: PointCloudBounds) => void;
+  statsData?: { total: number; online: number; offline: number };
 }
 
 // Component cho phương tiện 3D
@@ -138,6 +140,7 @@ const MapView3D: React.FC<MapView3DProps> = ({
   selectedVehicleId,
   onVehicleSelect,
   onBoundsCalculated,
+  statsData,
 }) => {
   const { t } = useLanguage();
   const controlsRef = useRef<any>(null);
@@ -216,6 +219,16 @@ const MapView3D: React.FC<MapView3DProps> = ({
 
   return (
     <div className="w-full h-full relative">
+      {/* Stats Overlay */}
+      {statsData && (
+        <VehicleStatsOverlay
+          total={statsData.total}
+          online={statsData.online}
+          offline={statsData.offline}
+          isVisible={true}
+        />
+      )}
+      
       <Canvas camera={{ position: PCD_CAMERA_POSITION, fov: PCD_CAMERA_FOV }}>
         <OrbitControls 
           ref={controlsRef}
