@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from datetime import datetime
+from typing import Tuple
 
 # Import comparison utils
 COMPARISON_UTILS_AVAILABLE = False
@@ -25,6 +26,8 @@ try:
         detect_drift,
         DEFAULT_ICP_MAX_ITERATIONS,
         DEFAULT_ICP_THRESHOLD_MULTIPLIER,
+        get_principal_axis_from_pcd,
+        calculate_pcd_length_along_principal_axis,
     )
     COMPARISON_UTILS_AVAILABLE = True
 except (ImportError, SystemError, OSError, SystemExit) as e:
@@ -112,7 +115,13 @@ class DesignMapComparison:
             # Lưu đường dẫn vào config để dùng lần sau
             self._save_design_file_config(filename, self.design_file_type)
     
-    def run_design_map_comparison(self, generated_pcd_path: Path, comparison_status_label=None, root=None):
+    def run_design_map_comparison(
+        self,
+        generated_pcd_path: Path,
+        comparison_status_label=None,
+        root=None,
+        tunnel_entrance_coords: Tuple[float, float, float] = None
+    ):
         """
         So sánh bản đồ tạo ra với bản thiết kế
         
@@ -158,8 +167,36 @@ class DesignMapComparison:
             # Load test PCD (bản đồ tạo ra)
             pcd_test = load_pcd(generated_pcd_path)
             test_points = len(pcd_test.points)
+            
+            # Calculate mapped PCD length and principal axis
+            mapped_length = calculate_pcd_length_along_principal_axis(pcd_test)
+            test_principal_direction, test_centroid = get_principal_axis_from_pcd(pcd_test)
+            
+            self.log(f"   Mapped PCD length: {mapped_length:.2f} m")
+            self.log(f"   Mapped PCD principal direction: [{test_principal_direction[0]:.3f}, {test_principal_direction[1]:.3f}, {test_principal_direction[2]:.3f}]")
+            
+            # Prepare cropping parameters if tunnel entrance coordinates provided
+            crop_params = None
+            design_length_before = None
+            design_length_after = None
+            principal_direction = test_principal_direction
+            
+            if tunnel_entrance_coords is not None:
+                self.log(f"   Tunnel entrance coordinates: ({tunnel_entrance_coords[0]:.3f}, {tunnel_entrance_coords[1]:.3f}, {tunnel_entrance_coords[2]:.3f})")
+                
+                # For design file, we'll use the same principal direction as test PCD
+                # (assuming they should be aligned)
+                principal_direction = test_principal_direction
+                
+                crop_params = {
+                    "origin": tunnel_entrance_coords,
+                    "direction": principal_direction.tolist(),
+                    "max_length": mapped_length
+                }
+                
+                self.log(f"   Will crop design file to length: {mapped_length:.2f} m")
 
-            # Load reference từ PCD hoặc OBJ
+            # Load reference từ PCD hoặc OBJ (with cropping if needed)
             if self.design_file_type == "obj":
                 # Thiết lập sampling cho OBJ: uniform, match density, lưu PCD convert
                 match_density = test_points if test_points > 0 else None
@@ -173,17 +210,40 @@ class DesignMapComparison:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 converted_pcd_path = self.config.obj_converted_dir / f"{design_path.stem}_converted_{timestamp}.pcd"
 
-                # Convert OBJ -> point cloud
-                pcd_ref = load_obj_as_pointcloud(
+                # Convert OBJ -> point cloud (without cropping first to measure length)
+                pcd_ref_temp = load_obj_as_pointcloud(
                     design_path,
                     sampling_method="uniform",
                     num_points=None,
                     match_density=match_density,
                 )
+                design_length_before = calculate_pcd_length_along_principal_axis(pcd_ref_temp)
+                self.log(f"   Design PCD length (before cropping): {design_length_before:.2f} m")
+                
+                # Now convert with cropping if needed
+                pcd_ref = load_obj_as_pointcloud(
+                    design_path,
+                    sampling_method="uniform",
+                    num_points=None,
+                    match_density=match_density,
+                    crop_params=crop_params
+                )
+                design_length_after = calculate_pcd_length_along_principal_axis(pcd_ref) if crop_params else design_length_before
                 self.log(f"   Converted OBJ to PCD with {len(pcd_ref.points):,} points")
+                if crop_params:
+                    self.log(f"   Design PCD length (after cropping): {design_length_after:.2f} m")
             else:
                 converted_pcd_path = None
-                pcd_ref = load_pcd(design_path)
+                # Load PCD without cropping first to measure length
+                pcd_ref_temp = load_pcd(design_path)
+                design_length_before = calculate_pcd_length_along_principal_axis(pcd_ref_temp)
+                self.log(f"   Design PCD length (before cropping): {design_length_before:.2f} m")
+                
+                # Now load with cropping if needed
+                pcd_ref = load_pcd(design_path, crop_params=crop_params)
+                design_length_after = calculate_pcd_length_along_principal_axis(pcd_ref) if crop_params else design_length_before
+                if crop_params:
+                    self.log(f"   Design PCD length (after cropping): {design_length_after:.2f} m")
 
             ref_points = len(pcd_ref.points)
             self.log(f"   Reference points: {ref_points:,}")
@@ -240,11 +300,32 @@ class DesignMapComparison:
                 "drift_detected": drift_detected,
                 "drift_reasons": drift_reasons,
             }
+            
+            # Add cropping info if cropping was performed
+            if tunnel_entrance_coords is not None and crop_params is not None:
+                self.comparison_result["cropping_info"] = {
+                    "was_cropped": True,
+                    "tunnel_entrance_coords": tunnel_entrance_coords,
+                    "mapped_pcd_length": mapped_length,
+                    "design_pcd_length_before": design_length_before,
+                    "design_pcd_length_after": design_length_after,
+                    "principal_axis_direction": principal_direction.tolist(),
+                }
 
             # Log tóm tắt
             self.log("=" * 60)
             self.log(self.translator.get('log.design_map_comparison_results', 
                 'Design Map Comparison Results'))
+            
+            # Log cropping info if available
+            if tunnel_entrance_coords is not None and crop_params is not None:
+                self.log(f"   Cropping Info:")
+                self.log(f"     Tunnel entrance: ({tunnel_entrance_coords[0]:.3f}, {tunnel_entrance_coords[1]:.3f}, {tunnel_entrance_coords[2]:.3f})")
+                self.log(f"     Mapped PCD length: {mapped_length:.2f} m")
+                self.log(f"     Design PCD length (before): {design_length_before:.2f} m")
+                self.log(f"     Design PCD length (after): {design_length_after:.2f} m")
+                self.log(f"     Principal axis direction: [{principal_direction[0]:.3f}, {principal_direction[1]:.3f}, {principal_direction[2]:.3f}]")
+            
             self.log(self.translator.get('label.similarity_percent', 
                 '   Similarity: {similarity}%').replace('{similarity}', f'{similarity:.2f}'))
             self.log(f"   ICP fitness: {metrics.get('icp_fitness', 0.0):.4f}")

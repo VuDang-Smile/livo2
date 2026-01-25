@@ -31,7 +31,9 @@ from pcd_comparison_utils import (
     detect_drift,
     DEFAULT_VOXEL_SIZE,
     DEFAULT_ICP_MAX_ITERATIONS,
-    DEFAULT_ICP_THRESHOLD_MULTIPLIER
+    DEFAULT_ICP_THRESHOLD_MULTIPLIER,
+    get_principal_axis_from_pcd,
+    calculate_pcd_length_along_principal_axis,
 )
 
 
@@ -218,6 +220,37 @@ class PCDComparisonTab(ttk.Frame):
             command=self.browse_save_path
         )
         save_path_browse_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Tunnel Entrance Coordinates
+        tunnel_entrance_frame = ttk.LabelFrame(control_frame, text="Tunnel Entrance Coordinates", padding="10")
+        tunnel_entrance_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # X coordinate
+        ttk.Label(tunnel_entrance_frame, text="X:", font=("Arial", 10)).pack(side=tk.LEFT, padx=5)
+        self.tunnel_entrance_x_var = tk.StringVar()
+        x_entry = ttk.Entry(tunnel_entrance_frame, textvariable=self.tunnel_entrance_x_var, width=12)
+        x_entry.pack(side=tk.LEFT, padx=5)
+        
+        # Y coordinate
+        ttk.Label(tunnel_entrance_frame, text="Y:", font=("Arial", 10)).pack(side=tk.LEFT, padx=5)
+        self.tunnel_entrance_y_var = tk.StringVar()
+        y_entry = ttk.Entry(tunnel_entrance_frame, textvariable=self.tunnel_entrance_y_var, width=12)
+        y_entry.pack(side=tk.LEFT, padx=5)
+        
+        # Z coordinate
+        ttk.Label(tunnel_entrance_frame, text="Z:", font=("Arial", 10)).pack(side=tk.LEFT, padx=5)
+        self.tunnel_entrance_z_var = tk.StringVar()
+        z_entry = ttk.Entry(tunnel_entrance_frame, textvariable=self.tunnel_entrance_z_var, width=12)
+        z_entry.pack(side=tk.LEFT, padx=5)
+        
+        # Checkbox for cropping
+        self.crop_by_length_var = tk.BooleanVar(value=True)
+        crop_check = ttk.Checkbutton(
+            tunnel_entrance_frame,
+            text="Crop design file by mapped length",
+            variable=self.crop_by_length_var
+        )
+        crop_check.pack(anchor=tk.W, padx=5, pady=2)
         
         # Frame nút điều khiển
         button_frame = ttk.Frame(control_frame)
@@ -505,35 +538,93 @@ class PCDComparisonTab(ttk.Frame):
             self.after(0, lambda: self.progress_var.set("Đang load files..."))
             self.after(0, lambda: self.log("Loading files..."))
             
-            # Load reference (PCD or OBJ)
+            # Load test PCD first (needed for density matching and cropping calculation)
+            pcd_test = load_pcd(test_path)
+            
+            # Calculate mapped PCD length and principal axis if cropping is enabled
+            crop_params = None
+            mapped_length = None
+            design_length_before = None
+            design_length_after = None
+            principal_direction = None
+            tunnel_entrance_coords = None
+            match_density_count = None
+            
+            if self.crop_by_length_var.get():
+                try:
+                    x = float(self.tunnel_entrance_x_var.get())
+                    y = float(self.tunnel_entrance_y_var.get())
+                    z = float(self.tunnel_entrance_z_var.get())
+                    tunnel_entrance_coords = (x, y, z)
+                    
+                    # Calculate mapped PCD length and principal axis
+                    mapped_length = calculate_pcd_length_along_principal_axis(pcd_test)
+                    test_principal_direction, _ = get_principal_axis_from_pcd(pcd_test)
+                    principal_direction = test_principal_direction
+                    
+                    self.after(0, lambda: self.log(f"Mapped PCD length: {mapped_length:.2f} m"))
+                    self.after(0, lambda: self.log(f"Tunnel entrance: ({x:.3f}, {y:.3f}, {z:.3f})"))
+                    
+                    # Prepare crop_params
+                    crop_params = {
+                        "origin": tunnel_entrance_coords,
+                        "direction": principal_direction.tolist(),
+                        "max_length": mapped_length
+                    }
+                    
+                except ValueError as e:
+                    self.after(0, lambda: messagebox.showerror("Error", f"Invalid tunnel entrance coordinates: {e}"))
+                    return
+            
+            # Load reference (PCD or OBJ) with cropping if enabled
             if file_type == "obj":
                 self.after(0, lambda: self.log(f"Converting OBJ to point cloud (method: {obj_sampling})..."))
                 
                 # Load test PCD first if matching density
-                match_density_count = None
                 if match_density:
-                    pcd_test_temp = load_pcd(test_path)
-                    match_density_count = len(pcd_test_temp.points)
+                    match_density_count = len(pcd_test.points)
                     self.after(0, lambda: self.log(f"Matching PCD density: {match_density_count:,} points"))
                 
+                # Calculate design file length before cropping
+                if crop_params is not None:
+                    pcd_ref_temp = load_obj_as_pointcloud(
+                        ref_path,
+                        sampling_method=obj_sampling,
+                        num_points=obj_points,
+                        match_density=match_density_count
+                    )
+                    design_length_before = calculate_pcd_length_along_principal_axis(pcd_ref_temp)
+                    self.after(0, lambda: self.log(f"Design PCD length (before cropping): {design_length_before:.2f} m"))
+                
+                # Load with cropping if enabled
                 pcd_ref = load_obj_as_pointcloud(
                     ref_path,
                     sampling_method=obj_sampling,
                     num_points=obj_points,
-                    match_density=match_density_count
+                    match_density=match_density_count,
+                    crop_params=crop_params
                 )
                 self.after(0, lambda: self.log(f"Converted OBJ: {len(pcd_ref.points):,} points"))
             else:
-                pcd_ref = load_pcd(ref_path)
-            
-            # Load test PCD
-            pcd_test = load_pcd(test_path)
+                # Calculate design file length before cropping
+                if crop_params is not None:
+                    pcd_ref_temp = load_pcd(ref_path)
+                    design_length_before = calculate_pcd_length_along_principal_axis(pcd_ref_temp)
+                    self.after(0, lambda: self.log(f"Design PCD length (before cropping): {design_length_before:.2f} m"))
+                
+                # Load with cropping if enabled
+                pcd_ref = load_pcd(ref_path, crop_params=crop_params)
             
             ref_points = len(pcd_ref.points)
             test_points = len(pcd_test.points)
             
             self.after(0, lambda: self.log(f"Reference: {ref_points:,} points"))
             self.after(0, lambda: self.log(f"Test: {test_points:,} points"))
+            
+            # Calculate design file length after cropping if cropping was applied
+            if crop_params is not None:
+                design_length_after = calculate_pcd_length_along_principal_axis(pcd_ref)
+                self.after(0, lambda: self.log(f"Design PCD length (after cropping): {design_length_after:.2f} m"))
             
             # Preprocess
             self.after(0, lambda: self.progress_var.set("Đang preprocessing..."))
@@ -597,6 +688,17 @@ class PCDComparisonTab(ttk.Frame):
                 "drift_reasons": drift_reasons
             }
             
+            # Add cropping info if cropping was performed
+            if crop_params is not None and tunnel_entrance_coords is not None:
+                self.last_results["cropping_info"] = {
+                    "was_cropped": True,
+                    "tunnel_entrance_coords": tunnel_entrance_coords,
+                    "mapped_pcd_length": mapped_length,
+                    "design_pcd_length_before": design_length_before,
+                    "design_pcd_length_after": design_length_after,
+                    "principal_axis_direction": principal_direction.tolist(),
+                }
+            
             # Display results
             self.after(0, lambda: self.display_results())
             
@@ -635,6 +737,18 @@ class PCDComparisonTab(ttk.Frame):
         output.append("Point Cloud Info:")
         output.append(f"  Reference: {results['reference_points']:,} points")
         output.append(f"  Test: {results['test_points']:,} points")
+        
+        # Add cropping info if available
+        if "cropping_info" in results and results["cropping_info"].get("was_cropped"):
+            crop_info = results["cropping_info"]
+            output.append("")
+            output.append("Cropping Info:")
+            output.append(f"  Tunnel entrance: ({crop_info['tunnel_entrance_coords'][0]:.3f}, {crop_info['tunnel_entrance_coords'][1]:.3f}, {crop_info['tunnel_entrance_coords'][2]:.3f})")
+            output.append(f"  Mapped PCD length: {crop_info['mapped_pcd_length']:.2f} m")
+            output.append(f"  Design PCD length (before): {crop_info['design_pcd_length_before']:.2f} m")
+            output.append(f"  Design PCD length (after): {crop_info['design_pcd_length_after']:.2f} m")
+            output.append(f"  Principal axis direction: [{crop_info['principal_axis_direction'][0]:.3f}, {crop_info['principal_axis_direction'][1]:.3f}, {crop_info['principal_axis_direction'][2]:.3f}]")
+        
         output.append("")
         output.append("Metrics:")
         output.append(f"  ICP Fitness Score: {metrics['icp_fitness']:.4f}")
@@ -711,6 +825,10 @@ class PCDComparisonTab(ttk.Frame):
                     "drift_detected": self.last_results["drift_detected"],
                     "drift_reasons": self.last_results["drift_reasons"]
                 }
+                
+                # Add cropping info if available
+                if "cropping_info" in self.last_results:
+                    json_data["cropping_info"] = self.last_results["cropping_info"]
                 
                 with open(file, 'w', encoding='utf-8') as f:
                     json.dump(json_data, f, indent=2, ensure_ascii=False)

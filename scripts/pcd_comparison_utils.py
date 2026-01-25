@@ -51,19 +51,27 @@ DEFAULT_MAX_DISTANCES = {
 }
 
 
-def load_pcd(path: Path) -> o3d.geometry.PointCloud:
+def load_pcd(
+    path: Path,
+    crop_params: Optional[Dict] = None
+) -> o3d.geometry.PointCloud:
     """
     Load PCD file và trả về Open3D point cloud
     
     Args:
         path: Đường dẫn tới file PCD
+        crop_params: Optional dict với keys:
+            - "origin": [x, y, z] - Tọa độ điểm gốc (đầu cửa hầm)
+            - "direction": [dx, dy, dz] - Vector hướng trục chính (normalized)
+            - "max_length": float - Độ dài tối đa cần cắt (m)
     
     Returns:
-        Point cloud object
+        Point cloud object (đã cắt nếu có crop_params)
     
     Raises:
         FileNotFoundError: Nếu file không tồn tại
         RuntimeError: Nếu PCD rỗng
+        ValueError: Nếu crop_params không hợp lệ
     """
     if not path.exists():
         raise FileNotFoundError(f"Không tìm thấy file PCD: {path}")
@@ -72,6 +80,22 @@ def load_pcd(path: Path) -> o3d.geometry.PointCloud:
     if pcd.is_empty():
         raise RuntimeError(f"PCD rỗng: {path}")
     
+    # Apply cropping if requested
+    if crop_params is not None:
+        origin = crop_params.get("origin")
+        direction = crop_params.get("direction")
+        max_length = crop_params.get("max_length")
+        
+        if origin is None or direction is None or max_length is None:
+            raise ValueError("crop_params must contain 'origin', 'direction', and 'max_length'")
+        
+        pcd = crop_pcd_by_length(
+            pcd,
+            np.array(origin),
+            np.array(direction),
+            float(max_length)
+        )
+    
     return pcd
 
 
@@ -79,7 +103,8 @@ def load_obj_as_pointcloud(
     path: Path,
     sampling_method: str = "uniform",
     num_points: Optional[int] = None,
-    match_density: Optional[int] = None
+    match_density: Optional[int] = None,
+    crop_params: Optional[Dict] = None
 ) -> o3d.geometry.PointCloud:
     """
     Load OBJ file và convert sang point cloud bằng sampling
@@ -89,14 +114,18 @@ def load_obj_as_pointcloud(
         sampling_method: Method sampling ("uniform", "poisson", "vertex")
         num_points: Số điểm để sample (None = auto)
         match_density: Match số điểm với PCD này (optional)
+        crop_params: Optional dict với keys:
+            - "origin": [x, y, z] - Tọa độ điểm gốc (đầu cửa hầm)
+            - "direction": [dx, dy, dz] - Vector hướng trục chính (normalized)
+            - "max_length": float - Độ dài tối đa cần cắt (m)
     
     Returns:
-        Point cloud từ OBJ mesh
+        Point cloud từ OBJ mesh (đã cắt nếu có crop_params)
     
     Raises:
         FileNotFoundError: Nếu file không tồn tại
         RuntimeError: Nếu OBJ rỗng hoặc conversion thất bại
-        ValueError: Nếu sampling method không hợp lệ
+        ValueError: Nếu sampling method không hợp lệ hoặc crop_params không hợp lệ
     """
     if not path.exists():
         raise FileNotFoundError(f"Không tìm thấy file OBJ: {path}")
@@ -118,6 +147,22 @@ def load_obj_as_pointcloud(
     
     if pcd.is_empty():
         raise RuntimeError(f"Failed to convert OBJ to point cloud: {path}")
+    
+    # Apply cropping if requested
+    if crop_params is not None:
+        origin = crop_params.get("origin")
+        direction = crop_params.get("direction")
+        max_length = crop_params.get("max_length")
+        
+        if origin is None or direction is None or max_length is None:
+            raise ValueError("crop_params must contain 'origin', 'direction', and 'max_length'")
+        
+        pcd = crop_pcd_by_length(
+            pcd,
+            np.array(origin),
+            np.array(direction),
+            float(max_length)
+        )
     
     return pcd
 
@@ -703,3 +748,142 @@ def detect_drift(
         )
     
     return drift_detected, reasons
+
+
+def get_principal_axis_from_pcd(pcd: o3d.geometry.PointCloud) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Tính trục chính của point cloud bằng PCA
+    
+    Args:
+        pcd: Point cloud
+    
+    Returns:
+        Tuple (direction_vector, centroid)
+        - direction_vector: Vector hướng trục chính (normalized, shape (3,))
+        - centroid: Tâm của point cloud (shape (3,))
+    
+    Raises:
+        ValueError: Nếu point cloud rỗng hoặc không đủ điểm
+    """
+    if pcd.is_empty() or len(pcd.points) < 3:
+        raise ValueError("Point cloud must have at least 3 points for PCA")
+    
+    points = np.asarray(pcd.points)
+    centroid = np.mean(points, axis=0)
+    
+    # Center points
+    centered_points = points - centroid
+    
+    # Compute covariance matrix
+    cov_matrix = np.cov(centered_points.T)
+    
+    # Compute eigenvalues and eigenvectors
+    eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+    
+    # Principal axis is the eigenvector with largest eigenvalue
+    principal_idx = np.argmax(eigenvalues)
+    direction_vector = eigenvectors[:, principal_idx]
+    
+    # Normalize direction vector
+    direction_vector = direction_vector / np.linalg.norm(direction_vector)
+    
+    return direction_vector, centroid
+
+
+def calculate_pcd_length_along_principal_axis(pcd: o3d.geometry.PointCloud) -> float:
+    """
+    Tính độ dài của point cloud theo trục chính
+    
+    Args:
+        pcd: Point cloud
+    
+    Returns:
+        Độ dài (m) - khoảng cách từ điểm gần nhất đến điểm xa nhất theo trục chính
+    
+    Raises:
+        ValueError: Nếu point cloud rỗng
+    """
+    if pcd.is_empty():
+        raise ValueError("Point cloud is empty")
+    
+    # Get principal axis
+    direction, centroid = get_principal_axis_from_pcd(pcd)
+    
+    points = np.asarray(pcd.points)
+    
+    # Project all points onto principal axis
+    # Vector from centroid to each point
+    vectors = points - centroid
+    
+    # Project onto principal axis (dot product)
+    projections = np.dot(vectors, direction)
+    
+    # Find min and max projections
+    min_proj = np.min(projections)
+    max_proj = np.max(projections)
+    
+    # Length is the difference
+    length = max_proj - min_proj
+    
+    return float(length)
+
+
+def crop_pcd_by_length(
+    pcd: o3d.geometry.PointCloud,
+    origin_point: np.ndarray,
+    direction: np.ndarray,
+    max_length: float
+) -> o3d.geometry.PointCloud:
+    """
+    Cắt point cloud theo độ dài từ điểm gốc dọc theo hướng cho trước
+    
+    Args:
+        pcd: Point cloud cần cắt
+        origin_point: Tọa độ điểm gốc (đầu cửa hầm) [x, y, z]
+        direction: Vector hướng trục chính (normalized) [dx, dy, dz]
+        max_length: Độ dài tối đa cần cắt (m)
+    
+    Returns:
+        Point cloud đã cắt (chỉ giữ lại các điểm trong phạm vi [0, max_length])
+    
+    Raises:
+        ValueError: Nếu point cloud rỗng hoặc direction không hợp lệ
+    """
+    if pcd.is_empty():
+        raise ValueError("Point cloud is empty")
+    
+    origin_point = np.asarray(origin_point, dtype=np.float64)
+    direction = np.asarray(direction, dtype=np.float64)
+    
+    # Normalize direction
+    direction_norm = np.linalg.norm(direction)
+    if direction_norm < 1e-6:
+        raise ValueError("Direction vector is too small or zero")
+    direction = direction / direction_norm
+    
+    points = np.asarray(pcd.points)
+    
+    # Vector from origin to each point
+    vectors = points - origin_point
+    
+    # Project onto direction (dot product gives signed distance along axis)
+    distances = np.dot(vectors, direction)
+    
+    # Filter points: keep only points with distance in [0, max_length]
+    mask = (distances >= 0) & (distances <= max_length)
+    
+    # Create new point cloud with filtered points
+    cropped_pcd = o3d.geometry.PointCloud()
+    cropped_pcd.points = o3d.utility.Vector3dVector(points[mask])
+    
+    # Copy colors if available
+    if pcd.has_colors():
+        colors = np.asarray(pcd.colors)
+        cropped_pcd.colors = o3d.utility.Vector3dVector(colors[mask])
+    
+    # Copy normals if available
+    if pcd.has_normals():
+        normals = np.asarray(pcd.normals)
+        cropped_pcd.normals = o3d.utility.Vector3dVector(normals[mask])
+    
+    return cropped_pcd

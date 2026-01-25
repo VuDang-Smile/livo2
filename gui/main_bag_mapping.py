@@ -548,10 +548,22 @@ class BagMappingInterface:
     def run_design_map_comparison(self, generated_pcd_path: Path):
         """So sánh bản đồ - delegate to design comparison module"""
         if hasattr(self, 'design_comparison'):
+            # Lấy tọa độ đầu cửa hầm từ UI (mặc định luôn có)
+            try:
+                x = float(self.tunnel_entrance_x_var.get())
+                y = float(self.tunnel_entrance_y_var.get())
+                z = float(self.tunnel_entrance_z_var.get())
+                tunnel_entrance_coords = (x, y, z)
+            except (ValueError, AttributeError) as e:
+                # Nếu không parse được hoặc không có UI, raise exception
+                self.add_log(f"❌ Error getting tunnel entrance coordinates: {e}")
+                raise ValueError("Tunnel entrance coordinates are required but not available")
+            
             success, similarity = self.design_comparison.run_design_map_comparison(
                 generated_pcd_path,
                 self.comparison_status_label,
-                self.root
+                self.root,
+                tunnel_entrance_coords=tunnel_entrance_coords
             )
             # Sync comparison result
             self.comparison_result = self.design_comparison.comparison_result
