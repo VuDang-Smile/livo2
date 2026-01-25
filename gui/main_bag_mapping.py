@@ -338,6 +338,12 @@ class BagMappingInterface:
         
         # Set default config
         self.set_default_config()
+        
+        # Load tunnel entrance coordinates từ config file
+        self._load_tunnel_entrance_config()
+        
+        # Bind events để tự động lưu khi người dùng thay đổi giá trị
+        self._setup_tunnel_entrance_auto_save()
     
     def setup_language_button(self):
         lang_frame = tk.Frame(self.root)
@@ -775,6 +781,71 @@ class BagMappingInterface:
         """Lưu đường dẫn design file - delegate to design comparison"""
         if hasattr(self, 'design_comparison'):
             self.design_comparison._save_design_file_config(file_path, file_type)
+    
+    def _load_tunnel_entrance_config(self):
+        """Tải tunnel entrance coordinates từ config file"""
+        config_path = self.config.tunnel_entrance_config_path
+        try:
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    x = data.get('x', '')
+                    y = data.get('y', '')
+                    z = data.get('z', '')
+                    
+                    # Chỉ set giá trị nếu các biến đã được khởi tạo
+                    if hasattr(self, 'tunnel_entrance_x_var') and self.tunnel_entrance_x_var:
+                        self.tunnel_entrance_x_var.set(str(x))
+                    if hasattr(self, 'tunnel_entrance_y_var') and self.tunnel_entrance_y_var:
+                        self.tunnel_entrance_y_var.set(str(y))
+                    if hasattr(self, 'tunnel_entrance_z_var') and self.tunnel_entrance_z_var:
+                        self.tunnel_entrance_z_var.set(str(z))
+        except Exception as e:
+            # Không hiển thị lỗi nếu file không tồn tại hoặc lỗi đọc
+            # Chỉ log nếu có lỗi thực sự (không phải file không tồn tại)
+            if config_path.exists():
+                self.add_log(f"⚠️  Không thể tải tunnel entrance config: {e}")
+    
+    def _save_tunnel_entrance_config(self):
+        """Lưu tunnel entrance coordinates vào config file"""
+        config_path = self.config.tunnel_entrance_config_path
+        try:
+            if not hasattr(self, 'tunnel_entrance_x_var') or not self.tunnel_entrance_x_var:
+                return
+            
+            x = self.tunnel_entrance_x_var.get().strip()
+            y = self.tunnel_entrance_y_var.get().strip()
+            z = self.tunnel_entrance_z_var.get().strip()
+            
+            data = {
+                'x': x,
+                'y': y,
+                'z': z
+            }
+            
+            # Tạo thư mục nếu chưa tồn tại
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            self.add_log(f"⚠️  Không thể lưu tunnel entrance config: {e}")
+    
+    def _setup_tunnel_entrance_auto_save(self):
+        """Thiết lập tự động lưu khi người dùng thay đổi giá trị"""
+        if not hasattr(self, 'tunnel_entrance_x_var') or not self.tunnel_entrance_x_var:
+            return
+        
+        # Bind event cho mỗi trường nhập liệu
+        def on_change(*args):
+            # Sử dụng after để tránh lưu quá nhiều lần khi người dùng đang gõ
+            if hasattr(self, '_tunnel_config_save_timer'):
+                self.root.after_cancel(self._tunnel_config_save_timer)
+            self._tunnel_config_save_timer = self.root.after(500, self._save_tunnel_entrance_config)  # Lưu sau 500ms khi người dùng ngừng gõ
+        
+        self.tunnel_entrance_x_var.trace_add('write', on_change)
+        self.tunnel_entrance_y_var.trace_add('write', on_change)
+        self.tunnel_entrance_z_var.trace_add('write', on_change)
     
     def _validate_config_file(self, config_path_obj):
         """Validate YAML config file - delegate to validation module"""

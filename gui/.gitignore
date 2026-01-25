@@ -20,5 +20,6 @@ __pycache__/
 Thumbs.db
 
 design_map_config.json
+tunnel_entrance_config.json
 
 output/
