@@ -12,6 +12,8 @@ Output:
 from __future__ import annotations
 
 import json
+import argparse
+import sys
 from pathlib import Path
 from typing import Dict, Any, Tuple
 
@@ -398,5 +400,122 @@ def pcd_to_2_views(
 
 
 __all__ = ["pcd_to_2_views"]
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Generate 2D floorplan PNGs + metadata from a PCD point cloud."
+    )
+    parser.add_argument(
+        "--pcd_path",
+        required=True,
+        help="Path to input PCD file (e.g. Log/merged_map/merged_all_rotated.pcd)",
+    )
+    parser.add_argument(
+        "--output_dir",
+        required=True,
+        help="Output directory to write PNG/JSON files (e.g. Log/floorplan_2d)",
+    )
+    parser.add_argument(
+        "--resolution",
+        type=float,
+        default=0.05,
+        help="Meters per pixel (default: 0.05)",
+    )
+    parser.add_argument(
+        "--colormap",
+        type=str,
+        default="binary",
+        choices=["binary", "density", "height"],
+        help="Colormap name for metadata (default: binary)",
+    )
+    # Pillow image creation is currently binary/blue-on-white; keep flags for API stability
+    parser.add_argument(
+        "--invert_colors",
+        action=getattr(argparse, "BooleanOptionalAction", "store_true"),
+        default=True,
+        help="Kept for API stability (default: true)",
+    )
+    parser.add_argument(
+        "--auto_crop",
+        action=getattr(argparse, "BooleanOptionalAction", "store_true"),
+        default=True,
+        help="Auto-crop around points (default: true)",
+    )
+    parser.add_argument(
+        "--crop_margin",
+        type=int,
+        default=5,
+        help="Crop margin (meters) when auto-crop is enabled (default: 5)",
+    )
+    parser.add_argument(
+        "--border_margin",
+        type=int,
+        default=20,
+        help="Border margin (pixels) around content (default: 20)",
+    )
+    parser.add_argument(
+        "--outlier_filter",
+        action=getattr(argparse, "BooleanOptionalAction", "store_true"),
+        default=True,
+        help="Enable outlier filter (default: true)",
+    )
+    parser.add_argument(
+        "--outlier_percentile",
+        type=float,
+        default=1.0,
+        help="Percentile for outlier filter per axis (default: 1.0)",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    parser = _build_arg_parser()
+    args = parser.parse_args(argv)
+
+    input_pcd = Path(args.pcd_path)
+    output_dir = Path(args.output_dir)
+
+    print(f"📐 Generating floorplan from PCD...")
+    print(f"📁 Input: {input_pcd}")
+    print(f"📁 Output: {output_dir}")
+
+    try:
+        result = pcd_to_2_views(
+            input_pcd=str(input_pcd),
+            output_dir=str(output_dir),
+            resolution=float(args.resolution),
+            colormap=str(args.colormap),
+            invert_colors=bool(args.invert_colors),
+            auto_crop=bool(args.auto_crop),
+            crop_margin=int(args.crop_margin),
+            border_margin=int(args.border_margin),
+            outlier_filter=bool(args.outlier_filter),
+            outlier_percentile=float(args.outlier_percentile),
+        )
+
+        expected = [
+            Path(result["top_png"]),
+            Path(result["side_x_png"]),
+            Path(result["metadata_path"]),
+        ]
+        missing = [p for p in expected if (not p.exists() or p.stat().st_size == 0)]
+        if missing:
+            print("❌ Floorplan generation finished but outputs are missing/empty:", file=sys.stderr)
+            for p in missing:
+                print(f"   - {p}", file=sys.stderr)
+            return 1
+
+        print("✅ Floorplan generated successfully!")
+        print(f"📄 Metadata: {result['metadata_path']}")
+        return 0
+    except Exception as e:
+        print(f"❌ Error generating floorplan: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 
 
