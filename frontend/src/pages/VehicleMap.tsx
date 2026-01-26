@@ -10,7 +10,6 @@ import { PointCloudBounds } from '../components/PCDMap';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { MapMetadata } from '../types/mapMetadata';
 import { MapVehicle } from '../types/vehicle';
-import VehicleStatusCard from '../components/vehicleMap/VehicleStatusCard';
 import { getVehicleCategoryLabel } from '../utils/vehicleCategoryUtils';
 import { getVehicleTypeLabel } from '../utils/vehicleTypeUtils';
 import { isValidArray } from '../utils/validationUtils';
@@ -209,6 +208,14 @@ const VehicleMap: React.FC = () => {
 
   const selectedVehicle = displayVehicles.find(v => v.id === selectedVehicleId);
 
+  // Calculate stats data with memoization
+  const statsData = useMemo(() => {
+    const total = displayVehicles.length;
+    const online = displayVehicles.filter(v => v.status === 'online').length;
+    const offline = displayVehicles.filter(v => v.status === 'offline').length;
+    return { total, online, offline };
+  }, [displayVehicles]);
+
   // Filter vehicles
   const filteredDisplayVehicles = useMemo(() => {
     let result = displayVehicles;
@@ -372,22 +379,6 @@ const VehicleMap: React.FC = () => {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <VehicleStatusCard
-          statusKey="total"
-          value={displayVehicles.length}
-        />
-        <VehicleStatusCard
-          statusKey="online"
-          value={displayVehicles.filter(v => v.status === 'online').length}
-        />
-        <VehicleStatusCard
-          statusKey="offline"
-          value={displayVehicles.filter(v => v.status === 'offline').length}
-        />
-      </div>
-
       {/* Map Container with Vehicle List */}
       <div className={`bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden ${
         isFullscreen ? 'fixed inset-0 z-50' : 'flex-1 min-h-0'
@@ -423,6 +414,7 @@ const VehicleMap: React.FC = () => {
                   selectedVehicleId={selectedVehicleId ?? null}
                   onVehicleSelect={handleVehicleSelect}
                   onBoundsCalculated={handleBoundsCalculated}
+                  statsData={statsData}
                 />
                 
                 {/* PCD Clipping Controls Overlay */}
@@ -496,6 +488,7 @@ const VehicleMap: React.FC = () => {
                       rotation={mapRotation}
                       selectedVehicleId={selectedVehicleId ?? null}
                       onVehicleSelect={handleVehicleSelect}
+                      statsData={statsData}
                     />
                     {isLoadingMetadata && (
                       <div className="absolute top-4 right-4 bg-white bg-opacity-90 p-2 rounded-lg shadow-sm">

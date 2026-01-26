@@ -35,6 +35,7 @@ class BagMappingConfig:
         # File paths
         self.design_config_path = Path(__file__).parent.parent / "design_map_config.json"
         self.qr_detect_json_path = self.log_path / "QR_detect.json"
+        self.tunnel_entrance_config_path = Path(__file__).parent.parent / "tunnel_entrance_config.json"
         
         # Default config file
         self.default_config_file = "mid360_equirectangular_stable.yaml"
