@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
 import VehicleStatusCard from './VehicleStatusCard';
 
 interface VehicleStatsOverlayProps {
@@ -11,13 +12,18 @@ interface VehicleStatsOverlayProps {
 const VehicleStatsOverlay = React.memo<VehicleStatsOverlayProps>(({ 
   total, online, offline, isVisible = true
 }) => {
+  const { t } = useLanguage();
+
   if (!isVisible) return null;
   
   return (
     <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20">
       {/* Stats cards với glass effect */}
       <div className="bg-white/80 backdrop-blur-md rounded-lg shadow-lg border border-gray-200/50 p-3">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 px-1">
+          {t('legend')}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <VehicleStatusCard
             statusKey="total"
             value={total}
