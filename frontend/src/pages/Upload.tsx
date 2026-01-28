@@ -1947,7 +1947,7 @@ const Upload: React.FC = () => {
                 {isPickingPosition3D && (
                   <div className="absolute inset-0 pointer-events-none">
                     <div className="absolute top-3 left-3 bg-white/95 border border-blue-200 shadow-sm rounded px-3 py-2 max-w-xs pointer-events-auto">
-                      <p className="text-xs text-gray-700">Double click trên một vị trí để đặt QR code</p>
+                      <p className="text-xs text-gray-700">{t('upload_qr_pick_hint_3d_position')}</p>
                       <div className="mt-2 flex gap-2">
                         <button
                           onClick={stopPicking}
@@ -2064,7 +2064,7 @@ const Upload: React.FC = () => {
                                 )}
                               </div>
                               {(isPickingPosition || isPickingPosition3D) && pickingRowId === qr.id && (
-                                <p className="text-[11px] text-blue-600">{previewMode === '2d' ? t('upload_qr_pick_hint') : 'Double click để đặt QR code'}</p>
+                                <p className="text-[11px] text-blue-600">{previewMode === '2d' ? t('upload_qr_pick_hint') : t('upload_qr_pick_hint_3d')}</p>
                               )}
                               {editedQR?.errors?.position && (
                                 <p className="text-xs text-red-500 mt-1">{editedQR.errors.position}</p>
@@ -2160,7 +2160,7 @@ const Upload: React.FC = () => {
                           )}
                         </div>
                         {(isPickingPosition || isPickingPosition3D) && pickingRowId === row.tempId && (
-                          <p className="text-[11px] text-blue-600">{previewMode === '2d' ? t('upload_qr_pick_hint') : 'Double click để đặt QR code'}</p>
+                          <p className="text-[11px] text-blue-600">{previewMode === '2d' ? t('upload_qr_pick_hint') : t('upload_qr_pick_hint_3d')}</p>
                         )}
                         {row.errors.position && (
                           <p className="text-xs text-red-500 mt-1">{row.errors.position}</p>
@@ -2324,7 +2324,7 @@ const Upload: React.FC = () => {
                 {isPickingPosition3D && (
                   <div className="absolute inset-0 pointer-events-none">
                     <div className="absolute top-3 left-3 bg-white/95 border border-blue-200 shadow-sm rounded px-3 py-2 max-w-xs pointer-events-auto">
-                      <p className="text-xs text-gray-700">Double click để đặt QR code</p>
+                      <p className="text-xs text-gray-700">{t('upload_qr_pick_hint_3d')}</p>
                       <div className="mt-2 flex gap-2">
                         <button
                           onClick={stopPicking}
