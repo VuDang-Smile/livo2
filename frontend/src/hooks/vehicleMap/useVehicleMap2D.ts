@@ -3,7 +3,6 @@ import { useMQTT } from '../../contexts/MQTTContext';
 import { MapVehicle, VehicleMapResponse } from '../../types/vehicle';
 import { UseVehicleMap2DResult } from '../../types/monitoring';
 import { useMQTTPositionHandler } from '../shared/useMQTTPositionHandler';
-import { useVehicleTimeout } from '../shared/useVehicleTimeout';
 import {
   extractTimestampStringFromMQTT,
   extractTimestampMsFromMQTT
@@ -28,23 +27,12 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
   const [mapVehicles, setMapVehicles] = useState<MapVehicle[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
-  const [vehicleLastSeen, setVehicleLastSeen] = useState<Map<string, number>>(new Map());
 
   const { lastPositionUpdate, lastVehicleStatus } = useMQTT();
   const { extractPosition, isExcludedVehicle } = useMQTTPositionHandler();
   const vehicleService = useVehicleService();
   // Store vehicles from API for merging with MQTT updates
   const [apiVehicles, setApiVehicles] = useState<Map<string, ApiVehicle>>(new Map());
-
-  // Track last position update timestamp for timeout check
-  const lastAnyPositionUpdate = useMemo(() => {
-    if (!lastPositionUpdate) return null;
-    const timestampMs = extractTimestampMsFromMQTT(lastPositionUpdate);
-    if (timestampMs === null && DEBUG) {
-      console.warn('⚠️ [useVehicleMap2D] No valid timestamp in position update, timeout check may be inaccurate');
-    }
-    return timestampMs;
-  }, [lastPositionUpdate]);
 
   /**
    * Load map data - API calls removed, hiện dùng metadata/floorplan từ storage.lidar.tm
@@ -122,21 +110,6 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
         return Array.from(existingMap.values());
       });
       
-      // Update vehicleLastSeen for vehicles from API
-      const now = Date.now();
-      setVehicleLastSeen(prev => {
-        const updated = new Map(prev);
-        transformedVehicles.forEach(vehicle => {
-          const timestampMs = new Date(vehicle.timestamp).getTime();
-          if (!isNaN(timestampMs)) {
-            updated.set(vehicle.id, timestampMs);
-          } else {
-            updated.set(vehicle.id, now);
-          }
-        });
-        return updated;
-      });
-      
       if (DEBUG) {
         console.log(`✅ [useVehicleMap2D] Fetched ${transformedVehicles.length} vehicles from API`);
       }
@@ -175,14 +148,6 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
 
     const newPosition = extractPosition(lastPositionUpdate);
     if (!newPosition) return;
-
-    // Update vehicleLastSeen timestamp - sử dụng timestamp từ MQTT
-    const timestampMs = extractTimestampMsFromMQTT(lastPositionUpdate) || Date.now();
-    setVehicleLastSeen(prev => {
-      const updated = new Map(prev);
-      updated.set(lastPositionUpdate.vehicle_id, timestampMs);
-      return updated;
-    });
 
     setMapVehicles(prevVehicles => {
       const existingIndex = prevVehicles.findIndex(
@@ -305,14 +270,6 @@ export function useVehicleMap2D(): UseVehicleMap2DResult {
       return prev;
     });
 
-    // Remove from lastSeen if vehicle is deleted
-    if (newStatus === 'deleted' || (lastVehicleStatus.action && lastVehicleStatus.action === 'deleted')) {
-      setVehicleLastSeen(prev => {
-        const updated = new Map(prev);
-        updated.delete(vehicleId);
-        return updated;
-      });
-    }
   }, [lastVehicleStatus, apiVehicles]);
 
   /**

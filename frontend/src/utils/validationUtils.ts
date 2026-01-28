@@ -3,7 +3,7 @@
  * Provides safe validation functions for API responses, data structures, and complex types
  */
 
-import { VehicleApi, VehicleApiPose, ApiVehicle, MapVehicle, VehicleStatus } from '../types/vehicle';
+import { VehicleApi, VehicleApiPose, ApiVehicle, VehicleStatus } from '../types/vehicle';
 import { MapMetadata, Pose3D, ViewMetadata, RotationMetadata } from '../types/mapMetadata';
 import { VehiclesListApiResponse } from '../types/vehicle';
 
