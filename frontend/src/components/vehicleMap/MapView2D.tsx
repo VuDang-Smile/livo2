@@ -475,14 +475,16 @@ const MapView2D: React.FC<MapView2DProps> = ({
 
   return (
     <div className="relative w-full h-full">
-      {/* Stats Overlay */}
+      {/* Stats Overlay - cố định góc trên trái viewer */}
       {statsData && (
-        <VehicleStatsOverlay
-          total={statsData.total}
-          online={statsData.online}
-          offline={statsData.offline}
-          isVisible={true}
-        />
+        <div className="absolute top-4 left-4 z-20">
+          <VehicleStatsOverlay
+            total={statsData.total}
+            online={statsData.online}
+            offline={statsData.offline}
+            isVisible={true}
+          />
+        </div>
       )}
       
       <div

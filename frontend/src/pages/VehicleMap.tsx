@@ -6,6 +6,7 @@ import { useVehiclePose2D } from '../hooks/vehicleMap/useVehiclePose2D';
 import { useVehicleMap2D } from '../hooks/vehicleMap/useVehicleMap2D';
 import MapView3D from '../components/vehicleMap/MapView3D';
 import MapView2D from '../components/vehicleMap/MapView2D';
+import VehicleStatsOverlay from '../components/vehicleMap/VehicleStatsOverlay';
 import { PCDClipControls } from '../components/PCDClipControls';
 import { PointCloudBounds } from '../components/PCDMap';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
@@ -402,6 +403,62 @@ const VehicleMap: React.FC = () => {
           <div className="flex-1 min-h-0">
             {viewMode === '3D' ? (
               <div className="relative w-full h-full">
+                {/* Stats Overlay + PCD controller - cố định góc trên trái viewer */}
+                <div className="absolute top-4 left-4 z-20 flex items-start gap-4">
+                  {statsData && (
+                    <VehicleStatsOverlay
+                      total={statsData.total}
+                      online={statsData.online}
+                      offline={statsData.offline}
+                      isVisible={true}
+                    />
+                  )}
+
+                  {/* PCD Clipping Controls Overlay - giữ nguyên thiết kế, chỉ thay đổi vị trí để nằm bên phải panel */}
+                  {pcdBounds && (
+                    <div className="relative">
+                      {/* Panel điều chỉnh PCD */}
+                      {showClipControls && (
+                        <div className="bg-white rounded-lg shadow-lg border border-gray-200 p-4 max-w-sm">
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-sm font-semibold text-gray-900">{t('pcd_adjust_point_cloud')}</h3>
+                            <button
+                              onClick={() => setShowClipControls(false)}
+                              className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                          <PCDClipControls
+                            bounds={pcdBounds}
+                            clipXRange={clipXRange}
+                            clipYRange={clipYRange}
+                            clipZRange={clipZRange}
+                            onClipXChange={setClipXRange}
+                            onClipYChange={setClipYRange}
+                            onClipZChange={setClipZRange}
+                          />
+                        </div>
+                      )}
+
+                      {/* Nút toggle show/hide controls (thiết kế cũ) */}
+                      {!showClipControls && (
+                        <button
+                          onClick={() => setShowClipControls(true)}
+                          className="bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-lg shadow-md border border-gray-200 flex items-center space-x-2"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                          </svg>
+                          <span className="text-sm font-medium">{t('pcd_adjust')}</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <MapView3D
                   vehicleMarkers={isValidArray(markers3D) ? markers3D : []}
                   pcdUrl={DEFAULT_PCD_URL}
@@ -417,45 +474,6 @@ const VehicleMap: React.FC = () => {
                   onBoundsCalculated={handleBoundsCalculated}
                   statsData={statsData}
                 />
-                
-                {/* PCD Clipping Controls Overlay */}
-                {showClipControls && (
-                  <div className="absolute top-4 left-4 bg-white rounded-lg shadow-lg border border-gray-200 p-4 z-10 max-w-sm">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-semibold text-gray-900">{t('pcd_adjust_point_cloud')}</h3>
-                      <button
-                        onClick={() => setShowClipControls(false)}
-                        className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                    <PCDClipControls
-                      bounds={pcdBounds}
-                      clipXRange={clipXRange}
-                      clipYRange={clipYRange}
-                      clipZRange={clipZRange}
-                      onClipXChange={setClipXRange}
-                      onClipYChange={setClipYRange}
-                      onClipZChange={setClipZRange}
-                    />
-                  </div>
-                )}
-                
-                {/* Toggle button để show/hide controls */}
-                {!showClipControls && pcdBounds && (
-                  <button
-                    onClick={() => setShowClipControls(true)}
-                    className="absolute top-4 left-4 bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-lg shadow-md border border-gray-200 z-10 flex items-center space-x-2"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                    </svg>
-                    <span className="text-sm font-medium">{t('pcd_adjust')}</span>
-                  </button>
-                )}
               </div>
             ) : (
               <div style={{ height: isFullscreen ? '100vh' : '100%' }}>
