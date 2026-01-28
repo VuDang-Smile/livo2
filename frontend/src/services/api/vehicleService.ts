@@ -18,8 +18,6 @@ import {
   getSafeVehicleStatus,
   getSafePosition,
   getSafeOrientation,
-  createDefaultPosition,
-  createDefaultOrientation,
 } from '../../utils/validationUtils';
 
 export interface FetchVehiclesParams {

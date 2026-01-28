@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Info, Map, Car, Upload, QrCode, Heart } from 'lucide-react';
+import { Info, Map, Car, QrCode, Heart } from 'lucide-react';
 import LanguageSwitcher from './LanguageSwitcher';
 
 const SideMenu: React.FC = () => {

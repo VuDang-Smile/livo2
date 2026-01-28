@@ -1,5 +1,3 @@
-import { Language } from '../contexts/LanguageContext';
-
 export type VehicleType = 'scanner' | 'worker';
 
 /**

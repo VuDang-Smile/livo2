@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
+import JapaneseLineBreak from '../components/JapaneseLineBreak';
 import { useVehicleMarkers3D } from '../hooks/vehicleMap/useVehicleMarkers3D';
 import { useVehiclePose2D } from '../hooks/vehicleMap/useVehiclePose2D';
 import { useVehicleMap2D } from '../hooks/vehicleMap/useVehicleMap2D';
@@ -16,7 +17,7 @@ import { isValidArray } from '../utils/validationUtils';
 
 // Component chính cho trang
 const VehicleMap: React.FC = () => {
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
@@ -206,8 +207,6 @@ const VehicleMap: React.FC = () => {
     }
   }, [viewMode, markers2D, markers3D, mapVehicles]);
 
-  const selectedVehicle = displayVehicles.find(v => v.id === selectedVehicleId);
-
   // Calculate stats data with memoization
   const statsData = useMemo(() => {
     const total = displayVehicles.length;
@@ -282,7 +281,9 @@ const VehicleMap: React.FC = () => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">{t('vehicle_map_3d')}</h1>
-          <p className="text-gray-600 mt-2">{t('track_real_time')}</p>
+          <p className="text-gray-600 mt-2">
+            <JapaneseLineBreak text={t('track_real_time')} />
+          </p>
         </div>
         <div className="flex space-x-3">
           {/* View Mode Toggle */}

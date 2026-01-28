@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useVehicleService } from '../hooks/api/useVehicleService';
 import { ApiVehicle, VehicleFormData } from '../types/vehicle';
 import { getVehicleCategoryLabel } from '../utils/vehicleCategoryUtils';
+import JapaneseLineBreak from '../components/JapaneseLineBreak';
 
 const Vehicles: React.FC = () => {
   const { t } = useLanguage();
@@ -68,7 +69,9 @@ const Vehicles: React.FC = () => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">{t('vehicle_list')}</h1>
-          <p className="text-gray-600 mt-2">{t('vehicle_management')}</p>
+          <p className="text-gray-600 mt-2">
+            <JapaneseLineBreak text={t('vehicle_management')} />
+          </p>
         </div>
         <div className="flex items-center space-x-3">
           <button
