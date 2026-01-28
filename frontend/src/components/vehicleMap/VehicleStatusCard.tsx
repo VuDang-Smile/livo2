@@ -16,7 +16,7 @@ export const VehicleStatusCard: React.FC<VehicleStatusCardProps> = ({ statusKey,
   const isTotal = statusKey === 'total';
 
   return (
-    <div className="bg-white px-4 py-3 rounded-lg shadow-sm border border-gray-200">
+    <div className="bg-white px-6 py-3 rounded-lg shadow-sm border border-gray-200 min-w-[160px]">
       <div className="flex items-center">
         <div className={`p-2 rounded-lg ${config.bgClass}`}>
           {isTotal ? (
