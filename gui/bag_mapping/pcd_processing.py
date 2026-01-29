@@ -546,6 +546,7 @@ class PCDProcessor:
     
     def generate_floorplan(self):
         """Generate floorplan from PCD file"""
+        log_root = self.config.log_path
         merged_map_dir = self.config.merged_map_dir
         pcd_to_floorplan_script = self.config.pcd_to_floorplan_script
         
@@ -555,7 +556,8 @@ class PCDProcessor:
             self.log(self.translator.get('log.floorplan_no_pcd_found', '❌ merged_all_rotated.pcd not found in merged_map directory'))
             return False
         
-        output_dir = merged_map_dir / "floorplan"
+        # Standard output directory (contract): Log/floorplan_2d
+        output_dir = log_root / "floorplan_2d"
         output_dir.mkdir(parents=True, exist_ok=True)
         
         self.log("=" * 60)
@@ -579,17 +581,45 @@ class PCDProcessor:
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
             )
             
+            output_lines = []
             for line in iter(process.stdout.readline, ''):
                 if line:
                     self.log(f"[Floorplan] {line.strip()}")
+                    output_lines.append(line.strip())
             
             process.wait()
             
             if process.returncode == 0:
+                # Validate required outputs exist (fail-fast to avoid "success" without PNGs)
+                stem = input_pcd.stem
+                required_files = [
+                    output_dir / f"{stem}_top.png",
+                    output_dir / f"{stem}_side_x.png",
+                    output_dir / f"{stem}_metadata.json",
+                ]
+                missing = [p for p in required_files if (not p.exists() or p.stat().st_size == 0)]
+                if missing:
+                    missing_str = ", ".join([str(p) for p in missing])
+                    self.log(
+                        self.translator.get(
+                            'log.floorplan_missing_files',
+                            '❌ Missing floorplan files: {files}'
+                        ).replace('{files}', missing_str)
+                    )
+                    if output_lines:
+                        self.log("Last output lines:")
+                        for line in output_lines[-10:]:
+                            self.log(f"   {line}")
+                    return False
+
                 self.log(self.translator.get('log.floorplan_success', '✅ Floorplan generated successfully!'))
                 return True
             else:
                 self.log(self.translator.get('log.floorplan_failed', '❌ Floorplan generation failed with code {code}').replace('{code}', str(process.returncode)))
+                if output_lines:
+                    self.log("Last output lines:")
+                    for line in output_lines[-10:]:
+                        self.log(f"   {line}")
                 return False
                 
         except Exception as e:

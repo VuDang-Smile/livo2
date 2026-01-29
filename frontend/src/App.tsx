@@ -26,7 +26,7 @@ function App() {
           <Router>
             <Routes>
               <Route path="/login" element={<MainLayout><Login /></MainLayout>} />
-              <Route path="/" element={<MainLayout><About /></MainLayout>} />
+              <Route path="/" element={<MainLayout><VehicleMap /></MainLayout>} />
               <Route path="/about" element={<MainLayout><About /></MainLayout>} />
               <Route path="/vehicles" element={<MainLayout><ProtectedRoute><Vehicles /></ProtectedRoute></MainLayout>} />
               <Route path="/vehicles/edit/:id" element={<MainLayout><ProtectedRoute><EditVehicle /></ProtectedRoute></MainLayout>} />

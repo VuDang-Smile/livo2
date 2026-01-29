@@ -82,3 +82,28 @@ canvas {
   max-width: 100%;
   height: auto;
 }
+
+/* Japanese line breaking (BudouX-assisted) */
+/* 
+ * BudouX inserts <wbr> tags at semantic break points.
+ * CSS must respect these tags and prevent unwanted breaks.
+ */
+.ja-linebreak {
+  /* Prevent unwanted word breaks in Japanese text */
+  word-break: keep-all;
+  
+  /* Respect <wbr> tags - only break at explicit break opportunities */
+  overflow-wrap: normal;
+  
+  /* Use Japanese line breaking rules */
+  line-break: auto;
+  
+  /* Ensure <wbr> tags are respected */
+  white-space: normal;
+  
+  /* Prevent automatic hyphenation */
+  hyphens: none;
+  
+  /* Ensure proper text rendering for Japanese */
+  text-rendering: optimizeLegibility;
+}

@@ -1,6 +1,4 @@
 import { VehicleCategory } from '../types/vehicle';
-import { VEHICLE_CATEGORY_LABELS } from '../constants/vehicleCategories';
-import { Language } from '../contexts/LanguageContext';
 
 /**
  * Lấy label đã dịch của vehicle category theo ngôn ngữ hiện tại

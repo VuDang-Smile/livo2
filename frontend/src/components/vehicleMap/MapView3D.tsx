@@ -219,16 +219,6 @@ const MapView3D: React.FC<MapView3DProps> = ({
 
   return (
     <div className="w-full h-full relative">
-      {/* Stats Overlay */}
-      {statsData && (
-        <VehicleStatsOverlay
-          total={statsData.total}
-          online={statsData.online}
-          offline={statsData.offline}
-          isVisible={true}
-        />
-      )}
-      
       <Canvas camera={{ position: PCD_CAMERA_POSITION, fov: PCD_CAMERA_FOV }}>
         <OrbitControls 
           ref={controlsRef}

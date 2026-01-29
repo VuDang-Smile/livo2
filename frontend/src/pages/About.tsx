@@ -1,5 +1,6 @@
 import React from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
+import JapaneseLineBreak from '../components/JapaneseLineBreak';
 
 const About: React.FC = () => {
   const { t } = useLanguage();
@@ -10,8 +11,13 @@ const About: React.FC = () => {
         <h1 className="text-4xl font-bold text-gray-900 mb-6">
           {t('about_hero_title')}
         </h1>
-        <p className="text-xl text-gray-600 max-w-4xl mx-auto">
-          {t('about_hero_desc')}
+        <p className="text-xl text-gray-600 mx-auto w-max text-left">
+          <span className="block md:whitespace-nowrap">
+            <JapaneseLineBreak text={t('about_hero_desc_line1')} />
+          </span>
+          <span className="block md:whitespace-nowrap">
+            <JapaneseLineBreak text={t('about_hero_desc_line2')} />
+          </span>
         </p>
       </section>
 
@@ -23,7 +29,7 @@ const About: React.FC = () => {
               {t('about_mission_title')}
             </h2>
             <p className="text-gray-600 mb-6">
-              {t('about_mission_desc')}
+              <JapaneseLineBreak text={t('about_mission_desc')} />
             </p>
             <div className="space-y-3">
               <div className="flex items-center">

@@ -8,7 +8,7 @@
  * Data Source: http://storage.lidar.tm/QR_detect.json
  */
 
-import { QRCodeInfo, QRCodeApiResponse } from '../../types/qrCode';
+import { QRCodeInfo } from '../../types/qrCode';
 import { isValidObject, isValidArray, isValidNumber } from '../../utils/validationUtils';
 
 export class QRCodeService {

@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, TransformControls, Text } from '@react-three/drei';
+import { OrbitControls, Text } from '@react-three/drei';
 import * as THREE from 'three';
-import { Edit, Trash2, Grid3x3, ImageIcon, Maximize2, X, CheckCircle2, XCircle, Info, AlertCircle } from 'lucide-react';
+import { Edit, Trash2, Grid3x3, ImageIcon, Maximize2, X, CheckCircle2, XCircle, Info } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import JapaneseLineBreak from '../components/JapaneseLineBreak';
 import type { VehicleCanvasPosition } from '../types/vehicle';
 import { QRCodeInfo } from '../types/qrCode';
 import { EditingRow, ManualPin } from '../types/upload';
@@ -11,7 +12,6 @@ import PCDMap from '../components/PCDMap';
 import { DEFAULT_PCD_URL } from '../constants/pcdConfig';
 import { useMapImage } from '../hooks/useMapImage';
 import { MAP_2D_IMAGE_URL } from '../constants/mapConfig';
-import { getVehicle2DPosition } from '../utils/vehicle2DHelper';
 import { useQRCodes } from '../hooks/api/useQRCodes';
 import { MapMetadata, CoordinateSystemConfig } from '../types/mapMetadata';
 import { transformPoseToPixel, pixelToWorld } from '../utils/coordinateTransform';
@@ -763,31 +763,6 @@ const Image2DPreview: React.FC<{
   );
 };
 
-// Component hiển thị giới thiệu về màn hình QR Mapper
-const IntroCard: React.FC = () => {
-  const { t } = useLanguage();
-
-  return (
-    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 rounded-md p-5 shadow-sm">
-      <div className="flex items-start">
-        <div className="flex-shrink-0">
-          <svg className="h-6 w-6 text-blue-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </div>
-        <div className="ml-4 flex-1">
-          <h3 className="text-base font-semibold text-blue-900 mb-2">
-            {t('upload_intro_title')}
-          </h3>
-          <p className="text-sm text-blue-800 leading-relaxed">
-            {t('upload_intro_content')}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const Upload: React.FC = () => {
   const { t } = useLanguage();
   const [selectedZipName, setSelectedZipName] = useState<string | null>(null);
@@ -1022,12 +997,6 @@ const Upload: React.FC = () => {
   //   }
   // };
   
-  // Placeholder function to prevent errors
-  const handleMapPositionPick = (_pos: [number, number]) => {
-    // 2D picking is disabled - this function is kept for compatibility
-    return;
-  };
-
   const handleMap3DPositionPick = (pos: [number, number, number], surface: 'floor' | 'ceiling' | 'left' | 'right') => {
     console.log(`🎯 handleMap3DPositionPick called with (scene coords):`, pos, `surface: ${surface}`, `pickingRowId: ${pickingRowId}`);
 
@@ -1835,7 +1804,9 @@ const Upload: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">{t('upload_page_title')}</h1>
-          <p className="text-gray-600 mt-2">{t('upload_page_desc')}</p>
+          <p className="text-gray-600 mt-2">
+            <JapaneseLineBreak text={t('upload_page_desc')} />
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <input
@@ -1976,7 +1947,7 @@ const Upload: React.FC = () => {
                 {isPickingPosition3D && (
                   <div className="absolute inset-0 pointer-events-none">
                     <div className="absolute top-3 left-3 bg-white/95 border border-blue-200 shadow-sm rounded px-3 py-2 max-w-xs pointer-events-auto">
-                      <p className="text-xs text-gray-700">Double click trên một vị trí để đặt QR code</p>
+                      <p className="text-xs text-gray-700">{t('upload_qr_pick_hint_3d_position')}</p>
                       <div className="mt-2 flex gap-2">
                         <button
                           onClick={stopPicking}
@@ -2001,7 +1972,7 @@ const Upload: React.FC = () => {
             </h2>
           </div>
           <p className="text-xs text-gray-500 mb-3">
-            {t('upload_qr_list_desc')}
+            <JapaneseLineBreak text={t('upload_qr_list_desc')} />
           </p>
 
           {/* Loading and Error States for QR Codes */}
@@ -2093,7 +2064,7 @@ const Upload: React.FC = () => {
                                 )}
                               </div>
                               {(isPickingPosition || isPickingPosition3D) && pickingRowId === qr.id && (
-                                <p className="text-[11px] text-blue-600">{previewMode === '2d' ? t('upload_qr_pick_hint') : 'Double click để đặt QR code'}</p>
+                                <p className="text-[11px] text-blue-600">{previewMode === '2d' ? t('upload_qr_pick_hint') : t('upload_qr_pick_hint_3d')}</p>
                               )}
                               {editedQR?.errors?.position && (
                                 <p className="text-xs text-red-500 mt-1">{editedQR.errors.position}</p>
@@ -2189,7 +2160,7 @@ const Upload: React.FC = () => {
                           )}
                         </div>
                         {(isPickingPosition || isPickingPosition3D) && pickingRowId === row.tempId && (
-                          <p className="text-[11px] text-blue-600">{previewMode === '2d' ? t('upload_qr_pick_hint') : 'Double click để đặt QR code'}</p>
+                          <p className="text-[11px] text-blue-600">{previewMode === '2d' ? t('upload_qr_pick_hint') : t('upload_qr_pick_hint_3d')}</p>
                         )}
                         {row.errors.position && (
                           <p className="text-xs text-red-500 mt-1">{row.errors.position}</p>
@@ -2353,7 +2324,7 @@ const Upload: React.FC = () => {
                 {isPickingPosition3D && (
                   <div className="absolute inset-0 pointer-events-none">
                     <div className="absolute top-3 left-3 bg-white/95 border border-blue-200 shadow-sm rounded px-3 py-2 max-w-xs pointer-events-auto">
-                      <p className="text-xs text-gray-700">Double click để đặt QR code</p>
+                      <p className="text-xs text-gray-700">{t('upload_qr_pick_hint_3d')}</p>
                       <div className="mt-2 flex gap-2">
                         <button
                           onClick={stopPicking}
