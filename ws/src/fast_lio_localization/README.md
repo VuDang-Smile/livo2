@@ -105,7 +105,13 @@ Support for higher frequency is coming soon.
 2. Provide initial pose
 Use Rviz2 to provide an initial pose by using the '2D Pose Estimate' Tool in RVIZ2.
 
-Note that, during the initialization stage, it's better to keep the robot still until the initialization succeeds. 
+Note that, during the initialization stage, it's better to keep the robot still until the initialization succeeds.
+
+### Relocalization from anywhere (e.g. HBA map with ScanContext)
+To relocalize when the device is stopped at an arbitrary point and localization is restarted: set `global_loc.candidate_max_distance` to **0** (disable distance gate) or a large value (e.g. 5000) so candidates are not rejected by odometry distance. If the map has only one HBA tile, enable virtual ScanContext (`global_loc.enable_virtual_scancontexts: true`) and set `global_loc.virtual_tile_max_tiles` to at least 50 (e.g. 400) so that ScanContext has enough entries for reliable matching. Ensure total ScanContext entries (real + virtual) are ≥ 50.
+
+### Replay: device moving while waiting for global
+When replaying a bag, the device may already be "moving" (odometry updates each frame) while global localization is still running. Mapping runs continuously, so pose (position and orientation) at the moment global completes is correctly aligned to the map via the relative transform from the matched frame to the current frame. To also preserve **velocity** (direction of movement) after global localization, set `global_loc.preserve_velocity_after_relocalize: true`. Otherwise velocity is reset to zero to avoid IMU-integration drift; it will be re-estimated from the next frames. 
 
 
 ## Related Works
