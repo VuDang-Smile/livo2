@@ -113,43 +113,90 @@ fi
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
-# Check if any livo services are already running and stop them before re-install
-stop_existing_services() {
-    # Check for running containers with livo- prefix (from this project)
-    local running=$($DOCKER_CMD ps -q --filter "name=livo-" 2>/dev/null)
-    local compose_containers=$($DOCKER_CMD compose ps -a -q 2>/dev/null)
+# Ports used by Livo stack (nginx, frontend, backend, mongodb, mqtt)
+LIVO_PORTS="80 3000 8000 27017 1883 9001"
 
-    if [ -z "$running" ] && [ -z "$compose_containers" ]; then
+# Get PIDs listening on a given port (fuser prints to stderr, lsof/ss as fallback)
+get_pids_on_port() {
+    local port=$1
+    local pids=""
+    if command -v fuser &> /dev/null; then
+        pids=$(fuser "${port}/tcp" 2>&1 | grep -oE '[0-9]+' | sort -u)
+    fi
+    if [ -z "$pids" ] && command -v lsof &> /dev/null; then
+        pids=$(lsof -i ":${port}" -t 2>/dev/null)
+    fi
+    if [ -z "$pids" ] && command -v ss &> /dev/null; then
+        pids=$(ss -tlnp 2>/dev/null | awk -v p=":${port}" '$4 ~ p { gsub(/.*pid=/, "", $6); gsub(/,.*/, "", $6); if ($6 != "") print $6 }' | sort -u)
+    fi
+    # Try with sudo if we need to see other users' processes
+    if [ -z "$pids" ] && command -v lsof &> /dev/null; then
+        pids=$(sudo lsof -i ":${port}" -t 2>/dev/null)
+    fi
+    echo "$pids"
+}
+
+# Kill processes occupying Livo ports (so docker down can bind later)
+kill_processes_on_ports() {
+    for port in $LIVO_PORTS; do
+        local pids=$(get_pids_on_port "$port")
+        if [ -n "$pids" ]; then
+            for pid in $pids; do
+                [ -z "$pid" ] && continue
+                local comm=$(ps -p "$pid" -o comm= 2>/dev/null || echo "?")
+                print_info "Port $port: killing process PID $pid ($comm)"
+                kill "$pid" 2>/dev/null || sudo kill "$pid" 2>/dev/null
+            done
+        fi
+    done
+    sleep 1
+    for port in $LIVO_PORTS; do
+        local pids=$(get_pids_on_port "$port")
+        if [ -n "$pids" ]; then
+            for pid in $pids; do
+                [ -z "$pid" ] && continue
+                print_warning "Port $port: force killing PID $pid (SIGKILL)"
+                kill -9 "$pid" 2>/dev/null || sudo kill -9 "$pid" 2>/dev/null
+            done
+        fi
+    done
+}
+
+# Check if any Livo port is in use (by non-docker process or docker)
+is_any_port_in_use() {
+    for port in $LIVO_PORTS; do
+        if [ -n "$(get_pids_on_port "$port")" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# If any Livo port is in use, ask to stop those processes only (no Docker detection)
+stop_processes_on_ports_if_needed() {
+    if ! is_any_port_in_use; then
         return 0
     fi
 
     echo ""
-    if [ -n "$running" ]; then
-        print_warning "Detected existing Livo services are running."
-    else
-        print_info "Found existing compose stack (stopped)."
-    fi
+    print_warning "One or more Livo ports are in use (80, 3000, 8000, 27017, 1883, 9001)."
     echo ""
-    read -p "Do you want to clear the entire old system before re-install? (Y/n): " -n 1 -r
+    read -p "Do you want to stop the processes that are using these ports? (Y/n): " -n 1 -r
     echo ""
 
     if [[ $REPLY =~ ^[Nn]$ ]]; then
-        print_info "Skipping clear. Continuing with existing stack (may cause port/name conflicts)."
+        print_info "Skipping. Continuing (may cause port conflicts)."
         echo ""
         return 0
     fi
 
-    print_info "Stopping and removing existing containers..."
-    if $DOCKER_CMD compose down 2>&1; then
-        print_success "Existing services stopped and removed."
-    else
-        print_error "Failed to stop existing services."
-        wait_for_exit
-    fi
+    print_info "Stopping processes using Livo ports..."
+    kill_processes_on_ports
+    print_success "Ports cleared."
     echo ""
 }
 
-stop_existing_services
+stop_processes_on_ports_if_needed
 
 # Create necessary directories
 print_info "Creating necessary directories..."
