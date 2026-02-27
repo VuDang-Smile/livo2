@@ -113,6 +113,44 @@ fi
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
+# Check if any livo services are already running and stop them before re-install
+stop_existing_services() {
+    # Check for running containers with livo- prefix (from this project)
+    local running=$($DOCKER_CMD ps -q --filter "name=livo-" 2>/dev/null)
+    local compose_containers=$($DOCKER_CMD compose ps -a -q 2>/dev/null)
+
+    if [ -z "$running" ] && [ -z "$compose_containers" ]; then
+        return 0
+    fi
+
+    echo ""
+    if [ -n "$running" ]; then
+        print_warning "Detected existing Livo services are running."
+    else
+        print_info "Found existing compose stack (stopped)."
+    fi
+    echo ""
+    read -p "Do you want to clear the entire old system before re-install? (Y/n): " -n 1 -r
+    echo ""
+
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        print_info "Skipping clear. Continuing with existing stack (may cause port/name conflicts)."
+        echo ""
+        return 0
+    fi
+
+    print_info "Stopping and removing existing containers..."
+    if $DOCKER_CMD compose down 2>&1; then
+        print_success "Existing services stopped and removed."
+    else
+        print_error "Failed to stop existing services."
+        wait_for_exit
+    fi
+    echo ""
+}
+
+stop_existing_services
+
 # Create necessary directories
 print_info "Creating necessary directories..."
 mkdir -p backend/uploads backend/processed
