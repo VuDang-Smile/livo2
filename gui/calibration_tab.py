@@ -299,6 +299,13 @@ class CalibrationTab(ttk.Frame):
             value="omnidir"
         ).pack(anchor=tk.W, pady=2)
         
+        # Camera Intrinsics
+        intrinsic_frame = ttk.Frame(camera_model_frame)
+        intrinsic_frame.pack(fill=tk.X, pady=(10, 0))
+        ttk.Label(intrinsic_frame, text="Camera Intrinsics (VD: 2880,1440):", font=("Arial", 9)).pack(side=tk.LEFT, padx=(0, 5))
+        self.camera_intrinsics_var = tk.StringVar(value="2880,1440")
+        ttk.Entry(intrinsic_frame, textvariable=self.camera_intrinsics_var, width=30).pack(side=tk.LEFT)
+        
         # Options
         options_frame = ttk.LabelFrame(parent, text="Options", padding=10)
         options_frame.pack(fill=tk.X, padx=20, pady=10)
@@ -837,6 +844,11 @@ class CalibrationTab(ttk.Frame):
         camera_model = self.camera_model_var.get()
         if camera_model:
             cmd_parts.extend(["--camera_model", camera_model])
+            
+        # Add camera intrinsics parameter
+        camera_intrinsics = getattr(self, 'camera_intrinsics_var', tk.StringVar(value="2880,1440")).get()
+        if camera_intrinsics:
+            cmd_parts.extend(["--camera_intrinsics", camera_intrinsics])
         
         if self.auto_topic_var.get():
             cmd_parts.append("-a")

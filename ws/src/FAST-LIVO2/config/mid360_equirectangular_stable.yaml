@@ -15,13 +15,13 @@
                     0.0, 0.0, 1.0]
       # Calibration from direct_visual_lidar_calibration
       # Rcl: rotation matrix from lidar to camera (row-major)
-      Rcl: [-0.45731348, -0.79715328, -0.39422205,
+      Rcl: [0.00043596, -0.99997253, 0.00739923,
 
-            0.11961245, 0.38412866, -0.91549879,
+            -0.99999471, -0.00045979, -0.00321859,
 
-            0.88122485, -0.4658238, -0.08031775]
+            0.0032219, -0.00739779, -0.99996745]
       # Pcl: translation vector from lidar to camera
-      Pcl: [-0.03360329, -0.23075573, 0.06867821]
+      Pcl: [-0.0531345, -0.02840041, 0.05694245]
     time_offset: 
       # Adjusted for better IMU-LiDAR synchronization
       # If IMU is ahead of LiDAR, use negative value
@@ -32,10 +32,10 @@
 
     preprocess:
       point_filter_num: 1  # Keep all points for better accuracy
-      filter_size_surf: 0.10  # Slightly reduced from 0.12 for better quality, but not too small to avoid memory issues
+      filter_size_surf: 0.05  # Giảm xuống 0.05 để map chi tiết và dày đặc hơn
       lidar_type: 8 # Livox MID360 LiDAR
       scan_line: 6  # MID360 has 6 scan lines
-      blind: 0.8
+      blind: 0.2  # Giảm xuống 0.2m để nhận diện các vật thể gần
 
     vio:
       max_iterations: 4  # Increased from 3 for better accuracy, but not too high to avoid long processing
@@ -65,9 +65,9 @@
       dept_err: 0.02
       beam_err: 0.05
       min_eigen_value: 0.002
-      voxel_size: 0.15  # Balanced size - not too small to avoid memory explosion
+      voxel_size: 0.05  # Giảm xuống 0.05 để map dày đặc hơn
       max_layer: 2  # Keep at 2 to avoid excessive memory usage
-      max_points_num: 50  # Reduced from default to save memory
+      max_points_num: 100  # Tăng lên 100 để mật độ điểm cao hơn
       layer_init_num: [5, 5, 5, 5, 5]
     local_map:  
       map_sliding_en: true  # CRITICAL: Must be enabled for memory management
@@ -88,7 +88,7 @@
       gravity_align_en: false
 
     publish:
-      dense_map_en: false  # CRITICAL: Set to false to reduce memory usage when publishing
+      dense_map_en: true  # Bật dense map để điểm hiển thị kín hơn
       pub_effect_point_en: false 
       pub_plane_en: false
       pub_scan_num: 5  # INCREASED from 3 to reduce publish rate and save memory
@@ -101,7 +101,7 @@
     pcd_save:
       pcd_save_en: true
       colmap_output_en: false
-      filter_size_pcd: 0.10  # Balanced filter size for PCD output
+      filter_size_pcd: 0.05  # Giảm xuống 0.05 để lưu map chi tiết hơn
       interval: 500
 
     camera:
