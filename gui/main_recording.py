@@ -33,7 +33,7 @@ class LivoxApp:
         
         self.is_recording = False
         self.workspace_path = Path(__file__).parent.parent / "ws"
-        self.drive_ws_path = Path(__file__).parent.parent / "drive_ws"
+        self.drive_ws_path = Path(__file__).parent.parent / "dependencies" / "drive_ws"
         self.record_process = None
         self.output_dir = None
         # Topics to record với mô tả

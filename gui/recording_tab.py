@@ -28,7 +28,7 @@ class RecordingTab(ttk.Frame):
         
         # Paths
         self.workspace_path = Path(__file__).parent.parent / "ws"
-        self.drive_ws_path = Path(__file__).parent.parent / "drive_ws"
+        self.drive_ws_path = Path(__file__).parent.parent / "dependencies" / "drive_ws"
         
         # Process
         self.record_process = None
@@ -524,4 +524,3 @@ class RecordingTab(ttk.Frame):
                 )
         except Exception as e:
             print(f"Lỗi khi update UI: {e}")
-
