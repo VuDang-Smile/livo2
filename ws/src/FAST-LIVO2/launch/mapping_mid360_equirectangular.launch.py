@@ -16,7 +16,7 @@ def generate_launch_description():
     rviz_config_file = os.path.join(get_package_share_directory("fast_livo"), "rviz_cfg", "fast_livo2.rviz")
 
     # Load parameters - Single unified configuration
-    config_file = os.path.join(config_file_dir, "mid360_equirectangular.yaml")
+    config_file = os.path.join(config_file_dir, "mid360_equirectangular_stable.yaml")
 
     # Param use_rviz
     use_rviz_arg = DeclareLaunchArgument(

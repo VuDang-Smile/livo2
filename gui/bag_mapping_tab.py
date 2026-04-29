@@ -61,7 +61,7 @@ class BagMappingTab(ttk.Frame):
         self.use_rviz = False
         self.config_path = None  # Path to config file
         self.bag_rate = 0.5  # Default: 0.5x for slower playback
-        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.ntm")
+        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://192.168.2.1:20128")
         
         # Tạo UI
         self.create_widgets()
@@ -154,7 +154,7 @@ class BagMappingTab(ttk.Frame):
             config_files = sorted([f.name for f in config_dir.glob("*.yaml") if f.is_file()])
         
         if not config_files:
-            config_files = ["mid360_equirectangular.yaml"]  # Fallback
+            config_files = ["mid360_equirectangular_stable.yaml"]  # Fallback
         
         quick_config_combo = ttk.Combobox(
             quick_config_frame,
@@ -1046,11 +1046,11 @@ class BagMappingTab(ttk.Frame):
     
     def set_default_config(self):
         """Set default config file"""
-        default_config = self.workspace_path / "src" / "FAST-LIVO2" / "config" / "mid360_equirectangular.yaml"
+        default_config = self.workspace_path / "src" / "FAST-LIVO2" / "config" / "mid360_equirectangular_stable.yaml"
         if default_config.exists():
             self.config_path = str(default_config)
             self.config_path_var.set(str(default_config))
-            self.quick_config_var.set("mid360_equirectangular.yaml")
+            self.quick_config_var.set("mid360_equirectangular_stable.yaml")
             self.log(f"✅ Đã chọn config mặc định: {default_config.name}")
         else:
             self.log("⚠️ Không tìm thấy config mặc định")
@@ -1700,4 +1700,3 @@ class BagMappingTab(ttk.Frame):
             text="Trạng thái: Đã dừng",
             foreground="red"
         )
-

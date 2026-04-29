@@ -935,10 +935,14 @@ class BagMappingInterface:
                 rclpy.init()
             
             self.add_log(self.translator.get('log.starting_qr_subscriber', '🔍 Starting QR code scanning subscriber...'))
+
+            image_topic = '/image_raw'
+            if hasattr(self, 'mapping_core') and getattr(self.mapping_core, 'playback_image_topic', None):
+                image_topic = self.mapping_core.playback_image_topic
             
             # Tạo ROS2 node cho QR scanning (subscribe cả image và odometry)
             self.qr_ros_node = QRImageSubscriberNode(
-                '/image_raw',
+                image_topic,
                 '/aft_mapped_to_init',
                 self.on_qr_image_received,
                 self.on_odometry_received,

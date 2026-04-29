@@ -30,9 +30,15 @@ add_executable(livox_msg_converter_node
 )
 ament_target_dependencies(livox_msg_converter_node ${dependencies})
 
+add_executable(recording_sync_relay_node
+  src/recording_sync_relay_node.cpp
+)
+ament_target_dependencies(recording_sync_relay_node ${dependencies})
+
 # Install executable
 install(TARGETS
   livox_msg_converter_node
+  recording_sync_relay_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -47,4 +53,3 @@ if(BUILD_TESTING)
 endif()
 
 ament_package()
-

@@ -24,7 +24,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   // Mật khẩu mặc định - trong thực tế nên được lưu trữ an toàn hơn
-  const CORRECT_PASSWORD = 'admin123';
+  const CORRECT_PASSWORD = '123456';
 
   const login = (password: string): boolean => {
     if (password === CORRECT_PASSWORD) {

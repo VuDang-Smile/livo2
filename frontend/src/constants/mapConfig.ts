@@ -27,13 +27,7 @@ export const MAP_WORLD_BOUNDS = {
  * Get backend URL based on current hostname
  */
 export function getBackendUrl(): string {
-  const hostname = window.location.hostname;
-  // If running on frontend.lidar.ntm or lidar.tm, use backend.lidar.ntm
-  if (hostname === 'frontend.lidar.ntm' || hostname === 'lidar.tm' || hostname.includes('lidar.tm')) {
-    return 'http://backend.lidar.ntm';
-  }
-  // For localhost or IP addresses, use same hostname with port 8000
-  return `http://${hostname}:8000`;
+  return 'http://192.168.2.1:20128';
 }
 
 /**
@@ -89,4 +83,3 @@ export function getMapMetadataUrl(uploadId: string): string {
 //   
 //   return await response.json();
 // }
-

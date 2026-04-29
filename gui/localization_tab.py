@@ -38,7 +38,7 @@ class LocalizationTab(ttk.Frame):
         # Paths
         self.workspace_path = Path(__file__).parent.parent / "ws"
         self.default_map_root = self.workspace_path / "src" / "FAST-LIVO2" / "Log" / "fastloc_map"
-        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.ntm")
+        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://192.168.2.1:20128")
         
         # Processes
         self.loc_process = None
@@ -404,4 +404,3 @@ class LocalizationTab(ttk.Frame):
     def stop_all(self):
         """Được gọi từ Main GUI khi đóng app"""
         self.stop_localization()
-

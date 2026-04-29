@@ -120,7 +120,7 @@ const Login: React.FC = () => {
 
             <div className="text-center">
               <p className="text-xs text-gray-500">
-                {t('default_password')}: <span className="font-mono bg-gray-100 px-1 rounded">admin123</span>
+                {t('default_password')}: <span className="font-mono bg-gray-100 px-1 rounded">123456</span>
               </p>
             </div>
           </form>

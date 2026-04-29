@@ -7,6 +7,8 @@ import os
 import signal
 import threading
 import time
+import re
+import tempfile
 from pathlib import Path
 from tkinter import messagebox
 
@@ -22,6 +24,18 @@ except (ImportError, SystemError, OSError, AttributeError):
 
 class MappingCore:
     """Quản lý core mapping logic"""
+
+    RAW_MAPPING_TOPICS = {
+        'lidar': '/livox/lidar',
+        'imu': '/livox/imu',
+        'image': '/image_raw',
+    }
+
+    SYNC_MAPPING_TOPICS = {
+        'lidar': '/record_sync/livox/lidar',
+        'imu': '/record_sync/livox/imu',
+        'image': '/record_sync/image_raw',
+    }
     
     def __init__(self, config, translator, logger_callback, validation_funcs, 
                  qr_scanner, qr_scan_enabled, qr_scan_frame_interval):
@@ -55,6 +69,65 @@ class MappingCore:
         self.is_mapping_running = False
         self.is_bag_playing = False
         self.is_stopping = False
+        self.playback_image_topic = self.RAW_MAPPING_TOPICS['image']
+        self.temp_config_path = None
+
+    def _build_source_prefix(self, ws_setup, drive_ws_setup, use_drive_ws):
+        ros2_setup = "/opt/ros/jazzy/setup.bash"
+        parts = [f"source {ros2_setup}"]
+        if use_drive_ws and drive_ws_setup and drive_ws_setup.exists():
+            parts.append(f"source {drive_ws_setup}")
+        parts.append(f"source {ws_setup}")
+        return " && ".join(parts)
+
+    def _get_bag_topics(self, bag_path, ws_setup, drive_ws_setup, use_drive_ws):
+        source_prefix = self._build_source_prefix(ws_setup, drive_ws_setup, use_drive_ws)
+        cmd = f"{source_prefix} && ros2 bag info {bag_path}"
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            executable="/bin/bash",
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode != 0:
+            self.log(self.translator.get('log.cannot_check_bag', '⚠️ Cannot check bag info, continuing...'))
+            return set()
+
+        topics = set(re.findall(r"Topic:\s+(\S+)", result.stdout))
+        return topics
+
+    def _resolve_mapping_topics(self, bag_topics):
+        if all(topic in bag_topics for topic in self.SYNC_MAPPING_TOPICS.values()):
+            self.log("🕒 Detected synced bag topics, mapping will use /record_sync topics")
+            return dict(self.SYNC_MAPPING_TOPICS)
+        return dict(self.RAW_MAPPING_TOPICS)
+
+    def _prepare_mapping_config(self, config_path_obj, mapping_topics):
+        if mapping_topics == self.RAW_MAPPING_TOPICS:
+            return str(config_path_obj)
+
+        config_text = config_path_obj.read_text(encoding='utf-8')
+        replacements = {
+            'lid_topic': mapping_topics['lidar'],
+            'imu_topic': mapping_topics['imu'],
+            'img_topic': mapping_topics['image'],
+        }
+
+        for key, topic in replacements.items():
+            pattern = rf'(^\s*{key}:\s*)"[^"]*"'
+            config_text, count = re.subn(pattern, rf'\1"{topic}"', config_text, count=1, flags=re.MULTILINE)
+            if count != 1:
+                raise RuntimeError(f"Cannot rewrite {key} in config: {config_path_obj}")
+
+        temp_dir = Path(tempfile.gettempdir()) / "livo2_bag_mapping"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_file = temp_dir / f"{config_path_obj.stem}_record_sync{config_path_obj.suffix}"
+        temp_file.write_text(config_text, encoding='utf-8')
+        self.temp_config_path = temp_file
+        self.log(f"📝 Generated temporary sync config: {temp_file}")
+        return str(temp_file)
     
     def start_mapping(self, bag_path, config_path, use_rviz, workspace_path, 
                      drive_ws_path, root, ui_callbacks):
@@ -134,29 +207,32 @@ class MappingCore:
         self.log(self.translator.get('log.preflight_checks_passed', '✅ All pre-flight checks passed!'))
         
         try:
-            ros2_setup = "/opt/ros/jazzy/setup.bash"
+            if self.temp_config_path and self.temp_config_path.exists():
+                try:
+                    self.temp_config_path.unlink()
+                except OSError:
+                    pass
+                self.temp_config_path = None
+
             rviz_arg = "True" if use_rviz else "False"
             launch_file = "mapping_mid360_equirectangular.launch.py"
             config_name = config_path_obj.name
+            bag_topics = self._get_bag_topics(bag_path, ws_setup, drive_ws_setup, use_drive_ws)
+            mapping_topics = self._resolve_mapping_topics(bag_topics)
+            mapping_config_path = self._prepare_mapping_config(config_path_obj, mapping_topics)
+            self.playback_image_topic = mapping_topics['image']
+            source_prefix = self._build_source_prefix(ws_setup, drive_ws_setup, use_drive_ws)
             
+            mapping_cmd = (
+                f"{source_prefix} && "
+                f"ros2 launch fast_livo {launch_file} "
+                f"use_rviz:={rviz_arg} "
+                f"params_file:={mapping_config_path}"
+            )
+
             if use_drive_ws:
-                mapping_cmd = (
-                    f"source {ros2_setup} && "
-                    f"source {drive_ws_setup} && "
-                    f"source {ws_setup} && "
-                    f"ros2 launch fast_livo {launch_file} "
-                    f"use_rviz:={rviz_arg} "
-                    f"params_file:={config_path}"
-                )
                 self.log(self.translator.get('log.source_drive_ws', '✅ Will source: ROS2 base -> drive_ws -> ws'))
             else:
-                mapping_cmd = (
-                    f"source {ros2_setup} && "
-                    f"source {ws_setup} && "
-                    f"ros2 launch fast_livo {launch_file} "
-                    f"use_rviz:={rviz_arg} "
-                    f"params_file:={config_path}"
-                )
                 self.log(self.translator.get('log.source_ws_only', '⚠️ Will source: ROS2 base -> ws (no drive_ws)'))
             
             # Cleanup ROS2 resources trước khi start
@@ -173,10 +249,11 @@ class MappingCore:
             self.log("=" * 60)
             self.log(self.translator.get('log.starting_mapping_node', '🚀 Starting Mapping Node'))
             self.log(f"{self.translator.get('log.config_file', '📋 Config file')}: {config_name}")
-            self.log(f"{self.translator.get('log.config_path', '📁 Config path')}: {config_path}")
+            self.log(f"{self.translator.get('log.config_path', '📁 Config path')}: {mapping_config_path}")
             self.log(f"{self.translator.get('log.launch_file', '🎯 Launch file')}: {launch_file}")
             rviz_text = self.translator.get('log.rviz_enabled', 'Yes') if use_rviz else self.translator.get('log.rviz_disabled', 'No')
             self.log(f"{self.translator.get('log.rviz2', '👁️ RViz2')}: {rviz_text}")
+            self.log(f"📷 Mapping image topic: {self.playback_image_topic}")
             self.log("=" * 60)
             
             self.log(self.translator.get('log.starting_mapping_node_process', '📡 Starting mapping node...'))
@@ -548,6 +625,13 @@ class MappingCore:
         
         # Reset flag
         self.is_stopping = False
+
+        if self.temp_config_path and self.temp_config_path.exists():
+            try:
+                self.temp_config_path.unlink()
+            except OSError:
+                pass
+            self.temp_config_path = None
     
     def _wait_for_process_health(self, max_wait_time=10):
         """Đợi process khởi động và kiểm tra health"""

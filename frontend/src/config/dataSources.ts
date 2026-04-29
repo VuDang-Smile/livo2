@@ -43,11 +43,5 @@ export const MAP_FLOORPLAN_IMAGE_URLS: Record<
  * Tái sử dụng logic từ mapConfig.ts để đảm bảo consistency
  */
 export function getBackendApiUrl(): string {
-  const hostname = window.location.hostname;
-  // If running on frontend.lidar.ntm or lidar.tm, use backend.lidar.ntm
-  if (hostname === 'frontend.lidar.ntm' || hostname === 'lidar.tm' || hostname.includes('lidar.tm')) {
-    return 'http://backend.lidar.ntm';
-  }
-  // For localhost or IP addresses, use same hostname with port 8000
-  return `http://${hostname}:8000`;
+  return 'http://192.168.2.1:20128';
 }

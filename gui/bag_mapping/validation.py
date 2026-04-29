@@ -339,14 +339,22 @@ def validate_bag_file(bag_path: str, workspace_path: Path, logger_callback=None,
         bag_output = result.stdout.lower()
         
         # Kiểm tra các topics cần thiết
-        required_topics = ['/livox/lidar', '/livox/imu', '/image_raw']
+        required_topic_groups = [
+            ['/livox/lidar', '/record_sync/livox/lidar'],
+            ['/livox/imu', '/record_sync/livox/imu'],
+            ['/image_raw', '/record_sync/image_raw'],
+        ]
         missing_topics = []
         
-        for topic in required_topics:
-            # Kiểm tra cả với và không có leading slash
-            topic_variants = [topic, topic[1:], topic.replace('/', '_')]
-            if not any(variant in bag_output for variant in topic_variants):
-                missing_topics.append(topic)
+        for topic_group in required_topic_groups:
+            group_found = False
+            for topic in topic_group:
+                topic_variants = [topic, topic[1:], topic.replace('/', '_')]
+                if any(variant in bag_output for variant in topic_variants):
+                    group_found = True
+                    break
+            if not group_found:
+                missing_topics.append(" | ".join(topic_group))
         
         if missing_topics:
             error_msg = get_translation('message.bag_missing_topics', 

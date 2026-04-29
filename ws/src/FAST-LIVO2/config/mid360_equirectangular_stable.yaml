@@ -9,8 +9,8 @@
       ros_driver_bug_fix: true
 
     extrin_calib:
-      extrinsic_T: [0.04165, 0.02326, -0.0284]  # IMU to LiDAR (keep default)
-      extrinsic_R: [1.0, 0.0, 0.0,              # IMU to LiDAR (keep default)
+      extrinsic_T: [-0.011, -0.02329, 0.04412]  # IMU to LiDAR for MID360
+      extrinsic_R: [1.0, 0.0, 0.0,
                     0.0, 1.0, 0.0,
                     0.0, 0.0, 1.0]
       # Calibration from direct_visual_lidar_calibration
@@ -31,18 +31,18 @@
       exposure_time_init: 0.0
 
     preprocess:
-      point_filter_num: 1  # Keep all points for better accuracy
-      filter_size_surf: 0.05  # Giảm xuống 0.05 để map chi tiết và dày đặc hơn
+      point_filter_num: 2  # Reduce front-end load while keeping sufficient structure
+      filter_size_surf: 0.12  # More forgiving surface filtering for mixed LIVO data
       lidar_type: 8 # Livox MID360 LiDAR
       scan_line: 6  # MID360 has 6 scan lines
-      blind: 0.2  # Giảm xuống 0.2m để nhận diện các vật thể gần
+      blind: 0.5  # Avoid unstable very-near returns during motion
 
     vio:
-      max_iterations: 4  # Increased from 3 for better accuracy, but not too high to avoid long processing
-      outlier_threshold: 800  # Balanced threshold
-      img_point_cov: 100
-      patch_size: 7  # Balanced patch size
-      patch_pyrimid_level: 3  # Balanced pyramid level
+      max_iterations: 3  # Keep visual optimization conservative for easier convergence
+      outlier_threshold: 1200  # Tolerate noisier equirectangular tracking
+      img_point_cov: 150
+      patch_size: 7
+      patch_pyrimid_level: 3
       normal_en: true
       raycast_en: false
       inverse_composition_en: false
@@ -51,47 +51,43 @@
 
     imu:
       imu_en: true
-      imu_int_frame: 30
-      # Increased covariance to reduce noise sensitivity
-      # Higher values make the filter more robust to IMU noise
-      acc_cov: 0.8  # Increased from 0.5 to reduce noise impact
-      gyr_cov: 0.5  # Increased from 0.3 to reduce noise impact
-      # Increased bias covariance for better bias estimation stability
-      b_acc_cov: 0.0002  # Increased from 0.0001 for better stability
-      b_gyr_cov: 0.0002  # Increased from 0.0001 for better stability
+      imu_int_frame: 50  # Give gravity/bias initialization more samples
+      acc_cov: 1.0
+      gyr_cov: 0.8
+      b_acc_cov: 0.0002
+      b_gyr_cov: 0.0002
 
     lio:
-      max_iterations: 4  # Increased from 3 for better accuracy, but not too high
+      max_iterations: 4
       dept_err: 0.02
       beam_err: 0.05
-      min_eigen_value: 0.002
-      voxel_size: 0.05  # Giảm xuống 0.05 để map dày đặc hơn
-      max_layer: 2  # Keep at 2 to avoid excessive memory usage
-      max_points_num: 100  # Tăng lên 100 để mật độ điểm cao hơn
+      min_eigen_value: 0.004
+      voxel_size: 0.18  # Coarser voxel map is more stable for camera-aided runs
+      max_layer: 2
+      max_points_num: 60
       layer_init_num: [5, 5, 5, 5, 5]
     local_map:  
-      map_sliding_en: true  # CRITICAL: Must be enabled for memory management
-      half_map_size: 60  # REDUCED from 90 to significantly reduce memory usage (40% reduction)
-      sliding_thresh: 5.0  # REDUCED from 8.0 to slide more frequently and free memory sooner
+      map_sliding_en: true
+      half_map_size: 60
+      sliding_thresh: 6.0
 
     memory:
-      # AGGRESSIVE memory management to prevent crashes
-      max_lidar_buffer_size: 3    # REDUCED from 5 to prevent buffer overflow
-      max_imu_buffer_size: 80     # REDUCED from 100 to prevent IMU buffer overflow
-      max_img_buffer_size: 2      # Keep at 2
-      forced_sliding_interval: 3  # REDUCED from 5 - force cleanup every 3 frames (very aggressive)
-      vio_feat_map_cleanup_interval: 10  # REDUCED from 20 - cleanup VIO feat_map every 10 frames (very frequent)
-      vio_feat_map_cleanup_radius: 12.0  # REDUCED from 15.0 - smaller cleanup radius to free memory faster
+      max_lidar_buffer_size: 5
+      max_imu_buffer_size: 100
+      max_img_buffer_size: 3
+      forced_sliding_interval: 5
+      vio_feat_map_cleanup_interval: 20
+      vio_feat_map_cleanup_radius: 15.0
 
     uav:
       imu_rate_odom: false
       gravity_align_en: false
 
     publish:
-      dense_map_en: true  # Bật dense map để điểm hiển thị kín hơn
+      dense_map_en: false  # Reduce publish load so visual tracking gets more headroom
       pub_effect_point_en: false 
       pub_plane_en: false
-      pub_scan_num: 5  # INCREASED from 3 to reduce publish rate and save memory
+      pub_scan_num: 5
       blind_rgb_points: 0.0
 
     evo:
@@ -101,7 +97,7 @@
     pcd_save:
       pcd_save_en: true
       colmap_output_en: false
-      filter_size_pcd: 0.05  # Giảm xuống 0.05 để lưu map chi tiết hơn
+      filter_size_pcd: 0.12
       interval: 500
 
     camera:
@@ -111,5 +107,4 @@
       width: 2880
       height: 1440
       scale: 1.0  # Full resolution
-
 

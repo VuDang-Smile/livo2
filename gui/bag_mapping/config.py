@@ -51,7 +51,7 @@ class BagMappingConfig:
         self.pcd_to_floorplan_script = self.scripts_path / "pcd_to_floorplan.py"
         
         # Backend configuration
-        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://backend.lidar.ntm")
+        self.backend_base_url = os.environ.get("LIVO_BACKEND_URL", "http://192.168.2.1:20128")
         
         # QR Scanner configuration
         self.qr_scanner_perspec_size = 600
