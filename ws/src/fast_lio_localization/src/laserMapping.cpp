@@ -114,6 +114,7 @@ bool freeze_odom_until_global_loc = true;
 bool freeze_odom_on_no_points = true;
 double freeze_odom_no_point_tolerance = 0.25; // seconds
 bool unfreeze_after_global_loc = true;
+bool preserve_velocity_after_relocalize = false; // if true, keep velocity in map frame when applying global (e.g. replay moving)
 size_t freeze_skip_counter = 0;
 double last_freeze_skip_log_time = 0.0;
 bool enable_ndt_fallback = true;
@@ -1390,8 +1391,9 @@ void global_localization()
             pcl::transformPointCloud(*current_init_pc, *current_init_pc, T_corr_current);
             T_corr = T_corr_current * T_init_sc;
 
-            // Fine alignment with tighter correspondence
+            // Fine alignment with tighter correspondence (more iterations to reduce local-minimum risk)
             icp.setMaxCorrespondenceDistance(1.0);
+            icp.setMaximumIterations(80);
             icp.setInputSource(current_init_pc);
             icp.setInputTarget(current_loop_pc);
             icp.align(*unused);
@@ -1623,6 +1625,7 @@ public:
         this->declare_parameter<bool>("global_loc.freeze_on_no_points", true);
         this->declare_parameter<double>("global_loc.freeze_on_no_points_tolerance", 0.25);
         this->declare_parameter<bool>("global_loc.unfreeze_after_relocalize", true);
+        this->declare_parameter<bool>("global_loc.preserve_velocity_after_relocalize", false);
         this->declare_parameter<double>("global_loc.candidate_max_distance", 15.0);
         this->declare_parameter<bool>("global_loc.auto_trigger_enable", true);
         this->declare_parameter<double>("global_loc.auto_trigger_xy_distance", 60.0);
@@ -1690,6 +1693,7 @@ public:
         this->get_parameter_or<bool>("global_loc.freeze_on_no_points", freeze_odom_on_no_points, true);
         this->get_parameter_or<double>("global_loc.freeze_on_no_points_tolerance", freeze_odom_no_point_tolerance, 0.25);
         this->get_parameter_or<bool>("global_loc.unfreeze_after_relocalize", unfreeze_after_global_loc, true);
+        this->get_parameter_or<bool>("global_loc.preserve_velocity_after_relocalize", preserve_velocity_after_relocalize, false);
         this->get_parameter_or<double>("global_loc.candidate_max_distance", global_loc_candidate_max_dist, 15.0);
         this->get_parameter_or<bool>("global_loc.auto_trigger_enable", auto_trigger_global_loc_enabled_, true);
         this->get_parameter_or<double>("global_loc.auto_trigger_xy_distance", auto_trigger_distance_xy_, 60.0);
@@ -1874,15 +1878,21 @@ public:
                                 virtual_tile_radius);
                 }
             }
+            if (map_loaded_ && scancontext_tiles.size() > 1 && scancontext_tiles.size() < 50)
+            {
+                RCLCPP_WARN(this->get_logger(),
+                            "ScanContext entries = %zu (recommend >= 50 for reliable detectLoopClosureID). Consider increasing virtual_tile_max_tiles or reducing virtual_tile_spacing.",
+                            scancontext_tiles.size());
+            }
 
             if (!map_loaded_)
             {
                 RCLCPP_WARN(this->get_logger(), "FAST-Localization map unavailable. Continuing without global relocalization.");
                 use_global_localization_ = false;
             }
-            else if (map_tile_count_ <= 1)
+            else if (scancontext_tiles.size() <= 1)
             {
-                RCLCPP_WARN(this->get_logger(), "FAST-Localization detected %zu map tile(s). Disabling ScanContext relocalization to avoid false matches.", map_tile_count_);
+                RCLCPP_WARN(this->get_logger(), "FAST-Localization has %zu ScanContext entries (real + virtual). Need > 1 for relocalization; disabling.", scancontext_tiles.size());
                 use_global_localization_ = false;
             }
 
@@ -1974,10 +1984,17 @@ private:
                 if (global_localization_finish && !global_update)
                 {
                     int init_id = init_result.first;
-                    if (init_id >= 0 && init_id < static_cast<int>(position_init.size()))
+                    // Map frame id to sliding-window index: window holds last max_init_history_ poses, ids [base_id, base_id+size)
+                    size_t pos_size = position_init.size();
+                    int base_id = (pos_size > 0 && init_count >= static_cast<int>(pos_size)) ? (init_count - static_cast<int>(pos_size)) : 0;
+                    int index = init_id - base_id;
+                    if (init_id >= 0 && index >= 0 && index < static_cast<int>(pos_size))
                     {
-                        Eigen::Vector3d init_time_p = position_init[init_id];
-                        Eigen::Quaterniond init_time_q = pose_init[init_id];
+                        RCLCPP_INFO(this->get_logger(),
+                                    "Applying global pose: init_id=%d window_index=%d (base_id=%d, pos_history_size=%zu)",
+                                    init_id, index, base_id, pos_size);
+                        Eigen::Vector3d init_time_p = position_init[index];
+                        Eigen::Quaterniond init_time_q = pose_init[index];
 
                         Eigen::Matrix4d T_odom_init_time = Eigen::Matrix4d::Identity();
                         T_odom_init_time.block<3, 3>(0, 0) = init_time_q.toRotationMatrix();
@@ -2012,13 +2029,22 @@ private:
                         
                         global_state.grav = S2(Eigen::Vector3d(0, 0, -G_m_s2));
                         
-                        // Also reset velocity since IMU integration may have accumulated error
-                        global_state.vel = Eigen::Vector3d::Zero();
+                        if (preserve_velocity_after_relocalize)
+                        {
+                            // Preserve velocity in map frame (e.g. replay: device was moving while waiting for global)
+                            Eigen::Matrix3d R_map = T_map_current.block<3, 3>(0, 0);
+                            global_state.vel = R_map * state_point.vel;
+                            RCLCPP_INFO(this->get_logger(), "Applied global localization alignment. Velocity preserved in map frame (%.3f, %.3f, %.3f).", global_state.vel(0), global_state.vel(1), global_state.vel(2));
+                        }
+                        else
+                        {
+                            // Reset velocity since IMU integration may have accumulated error
+                            global_state.vel = Eigen::Vector3d::Zero();
+                            RCLCPP_INFO(this->get_logger(), "Applied global localization alignment. Gravity and velocity reset.");
+                        }
                         
                         kf.change_x(global_state);
                         state_point = kf.get_x();
-                        
-                        RCLCPP_INFO(this->get_logger(), "Applied global localization alignment. Gravity and velocity reset.");
                         
                         last_stable_state = state_point;
                         last_stable_state_valid = true;
@@ -2039,7 +2065,9 @@ private:
                     }
                     else
                     {
-                        RCLCPP_WARN(this->get_logger(), "Invalid init id %d for position history size %zu", init_id, position_init.size());
+                        RCLCPP_WARN(this->get_logger(),
+                                    "Invalid init id %d for position history size %zu (base_id=%d, index=%d)",
+                                    init_id, position_init.size(), base_id, index);
                         global_update = true;
                     }
                 }

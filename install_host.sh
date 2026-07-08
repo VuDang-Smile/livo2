@@ -113,6 +113,91 @@ fi
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
+# Ports used by Livo stack (nginx, frontend, backend, mongodb, mqtt)
+LIVO_PORTS="80 3000 8000 27017 1883 9001"
+
+# Get PIDs listening on a given port (fuser prints to stderr, lsof/ss as fallback)
+get_pids_on_port() {
+    local port=$1
+    local pids=""
+    if command -v fuser &> /dev/null; then
+        pids=$(fuser "${port}/tcp" 2>&1 | grep -oE '[0-9]+' | sort -u)
+    fi
+    if [ -z "$pids" ] && command -v lsof &> /dev/null; then
+        pids=$(lsof -i ":${port}" -t 2>/dev/null)
+    fi
+    if [ -z "$pids" ] && command -v ss &> /dev/null; then
+        pids=$(ss -tlnp 2>/dev/null | awk -v p=":${port}" '$4 ~ p { gsub(/.*pid=/, "", $6); gsub(/,.*/, "", $6); if ($6 != "") print $6 }' | sort -u)
+    fi
+    # Try with sudo if we need to see other users' processes
+    if [ -z "$pids" ] && command -v lsof &> /dev/null; then
+        pids=$(sudo lsof -i ":${port}" -t 2>/dev/null)
+    fi
+    echo "$pids"
+}
+
+# Kill processes occupying Livo ports (so docker down can bind later)
+kill_processes_on_ports() {
+    for port in $LIVO_PORTS; do
+        local pids=$(get_pids_on_port "$port")
+        if [ -n "$pids" ]; then
+            for pid in $pids; do
+                [ -z "$pid" ] && continue
+                local comm=$(ps -p "$pid" -o comm= 2>/dev/null || echo "?")
+                print_info "Port $port: killing process PID $pid ($comm)"
+                kill "$pid" 2>/dev/null || sudo kill "$pid" 2>/dev/null
+            done
+        fi
+    done
+    sleep 1
+    for port in $LIVO_PORTS; do
+        local pids=$(get_pids_on_port "$port")
+        if [ -n "$pids" ]; then
+            for pid in $pids; do
+                [ -z "$pid" ] && continue
+                print_warning "Port $port: force killing PID $pid (SIGKILL)"
+                kill -9 "$pid" 2>/dev/null || sudo kill -9 "$pid" 2>/dev/null
+            done
+        fi
+    done
+}
+
+# Check if any Livo port is in use (by non-docker process or docker)
+is_any_port_in_use() {
+    for port in $LIVO_PORTS; do
+        if [ -n "$(get_pids_on_port "$port")" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# If any Livo port is in use, ask to stop those processes only (no Docker detection)
+stop_processes_on_ports_if_needed() {
+    if ! is_any_port_in_use; then
+        return 0
+    fi
+
+    echo ""
+    print_warning "One or more Livo ports are in use (80, 3000, 8000, 27017, 1883, 9001)."
+    echo ""
+    read -p "Do you want to stop the processes that are using these ports? (Y/n): " -n 1 -r
+    echo ""
+
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        print_info "Skipping. Continuing (may cause port conflicts)."
+        echo ""
+        return 0
+    fi
+
+    print_info "Stopping processes using Livo ports..."
+    kill_processes_on_ports
+    print_success "Ports cleared."
+    echo ""
+}
+
+stop_processes_on_ports_if_needed
+
 # Create necessary directories
 print_info "Creating necessary directories..."
 mkdir -p backend/uploads backend/processed

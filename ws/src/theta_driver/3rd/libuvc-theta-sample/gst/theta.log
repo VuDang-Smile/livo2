@@ -1,0 +1,17 @@
+[THETA][INFO]  [gst_viewer.c:201] main: starting as gst_viewer, pipeline=autovideosink
+[THETA][INFO]  [gst_viewer.c:93] gst_src_init: initializing pipeline
+[THETA][INFO]  [gst_viewer.c:121] gst_src_init: pipeline created successfully
+[THETA][INFO]  [gst_viewer.c:215] main: uvc_init success
+[THETA][INFO]  [gst_viewer.c:251] main: finding THETA device index 0
+[THETA][INFO]  [thetauvc.c:194] thetauvc_find_device: finding device index 0
+[THETA][INFO]  [thetauvc.c:87] thetauvc_find_devices: searching THETA devices (VID 0x05ca)
+[THETA][INFO]  [thetauvc.c:139] thetauvc_find_devices: found 1 THETA device(s)
+[THETA][INFO]  [thetauvc.c:214] thetauvc_find_device: selected device index 0
+[THETA][INFO]  [gst_viewer.c:263] main: device opened, setting pipeline to PLAYING
+[THETA][INFO]  [thetauvc.c:286] thetauvc_get_stream_ctrl_format_size: getting stream ctrl mode=0 (3840x1920@29fps)
+[THETA][INFO]  [thetauvc.c:296] thetauvc_get_stream_ctrl_format_size: success
+[THETA][INFO]  [gst_viewer.c:285] main: streaming started, hit any key to stop
+[THETA][ERROR] [gst_viewer.c:72] gst_bus_cb: GStreamer pipeline error: Output window was closed
+[THETA][INFO]  [gst_viewer.c:288] main: stopping streaming, cleaning up
+[THETA][INFO]  [gst_viewer.c:299] main: streaming completed successfully
+[THETA][INFO]  [gst_viewer.c:303] main: exiting, res=0

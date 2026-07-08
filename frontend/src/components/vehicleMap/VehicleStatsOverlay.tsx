@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
 import VehicleStatusCard from './VehicleStatusCard';
 
 interface VehicleStatsOverlayProps {
@@ -11,6 +12,8 @@ interface VehicleStatsOverlayProps {
 const VehicleStatsOverlay = React.memo<VehicleStatsOverlayProps>(({ 
   total, online, offline, isVisible = true
 }) => {
+  const { t } = useLanguage();
+
   if (!isVisible) return null;
   
   return (
